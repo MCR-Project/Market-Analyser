@@ -1,0 +1,27 @@
+name: Daily ticker data fetch
+
+on:
+  schedule:
+    # 22:30 UTC, Mon–Fri — after US markets close, before the next session opens
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Fetch prices and update Supabase
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/fetch_daily.py
