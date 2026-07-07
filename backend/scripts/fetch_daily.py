@@ -24,6 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import yfinance as yf
 
+from config import DEFAULT_ETFS
+from services.market_data import get_etf_info, get_etf_holdings
 from services.supabase_client import get_client
 
 BACKFILL_PERIOD = "max"  # first-ever fetch for a ticker - full available history
@@ -59,6 +61,48 @@ def fetch_ticker_rows(ticker_id: str, period: str) -> list[dict]:
             "splits": _safe_float(r.get("Stock Splits")) or 0,
         })
     return rows
+
+
+def sync_etfs(client, known_tickers: set[str]) -> list[str]:
+    """Refresh etfs/etf_holdings for every ETF in DEFAULT_ETFS.
+
+    aum is deliberately not stored here - it's a live snapshot value, not
+    something that should sit in the DB going stale between daily runs.
+    Callers that need current AUM should call get_etf_info directly.
+
+    Holdings for tickers we don't track yet are skipped (etf_holdings.ticker
+    has an FK to ticker.id) rather than failing the whole ETF - they'll show
+    up once that ticker is added via scripts/add_ticker.py.
+    """
+    failed = []
+    for etf_id in DEFAULT_ETFS:
+        try:
+            info = get_etf_info(etf_id)
+            holdings = get_etf_holdings(etf_id)
+        except Exception as e:
+            print(f"  FAILED  {etf_id:8s} {e}")
+            failed.append(etf_id)
+            continue
+
+        client.table("etfs").upsert({
+            "id": etf_id,
+            "name": info["name"],
+            "cat": info["cat"],
+            "desc": info["desc"],
+        }).execute()
+
+        holding_rows = [
+            {"etf_id": etf_id, "ticker": t, "weight": w}
+            for t, w in holdings if t in known_tickers
+        ]
+        skipped = len(holdings) - len(holding_rows)
+        if holding_rows:
+            client.table("etf_holdings").upsert(holding_rows).execute()
+
+        note = f", {skipped} skipped (untracked ticker)" if skipped else ""
+        print(f"  {etf_id:8s} {len(holding_rows):4d} holdings{note}")
+
+    return failed
 
 
 def main():
