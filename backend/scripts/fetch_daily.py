@@ -1,6 +1,9 @@
 """
-Daily data-refresh job - fetches OHLCV history for every active ticker from
-yfinance and upserts it into Supabase, then stamps ticker.last_fetch.
+Daily data-refresh job:
+  - Fetches OHLCV history for every active ticker from yfinance and upserts
+    it into Supabase, then stamps ticker.last_fetch.
+  - Refreshes ETF metadata and holdings (config.DEFAULT_ETFS) into the
+    etfs / etf_holdings tables, since holding weights drift over time.
 
 Run manually with:   python scripts/fetch_daily.py
 Runs on a schedule via .github/workflows/fetch-daily.yml.
@@ -13,6 +16,11 @@ Backfill vs top-up:
     weekends, holidays, and the odd missed run. (ticker, date) is the
     primary key on `prices`, so upserting is idempotent - re-fetched days
     just overwrite the same rows.
+
+DEFAULT_ETFS (backend/config.py) is a fixed, manually maintained list - a
+placeholder until automatic ETF/ticker discovery lands (see the "Find a way
+to automatically fetch tickers and etfs" issue). Same goes for which stocks
+are tracked: that's whatever scripts/add_ticker.py has added to `ticker`.
 """
 
 import sys
@@ -108,18 +116,28 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
 def main():
     client = get_client()
 
-    tickers_resp = client.table("ticker").select("id,last_fetch").eq("active", True).execute()
-    tickers = sorted(tickers_resp.data, key=lambda row: row["id"])
+    tickers_resp = client.table("ticker").select("id,last_fetch,active").execute()
+    all_ticker_ids = {row["id"] for row in tickers_resp.data}
+    active_tickers = sorted(
+        (row for row in tickers_resp.data if row["active"]),
+        key=lambda row: row["id"],
+    )
 
-    if not tickers:
-        print("No active tickers found - add some with scripts/add_ticker.py first.")
+    print("Syncing ETFs (config.DEFAULT_ETFS)...")
+    etf_failures = sync_etfs(client, all_ticker_ids)
+
+    if not active_tickers:
+        print("\nNo active tickers found - add some with scripts/add_ticker.py first.")
+        if etf_failures:
+            sys.exit(1)
         return
 
+    print("\nSyncing stock prices...")
     today = date.today().isoformat()
     total_rows = 0
-    failed = []
+    failed = list(etf_failures)
 
-    for ticker in tickers:
+    for ticker in active_tickers:
         ticker_id = ticker["id"]
         period = BACKFILL_PERIOD if not ticker["last_fetch"] else TOPUP_PERIOD
         try:
@@ -136,7 +154,7 @@ def main():
         client.table("ticker").update({"last_fetch": today}).eq("id", ticker_id).execute()
         print(f"  {ticker_id:8s} {len(rows):4d} rows  ({period})")
 
-    print(f"\nDone: {len(tickers)} tickers, {total_rows} price rows upserted.")
+    print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
     if failed:
         print(f"Failed: {', '.join(failed)}")
         sys.exit(1)
