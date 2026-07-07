@@ -16,7 +16,10 @@ CACHE_TTL_HOLDINGS = 3600    # 1 hour — ETF holdings, stock metadata
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations
 
-# ETFs shown in the picker and loaded on startup
+# ETFs shown in the picker and loaded on startup.
+# Fixed list, manually maintained - a placeholder until automatic ETF/ticker
+# discovery lands (see the "Find a way to automatically fetch tickers and
+# etfs" issue). Also the list scripts/fetch_daily.py syncs into Supabase.
 DEFAULT_ETFS = ["SPY", "QQQ", "VTI", "URTH", "SMH", "XLK", "SOXX", "ARKK"]
 
 # Normalize sector names from yfinance → short display tags.
