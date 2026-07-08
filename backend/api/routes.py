@@ -23,8 +23,9 @@ from services.market_data import (
     get_stock_info,
     get_price_series,
     compute_correlation_matrix,
+    list_etfs,
 )
-from config import DEFAULT_ETFS, SECTOR_TAG
+from config import SECTOR_TAG
 
 router = APIRouter(prefix="/api")
 
@@ -32,14 +33,15 @@ router = APIRouter(prefix="/api")
 # ── ETF endpoints ─────────────────────────────────────────────────────────────
 
 @router.get("/etfs")
-def list_etfs():
+def get_etfs():
     """List all tracked ETFs with summary info (no holdings array).
 
-    Iterates DEFAULT_ETFS from config, fetches info + holding count for each.
-    The holding count comes from get_etf_holdings length, not from the info dict.
+    Iterates every ETF id in Supabase's `etfs` table (list_etfs), fetching
+    info + holding count for each. The holding count comes from
+    get_etf_holdings length, not from the info dict.
     """
     results = []
-    for etf_id in DEFAULT_ETFS:
+    for etf_id in list_etfs():
         info = get_etf_info(etf_id)
         holdings = get_etf_holdings(etf_id)
         results.append({**info, "holdingCount": len(holdings)})
