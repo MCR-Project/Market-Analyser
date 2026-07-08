@@ -1,8 +1,8 @@
 """
 Application-wide configuration constants.
 
-Cache TTLs, default ETF universe, and sector label normalization map.
-yfinance and Yahoo Finance use inconsistent sector names across endpoints
+Cache TTLs, period-to-days lookback windows, and sector label normalization
+map. yfinance and Yahoo Finance use inconsistent sector names across endpoints
 (e.g. "Technology" vs "Information Technology"), so SECTOR_TAG maps all
 known variants to a short uppercase tag for display.
 """
@@ -16,11 +16,13 @@ CACHE_TTL_HOLDINGS = 3600    # 1 hour — ETF holdings, stock metadata
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations
 
-# ETFs shown in the picker and loaded on startup.
-# Fixed list, manually maintained - a placeholder until automatic ETF/ticker
-# discovery lands (see the "Find a way to automatically fetch tickers and
-# etfs" issue). Also the list scripts/fetch_daily.py syncs into Supabase.
-DEFAULT_ETFS = ["SPY", "QQQ", "VTI", "URTH", "SMH", "XLK", "SOXX", "ARKK"]
+# Maps a yfinance-style `period` string to a lookback window in days, used to
+# filter the `prices` table by date when reading price history from Supabase.
+# "max" has no entry - it means no lower bound (select all rows).
+PERIOD_TO_DAYS = {
+    "1d": 1, "5d": 5, "1mo": 30, "3mo": 90,
+    "6mo": 182, "1y": 365, "2y": 730, "5y": 1825,
+}
 
 # Normalize sector names from yfinance → short display tags.
 # Yahoo returns different strings depending on the endpoint

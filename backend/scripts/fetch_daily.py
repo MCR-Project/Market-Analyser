@@ -2,8 +2,12 @@
 Daily data-refresh job:
   - Fetches OHLCV history for every active ticker from yfinance and upserts
     it into Supabase, then stamps ticker.last_fetch.
-  - Refreshes ETF metadata and holdings (config.DEFAULT_ETFS) into the
-    etfs / etf_holdings tables, since holding weights drift over time.
+  - Refreshes each active ticker's stock metadata (sector, market cap,
+    currency, exchange, logo, website) so get_stock_info can be fully
+    DB-read - market cap will be as fresh as this run.
+  - Refreshes ETF metadata and holdings for every ETF in Supabase's `etfs`
+    table (via market_data.list_etfs) into the etfs / etf_holdings tables,
+    since holding weights drift over time.
 
 Run manually with:   python scripts/fetch_daily.py
 Runs on a schedule via .github/workflows/fetch-daily.yml.
@@ -17,10 +21,10 @@ Backfill vs top-up:
     primary key on `prices`, so upserting is idempotent - re-fetched days
     just overwrite the same rows.
 
-DEFAULT_ETFS (backend/config.py) is a fixed, manually maintained list - a
-placeholder until automatic ETF/ticker discovery lands (see the "Find a way
-to automatically fetch tickers and etfs" issue). Same goes for which stocks
-are tracked: that's whatever scripts/add_ticker.py has added to `ticker`.
+Which ETFs/stocks are tracked is entirely DB-driven, not a hardcoded list -
+see market_data.list_etfs for ETFs and scripts/add_ticker.py for stocks -
+placeholders until automatic discovery lands (see the "Find a way to
+automatically fetch tickers and etfs" issue).
 """
 
 import sys
@@ -32,8 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import yfinance as yf
 
-from config import DEFAULT_ETFS
-from services.market_data import get_etf_info, get_etf_holdings
+from services.market_data import get_etf_info, get_etf_holdings, list_etfs, _get_stock_info_live
 from services.supabase_client import get_client
 
 BACKFILL_PERIOD = "max"  # first-ever fetch for a ticker - full available history
@@ -72,7 +75,9 @@ def fetch_ticker_rows(ticker_id: str, period: str) -> list[dict]:
 
 
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
-    """Refresh etfs/etf_holdings for every ETF in DEFAULT_ETFS.
+    """Refresh etfs/etf_holdings for every ETF already tracked in Supabase
+    (market_data.list_etfs) - this only ever refreshes existing rows, it
+    doesn't add new ETFs (there's no add_etf.py script yet).
 
     aum is deliberately not stored here - it's a live snapshot value, not
     something that should sit in the DB going stale between daily runs.
@@ -83,7 +88,7 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     up once that ticker is added via scripts/add_ticker.py.
     """
     failed = []
-    for etf_id in DEFAULT_ETFS:
+    for etf_id in list_etfs():
         try:
             info = get_etf_info(etf_id)
             holdings = get_etf_holdings(etf_id)
@@ -123,7 +128,7 @@ def main():
         key=lambda row: row["id"],
     )
 
-    print("Syncing ETFs (config.DEFAULT_ETFS)...")
+    print("Syncing ETFs (market_data.list_etfs)...")
     etf_failures = sync_etfs(client, all_ticker_ids)
 
     if not active_tickers:
@@ -152,7 +157,24 @@ def main():
             total_rows += len(rows)
 
         client.table("ticker").update({"last_fetch": today}).eq("id", ticker_id).execute()
-        print(f"  {ticker_id:8s} {len(rows):4d} rows  ({period})")
+
+        metadata_note = ""
+        try:
+            info = _get_stock_info_live(ticker_id)
+            client.table("ticker").update({
+                "sector": info["sector"],
+                "market_cap": info["marketCap"],
+                "currency": info["currency"],
+                "exchange": info["exchange"],
+                "logo": info["logo"],
+                "website": info["website"],
+            }).eq("id", ticker_id).execute()
+        except Exception as e:
+            print(f"  METADATA FAILED  {ticker_id:8s} {e}")
+            failed.append(ticker_id)
+            metadata_note = ", metadata failed"
+
+        print(f"  {ticker_id:8s} {len(rows):4d} rows  ({period}){metadata_note}")
 
     print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
     if failed:

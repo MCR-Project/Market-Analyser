@@ -10,7 +10,10 @@ Usage:
   python scripts/add_ticker.py --inactive OLDCO
 
 Each argument is a ticker id, optionally followed by ":Full Name". If no
-name is given, it's looked up via yfinance.
+name is given, full metadata (name, sector, market cap, currency, exchange,
+logo, website) is looked up via yfinance. If a name IS given, only
+id/name/active are set - the metadata columns stay null until the next
+scripts/fetch_daily.py run backfills them.
 """
 
 import argparse
@@ -22,11 +25,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from services.supabase_client import get_client
 
 
-def resolve_name(ticker_id: str) -> str:
-    import yfinance as yf
+def resolve_ticker_row(ticker_id: str) -> dict:
+    """Full live metadata lookup, used when no name was given on the CLI."""
+    from services.market_data import _get_stock_info_live
 
-    info = yf.Ticker(ticker_id).info or {}
-    return info.get("longName") or info.get("shortName") or ticker_id
+    info = _get_stock_info_live(ticker_id)
+    return {
+        "name": info["name"],
+        "sector": info["sector"],
+        "market_cap": info["marketCap"],
+        "currency": info["currency"],
+        "exchange": info["exchange"],
+        "logo": info["logo"],
+        "website": info["website"],
+    }
 
 
 def main():
@@ -51,14 +63,18 @@ def main():
         else:
             ticker_id, name = raw, None
         ticker_id = ticker_id.strip().upper()
-        if not name:
-            name = resolve_name(ticker_id)
-        rows.append({"id": ticker_id, "name": name, "active": not args.inactive})
 
-    # Note: rows never sets `last_fetch`. PostgREST's upsert only touches
-    # columns present in the payload, so this insert leaves brand-new
-    # tickers at the column default (null — backfill on the next fetch_daily
-    # run) while leaving an existing ticker's last_fetch untouched.
+        if name:
+            row = {"id": ticker_id, "name": name, "active": not args.inactive}
+        else:
+            row = {"id": ticker_id, "active": not args.inactive, **resolve_ticker_row(ticker_id)}
+        rows.append(row)
+
+    # Note: a row only sets the columns it has values for (an explicit-name
+    # add skips sector/market_cap/etc). PostgREST's upsert only touches
+    # columns present in the payload, so this insert leaves those columns
+    # (and last_fetch) at their defaults / untouched on conflict - backfilled
+    # by the next fetch_daily.py run either way.
     client = get_client()
     client.table("ticker").upsert(rows).execute()
 
