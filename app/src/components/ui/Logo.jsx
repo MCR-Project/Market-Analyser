@@ -3,15 +3,14 @@
  * per-ticker lookup table) via utils/logo.js. Falls back from theSVG's
  * icon CDN to a guessed-domain favicon to a neutral placeholder on
  * successive load errors.
- * Props: ticker (string), size (px), className.
+ * Props: ticker (string), name (company name, optional — the ticker is
+ * slugified instead when omitted), size (px), className.
  */
 import { memo } from 'react';
-import { STOCKS } from '../../data/stocks';
 import { logoUrl, fallbackFaviconUrl, handleLogoError } from '../../utils/logo';
 
-export const Logo = memo(function Logo({ ticker, size = 32, className = '' }) {
+export const Logo = memo(function Logo({ ticker, name, size = 32, className = '' }) {
   const r = Math.round(size * 0.22);
-  const name = STOCKS[ticker]?.name;
   return (
     <img
       src={logoUrl(ticker, name)}

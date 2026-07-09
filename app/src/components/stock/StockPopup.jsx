@@ -111,7 +111,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
         {/* Header */}
         <div className="flex items-start justify-between p-[24px_28px_20px] border-b border-[var(--divider)] gap-5 flex-none">
           <div className="flex items-center gap-4 min-w-0">
-            <Logo ticker={ticker} size={52} />
+            <Logo ticker={ticker} name={stockInfo?.name} size={52} />
             <div className="flex flex-col gap-2 min-w-0">
               <div className="flex items-baseline gap-3.5 flex-wrap">
                 <span className="font-[var(--font-mono)] text-[30px] font-extrabold text-[var(--accent)] tracking-tight leading-none">{ticker}</span>
@@ -239,7 +239,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 overflow-hidden flex items-center gap-1.5">
-                        <Logo ticker={pr.ticker} size={20} />
+                        <Logo ticker={pr.ticker} name={peerNameMap[pr.ticker]} size={20} />
                         <span className="font-[var(--font-mono)] text-[13px] font-bold text-[var(--accent)]">{pr.ticker}</span>
                         <div className="text-xs text-[var(--fg-2)] ml-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
                           {peerNameMap[pr.ticker] || (peerNamesLoading ? <Loading variant="skeleton" lines={1} className="w-16" /> : pr.ticker)}

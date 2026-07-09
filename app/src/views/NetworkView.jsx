@@ -23,9 +23,9 @@ import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveEtf } from '../hooks/useLiveEtf';
 import { useLiveCorrelation } from '../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../hooks/useLiveSectors';
+import { useLiveStocks } from '../hooks/useLiveStocks';
 import { computeLayout } from '../utils/layout';
 import { fmtCorr } from '../utils/format';
-import { STOCKS } from '../data/stocks';
 import { logoUrl, fallbackFaviconUrl, handleSvgImageLogoError } from '../utils/logo';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
@@ -50,6 +50,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   const [threshold, setThreshold] = useState(0.5);
   const corrData = useLiveCorrelation(etfId, tickers, threshold);
   const sectors = useLiveSectors(etfId);
+  const { stockMap } = useLiveStocks(tickers);
 
   const corrMatrix = corrData.matrix;
   // No mock fallback — pairs missing from the live matrix (e.g. a ticker
@@ -100,7 +101,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
                     if (!p) return null;
                     const w = weightOf(t);
                     const r = nodeRadius(w);
-                    const name = STOCKS[t]?.name;
+                    const name = stockMap[t]?.name;
                     const pid = 'lp_' + t.replace('.', '_');
                     const pad = r * 0.14;
                     return (

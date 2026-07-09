@@ -12,16 +12,18 @@
  *     • Ranked peer correlation list (clickable to switch selection)
  */
 import { memo, useMemo, useCallback } from 'react';
-import { STOCKS } from '../data/stocks';
+import { useLiveStocks } from '../hooks/useLiveStocks';
 import { fmtCorr, fmtMoney } from '../utils/format';
 
 export const DetailAside = memo(function DetailAside({ etf, tickers, selected, onSelect, correlationData, sectorData }) {
+  const { stockMap } = useLiveStocks(tickers);
+
   const selData = useMemo(() => {
     if (!selected || !tickers.includes(selected)) return null;
-    const s = STOCKS[selected] || { name: selected, sector: 'Unknown' };
+    const s = stockMap[selected] || { name: selected, sector: 'Unknown' };
     const w = etf.holdings.find(x => x[0] === selected)?.[1] || 0;
     return { ticker: selected, name: s.name, sector: s.sector, weight: w.toFixed(1), value: fmtMoney(etf.aum * w / 100) };
-  }, [selected, tickers, etf]);
+  }, [selected, tickers, etf, stockMap]);
 
   const corrMatrix = correlationData?.matrix;
   // No mock fallback — a peer missing from the live matrix (e.g. a ticker
