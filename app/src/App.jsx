@@ -56,6 +56,14 @@ export default function App() {
     setSelected(null);
   }, [etfId]);
 
+  // If the manifest fetch failed earlier (e.g. the page loaded before the
+  // backend was up), opening the picker re-attempts it — the measurement
+  // list is only fetched once otherwise, so this is its recovery path.
+  const openMeasurePicker = () => {
+    if (measurements.manifest.length === 0) measurements.retryManifest();
+    setMeasurePickerOpen(true);
+  };
+
   const tabs = {
     Table: (
       <TableView
@@ -63,7 +71,7 @@ export default function App() {
         tickers={tickers}
         onSelectStock={setStockPopup}
         measurements={measurements}
-        onOpenMeasurePicker={() => setMeasurePickerOpen(true)}
+        onOpenMeasurePicker={openMeasurePicker}
       />
     ),
     Matrix: <MatrixView selected={selected} onSelect={setSelected} />,
@@ -87,7 +95,7 @@ export default function App() {
               <Loading variant="skeleton" lines={8} />
             </div>
           ) : (
-            <ErrorState onRetry={etfRetry} className="mt-2" />
+            <ErrorState onRetry={() => { etfRetry(); measurements.retryManifest(); }} className="mt-2" />
           )
         ) : (
           <>

@@ -9,36 +9,37 @@
  * `per_ticker` (raw numbers) drives sorting/filtering; `per_ticker_mdx`
  * (backend-rendered markdown) is what's actually displayed in the table.
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useFetch } from './useFetch';
 import { api } from '../utils/api';
 
 export function useMeasurements(etfId) {
-  const [manifest, setManifest] = useState([]);
   const [activeIds, setActiveIds] = useState(null); // null = not yet initialized
   const [results, setResults] = useState({});
   const [loading, setLoading] = useState({});
   const abortRefs = useRef({});
   const initializedRef = useRef(false);
 
-  // Fetch manifest on mount, auto-enable defaults
+  // Fetch the manifest via useFetch so a failed attempt (e.g. the page
+  // loaded before the backend was up) can be re-run through retryManifest
+  // instead of leaving the measurement list empty until a full reload.
+  const { data: manifestData, retry: retryManifest } = useFetch(
+    () => api.listMeasurements(),
+    [],
+    { fallback: null }
+  );
+  // Stable reference while manifestData is null — this feeds the results
+  // effect's dependency array, so it must not be a fresh [] every render.
+  const manifest = useMemo(() => manifestData || [], [manifestData]);
+
+  // Auto-enable defaults once, when the manifest first arrives
   useEffect(() => {
-    api.listMeasurements()
-      .then(data => {
-        setManifest(data);
-        if (!initializedRef.current) {
-          const defaults = data.filter(m => m.default_enabled).map(m => m.id);
-          setActiveIds(defaults);
-          initializedRef.current = true;
-        }
-      })
-      .catch(() => {
-        setManifest([]);
-        if (!initializedRef.current) {
-          setActiveIds([]);
-          initializedRef.current = true;
-        }
-      });
-  }, []);
+    if (manifestData && !initializedRef.current) {
+      const defaults = manifestData.filter(m => m.default_enabled).map(m => m.id);
+      setActiveIds(defaults);
+      initializedRef.current = true;
+    }
+  }, [manifestData]);
 
   const toggle = useCallback((id) => {
     setActiveIds(prev => {
@@ -126,6 +127,7 @@ export function useMeasurements(etfId) {
 
   return {
     manifest,
+    retryManifest,
     activeIds: activeIds || [],
     activeManifests,
     toggle,
