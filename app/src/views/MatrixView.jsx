@@ -21,9 +21,10 @@ import { cellColor } from '../utils/correlation';
 import { fmtCorr } from '../utils/format';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
+import { ErrorState } from '../components/ui/ErrorState';
 
 export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
-  const { etf, etfId, tickers } = useLiveEtf();
+  const { etf, etfId, tickers, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   // threshold=0 — the matrix always shows the full correlation range,
   // it doesn't filter by an edge threshold like the network view does.
   const corrData = useLiveCorrelation(etfId, tickers, 0);
@@ -48,8 +49,12 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
         <span className="font-[var(--font-mono)] text-[13px] font-semibold text-[var(--fg)] w-[22px] tabular-nums">{matrixN}</span>
       </div>
 
-      {corrData.loading ? (
+      {/* This view fetches its own copy of the ETF (see useLiveEtf), so it
+          gates on that fetch itself — DetailAside below needs a loaded etf. */}
+      {corrData.loading || etfLoading ? (
         <Loading variant="skeleton" lines={10} />
+      ) : !etf ? (
+        <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex gap-5 items-start flex-wrap">
           <section className="flex-1 min-w-[320px] bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">

@@ -29,6 +29,7 @@ import { fmtCorr } from '../utils/format';
 import { logoUrl, fallbackFaviconUrl, handleSvgImageLogoError } from '../utils/logo';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
+import { ErrorState } from '../components/ui/ErrorState';
 
 const W = 620, H = 440;
 
@@ -46,7 +47,7 @@ function nodeRadius(weightPct) {
 }
 
 export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
-  const { etf, etfId, tickers, weightOf } = useLiveEtf();
+  const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   const [threshold, setThreshold] = useState(0.5);
   const corrData = useLiveCorrelation(etfId, tickers, threshold);
   const sectors = useLiveSectors(etfId);
@@ -57,7 +58,8 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   // dropped by the backend for insufficient price history) resolve to
   // null and are treated as "unknown", not filled with a fake value.
   const corr = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
-  const layout = useMemo(() => computeLayout(etfId, etf.holdings, corrMatrix), [etfId, etf.holdings, corrMatrix]);
+  const holdings = useMemo(() => etf?.holdings ?? [], [etf]);
+  const layout = useMemo(() => computeLayout(etfId, holdings, corrMatrix), [etfId, holdings, corrMatrix]);
 
   const edges = useMemo(() => {
     const result = [];
@@ -87,8 +89,12 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
         <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">· {corrData.loading ? '…' : corrData.edgeCount} links</span>
       </div>
 
-      {corrData.loading ? (
+      {/* This view fetches its own copy of the ETF (see useLiveEtf), so it
+          gates on that fetch itself — DetailAside below needs a loaded etf. */}
+      {corrData.loading || etfLoading ? (
         <Loading variant="chart" height={440} />
+      ) : !etf ? (
+        <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex gap-5 items-start flex-wrap">
           <section className="flex-1 min-w-[320px] bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">

@@ -30,13 +30,14 @@ import { ChartTooltip } from '../charts/ChartTooltip';
 import { TimeframeTabs } from '../ui/TimeframeTabs';
 import { SectorZone } from './SectorZone';
 import { Loading } from '../ui/Loading';
+import { ErrorState } from '../ui/ErrorState';
 import { EtfPicker } from './EtfPicker';
 
 export const EtfDashboard = memo(function EtfDashboard() {
   const [timeframe, setTimeframe] = useState('1Y');
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const { etf, etfId, tickers, allEtfs, switchEtf } = useLiveEtf();
+  const { etf, etfId, tickers, allEtfs, switchEtf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
 
   // threshold=0 — this card only needs the per-ticker averages, not the
   // edge count used elsewhere by the network view's threshold slider.
@@ -58,6 +59,18 @@ export const EtfDashboard = memo(function EtfDashboard() {
     switchEtf(id);
     setPickerOpen(false);
   };
+
+  // This component fetches its own copy of the ETF (see useLiveEtf), so
+  // it can render before/without data even when a parent's copy resolved.
+  if (!etf) {
+    return etfLoading ? (
+      <section className="flex-none bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-6 mb-5">
+        <Loading variant="skeleton" lines={5} />
+      </section>
+    ) : (
+      <ErrorState onRetry={etfRetry} className="flex-none mb-5" />
+    );
+  }
 
   return (
     <>
