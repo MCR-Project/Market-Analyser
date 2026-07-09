@@ -72,7 +72,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   }, [tickers, threshold, corr]);
 
   // Guard against edges referencing tickers whose layout position isn't
-  // ready yet (e.g. mid-transition between mock and live data).
+  // ready yet (e.g. mid-transition while a new ETF's holdings load).
   const renderableEdges = useMemo(
     () => edges.filter(({ a, b }) => layout[a] && layout[b]),
     [edges, layout]

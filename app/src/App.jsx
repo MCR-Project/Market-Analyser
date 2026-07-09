@@ -3,7 +3,7 @@
  *
  * Layout:
  *  ┌────────────────────────────────────────────┐
- *  │ Header  (nav, live/mock badge, theme)      │
+ *  │ Header  (nav, connectivity badge, theme)   │
  *  ├────────────────────────────────────────────┤
  *  │ EtfDashboard  (identity · sector · chart)  │
  *  ├────────────────────────────────────────────┤

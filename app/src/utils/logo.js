@@ -3,8 +3,8 @@
  * per-ticker lookup table.
  *
  * Instead of a giant ticker → domain/logo map, this slugifies the
- * company's name (already in data/stocks.js for other purposes, e.g.
- * "NVDA" -> "NVIDIA") into the slug used by theSVG's brand icon catalog
+ * company's name (fetched from the API alongside other stock metadata,
+ * e.g. "NVDA" -> "NVIDIA") into the slug used by theSVG's brand icon catalog
  * (https://thesvg.org — the same dataset published as the @thesvg/icons
  * npm package) and loads it from their CDN.
  *

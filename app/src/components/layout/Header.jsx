@@ -1,8 +1,8 @@
 /**
  * Header — sticky top navigation bar.
  *
- * Shows the MCR-3 brand mark, a live/mock data badge (green = backend
- * connected, yellow = using fallback data), and a light/dark theme toggle.
+ * Shows the MCR-3 brand mark, a connectivity badge (green = backend
+ * connected, yellow = backend offline), and a light/dark theme toggle.
  */
 import { memo } from 'react';
 
