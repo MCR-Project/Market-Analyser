@@ -3,18 +3,23 @@
  *
  * Uses a ref for the fetcher to avoid stale closure issues.
  * Clears data immediately when dependencies change.
+ * `retry()` re-runs the current fetch (e.g. from an error state's
+ * Retry button) without needing a full page reload.
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   const [data, setData] = useState(fallback);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
   const fetcherRef = useRef(fetcher);
   const abortRef = useRef(null);
 
   // Always keep the latest fetcher in the ref
   fetcherRef.current = fetcher;
+
+  const retry = useCallback(() => setAttempt(a => a + 1), []);
 
   useEffect(() => {
     // Abort any in-flight request
@@ -37,14 +42,14 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
       })
       .catch(err => {
         if (!controller.signal.aborted) {
-          console.warn('[useFetch] falling back to mock data:', err.message);
+          console.warn('[useFetch] request failed:', err.message);
           setError(err);
           setLoading(false);
         }
       });
 
     return () => controller.abort();
-  }, deps);
+  }, [...deps, attempt]);
 
-  return { data, loading, error };
+  return { data, loading, error, retry };
 }

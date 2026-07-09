@@ -26,6 +26,8 @@ import { Header } from './components/layout/Header';
 import { EtfDashboard } from './components/etf/EtfDashboard';
 import { StockPopup } from './components/stock/StockPopup';
 import { ViewTabs } from './components/ui/ViewTabs';
+import { Loading } from './components/ui/Loading';
+import { ErrorState } from './components/ui/ErrorState';
 import { MeasurementPicker } from './components/ui/MeasurementPicker';
 import { TableView } from './views/TableView';
 import { MatrixView } from './views/MatrixView';
@@ -33,7 +35,7 @@ import { NetworkView } from './views/NetworkView';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme('light');
-  const { etf, etfId, tickers, weightOf, loading: etfLoading, isLive: etfLive } = useLiveEtf();
+  const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry, isLive: etfLive } = useLiveEtf();
 
   // Shared across Matrix/Network — kept here (rather than inside those
   // now-self-contained views) so the highlighted stock survives switching
@@ -73,10 +75,28 @@ export default function App() {
       <Header theme={theme} onToggleTheme={toggleTheme} isLive={etfLive || corrData.isLive} />
 
       <main className="max-w-[1280px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-hidden flex flex-col">
-        <EtfDashboard />
+        {/* Every child below assumes a loaded ETF (non-null etf, populated
+            tickers), so the whole main area is gated on that one fetch:
+            skeleton while loading, explicit error panel on failure —
+            never stale or fabricated data. */}
+        {!etf ? (
+          etfLoading ? (
+            <div className="flex flex-col gap-5 pt-2">
+              <Loading variant="bar" />
+              <Loading variant="chart" height={180} />
+              <Loading variant="skeleton" lines={8} />
+            </div>
+          ) : (
+            <ErrorState onRetry={etfRetry} className="mt-2" />
+          )
+        ) : (
+          <>
+            <EtfDashboard />
 
-        {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
-        <ViewTabs tabs={tabs} />
+            {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
+            <ViewTabs tabs={tabs} />
+          </>
+        )}
       </main>
 
       {stockPopup && tickers.includes(stockPopup) && (
