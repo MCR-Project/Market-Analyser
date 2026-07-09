@@ -25,8 +25,9 @@
  *  4. Scrollable rows: one row per holding, sorted per the active sort key
  */
 import { memo, useState, useMemo, useCallback, useEffect } from 'react';
-import { STOCKS } from '../data/stocks';
+import { useLiveStocks } from '../hooks/useLiveStocks';
 import { Logo } from '../components/ui/Logo';
+import { Loading } from '../components/ui/Loading';
 import { MdxCell } from '../components/ui/MdxCell';
 
 const NAME_COL_WIDTH = 230;
@@ -41,9 +42,11 @@ export const TableView = memo(function TableView({
   const [measureFilters, setMeasureFilters] = useState({});
   const [sort, setSort] = useState({ key: null, dir: 'asc' });
 
+  const { stockMap, loading: stocksLoading, error: stocksError } = useLiveStocks(tickers);
+
   const sectorOptions = useMemo(
-    () => [...new Set(tickers.map(t => (STOCKS[t] || {}).sector || 'Unknown'))].sort(),
-    [tickers]
+    () => [...new Set(tickers.map(t => stockMap[t]?.sector || 'Unknown'))].sort(),
+    [tickers, stockMap]
   );
 
   const setMeasureFilter = useCallback((id, value) => {
@@ -70,12 +73,12 @@ export const TableView = memo(function TableView({
   // mMdx (backend-rendered markdown) is what's actually displayed.
   const allRows = useMemo(() => {
     return tickers.map(t => {
-      const stock = STOCKS[t] || { name: t, sector: 'Unknown' };
+      const stock = stockMap[t] || { name: t, sector: 'Unknown' };
       const mVals = measurements.getTickerValues(t);
       const mMdx = measurements.getTickerMdx(t);
       return { ticker: t, name: stock.name, sector: stock.sector, mVals, mMdx };
     });
-  }, [tickers, measurements.getTickerValues, measurements.getTickerMdx]);
+  }, [tickers, stockMap, measurements.getTickerValues, measurements.getTickerMdx]);
 
   // Apply filters
   const filtered = useMemo(() => {
@@ -190,13 +193,23 @@ export const TableView = memo(function TableView({
 
         {/* Rows */}
         <div className="corr-scroll flex-1 overflow-y-auto flex flex-col gap-1.5 p-[6px_0_24px]">
-          {sortedRows.map(row => (
+          {stocksLoading && (
+            <div className="px-[18px] py-4">
+              <Loading variant="skeleton" lines={8} />
+            </div>
+          )}
+          {!stocksLoading && stocksError && (
+            <div className="py-14 text-center text-[var(--fg-2)] text-sm">
+              Couldn't load holding details — backend unreachable.
+            </div>
+          )}
+          {!stocksLoading && !stocksError && sortedRows.map(row => (
             <button key={row.ticker} onClick={() => onSelectStock(row.ticker)}
               className="flex items-center text-left cursor-pointer w-full bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] transition-all duration-150 hover:border-[var(--border-strong)]"
             >
               {/* Stock identity */}
               <MetricSlot width={NAME_COL_WIDTH} className="flex items-center gap-2.5 overflow-hidden p-2">
-                <Logo ticker={row.ticker} size={32} />
+                <Logo ticker={row.ticker} name={row.name} size={32} />
                 <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
                   <div className="font-[var(--font-mono)] text-[15px] font-bold text-[var(--accent)] tracking-tight">{row.ticker}</div>
                   <div className="text-sm font-semibold text-[var(--fg)] whitespace-nowrap overflow-hidden text-ellipsis">{row.name}</div>
@@ -214,7 +227,7 @@ export const TableView = memo(function TableView({
               </div>
             </button>
           ))}
-          {sortedRows.length === 0 && (
+          {!stocksLoading && !stocksError && sortedRows.length === 0 && (
             <div className="py-14 text-center text-[var(--fg-2)] text-sm">No holdings match the current filters.</div>
           )}
         </div>

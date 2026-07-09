@@ -23,12 +23,13 @@ import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveEtf } from '../hooks/useLiveEtf';
 import { useLiveCorrelation } from '../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../hooks/useLiveSectors';
+import { useLiveStocks } from '../hooks/useLiveStocks';
 import { computeLayout } from '../utils/layout';
 import { fmtCorr } from '../utils/format';
-import { STOCKS } from '../data/stocks';
 import { logoUrl, fallbackFaviconUrl, handleSvgImageLogoError } from '../utils/logo';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
+import { ErrorState } from '../components/ui/ErrorState';
 
 const W = 620, H = 440;
 
@@ -46,17 +47,19 @@ function nodeRadius(weightPct) {
 }
 
 export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
-  const { etf, etfId, tickers, weightOf } = useLiveEtf();
+  const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   const [threshold, setThreshold] = useState(0.5);
   const corrData = useLiveCorrelation(etfId, tickers, threshold);
   const sectors = useLiveSectors(etfId);
+  const { stockMap } = useLiveStocks(tickers);
 
   const corrMatrix = corrData.matrix;
   // No mock fallback — pairs missing from the live matrix (e.g. a ticker
   // dropped by the backend for insufficient price history) resolve to
   // null and are treated as "unknown", not filled with a fake value.
   const corr = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
-  const layout = useMemo(() => computeLayout(etfId, etf.holdings, corrMatrix), [etfId, etf.holdings, corrMatrix]);
+  const holdings = useMemo(() => etf?.holdings ?? [], [etf]);
+  const layout = useMemo(() => computeLayout(etfId, holdings, corrMatrix), [etfId, holdings, corrMatrix]);
 
   const edges = useMemo(() => {
     const result = [];
@@ -71,7 +74,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   }, [tickers, threshold, corr]);
 
   // Guard against edges referencing tickers whose layout position isn't
-  // ready yet (e.g. mid-transition between mock and live data).
+  // ready yet (e.g. mid-transition while a new ETF's holdings load).
   const renderableEdges = useMemo(
     () => edges.filter(({ a, b }) => layout[a] && layout[b]),
     [edges, layout]
@@ -86,8 +89,12 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
         <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">· {corrData.loading ? '…' : corrData.edgeCount} links</span>
       </div>
 
-      {corrData.loading ? (
+      {/* This view fetches its own copy of the ETF (see useLiveEtf), so it
+          gates on that fetch itself — DetailAside below needs a loaded etf. */}
+      {corrData.loading || etfLoading ? (
         <Loading variant="chart" height={440} />
+      ) : !etf ? (
+        <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex gap-5 items-start flex-wrap">
           <section className="flex-1 min-w-[320px] bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
@@ -100,7 +107,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
                     if (!p) return null;
                     const w = weightOf(t);
                     const r = nodeRadius(w);
-                    const name = STOCKS[t]?.name;
+                    const name = stockMap[t]?.name;
                     const pid = 'lp_' + t.replace('.', '_');
                     const pad = r * 0.14;
                     return (
