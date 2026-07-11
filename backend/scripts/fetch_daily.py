@@ -22,9 +22,9 @@ Backfill vs top-up:
     just overwrite the same rows.
 
 Which ETFs/stocks are tracked is entirely DB-driven, not a hardcoded list -
-see market_data.list_etfs for ETFs and scripts/add_ticker.py for stocks -
-placeholders until automatic discovery lands (see the "Find a way to
-automatically fetch tickers and etfs" issue).
+see market_data.list_etfs for ETFs, scripts/add_ticker.py for adding stocks
+by hand, and scripts/complete_database.py for completing tracked ETFs
+(metadata, constituent tickers, and their price history) in bulk.
 """
 
 import sys
