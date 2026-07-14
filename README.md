@@ -22,13 +22,19 @@ in `.env` — see `.env.example`):
 
 - `python scripts/add_ticker.py NVDA "AAPL:Apple Inc."` — manually add or
   update tickers.
-- `python scripts/complete_database.py [--dry-run] [--etfs SPY QQQ]` —
-  complete the ETFs already in the `etfs` table: fill missing metadata from
-  [financedatabase](https://pypi.org/project/financedatabase/), discover
-  their constituent tickers via yfinance top holdings, validate each one
-  (present in financedatabase + yfinance has price data), insert it, and
-  backfill its full price history. Idempotent; also runnable on demand via
-  the "Complete database (manual)" GitHub Action.
+- `python fetcher/vaneck.py --output vaneck_holdings.json [--limit N]` —
+  run from the repo root (deps in `fetcher/requirements.txt`, no API key):
+  scrapes the provider's website for its full ETF holdings and writes them
+  as JSON (schema in `fetcher/common.py`). One fetcher per provider lives
+  in `fetcher/`.
+- `python scripts/complete_database.py --holdings-json ../vaneck_holdings.json
+  [--dry-run] [--etfs SMH]` — complete the ETFs already in the `etfs` table
+  from a holdings JSON: fill missing metadata, validate each new constituent
+  ticker (yfinance must return price history — non-US Bloomberg-style
+  tickers are skipped), insert it, backfill its full price history, and
+  upsert the full holdings with weights. Idempotent; both stages run
+  end-to-end via the "Fetch holdings and complete database (manual)"
+  GitHub Action.
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
   and ETF holdings for everything tracked. Runs on a cron via the "Daily
   ticker data fetch" GitHub Action.
