@@ -1,0 +1,50 @@
+name: Fetch holdings and complete database (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Holdings provider to fetch"
+        type: choice
+        options:
+          - vaneck
+        default: vaneck
+      dry_run:
+        description: "Preview changes without writing to Supabase"
+        type: boolean
+        default: false
+      limit:
+        description: "Max ETFs to fetch (empty = all)"
+        type: string
+        default: ""
+
+jobs:
+  fetch-and-complete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r fetcher/requirements.txt
+          pip install -r backend/requirements.txt
+
+      - name: Fetch holdings from ${{ inputs.provider }}
+        run: python fetcher/${{ inputs.provider }}.py --output holdings.json ${{ inputs.limit != '' && format('--limit {0}', inputs.limit) || '' }}
+
+      # Uploaded before the Supabase step so the raw JSON survives a failed run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holdings-${{ inputs.provider }}
+          path: holdings.json
+
+      - name: Complete ETFs/tickers in Supabase
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/complete_database.py --holdings-json ../holdings.json ${{ inputs.dry_run && '--dry-run' || '' }}
