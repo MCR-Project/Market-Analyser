@@ -8,6 +8,7 @@ on:
         type: choice
         options:
           - vaneck
+          - spdr
         default: vaneck
       dry_run:
         description: "Preview changes without writing to Supabase"
