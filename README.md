@@ -32,9 +32,11 @@ in `.env` — see `.env.example`):
   from a holdings JSON: fill missing metadata, validate each new constituent
   ticker (yfinance must return price history — non-US Bloomberg-style
   tickers are skipped), insert it, backfill its full price history, and
-  upsert the full holdings with weights. Idempotent; both stages run
-  end-to-end via the "Fetch holdings and complete database (manual)"
-  GitHub Action.
+  upsert the full holdings with weights. Only stocks weighing at least 1%
+  in one of their ETFs are tracked (`--min-weight` to override); lighter
+  ones are skipped on insert and pruned from the DB if already present.
+  Idempotent; both stages run end-to-end via the "Fetch holdings and
+  complete database (manual)" GitHub Action.
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
   and ETF holdings for everything tracked. Runs on a cron via the "Daily
   ticker data fetch" GitHub Action.

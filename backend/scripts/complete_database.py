@@ -20,11 +20,17 @@ fetcher/common.py):
      ids containing a space, e.g. "NPN SJ") are skipped upfront; slash
      share classes are dotted (BRK/B -> BRK.B); duplicate share classes are
      merged via market_data.DUPLICATE_TICKERS.
-  5. For every holding not yet in the `ticker` table, validate that yfinance
-     actually returns price history for it, then insert it with live
-     yfinance metadata and backfill its full price history into `prices`.
+  5. For every holding not yet in the `ticker` table that weighs at least
+     MIN_HOLDING_WEIGHT_PCT (1%) in one of the covered ETFs, validate that
+     yfinance actually returns price history for it, then insert it with
+     live yfinance metadata and backfill its full price history into
+     `prices`. Lighter holdings are never added to the tracked universe.
   6. Upsert `etf_holdings` from the JSON weights - full constituent lists,
      not just the top ~10 that yfinance exposes.
+  7. Prune: remove every tracked stock whose weight is below the threshold
+     in ALL the ETFs that hold it (DB-wide, not just this run's files),
+     along with its price history and holdings rows. Stocks that belong to
+     no ETF (hand-added watchlist entries) are never pruned.
 
 Only columns that already exist in the DB are written - no new columns, no
 schema changes, and AUM stays a live-only value (see market_data._compute_aum).
@@ -61,6 +67,11 @@ from services.market_data import (
 from services.supabase_client import get_client
 
 PRICE_UPSERT_CHUNK = 5000  # a "max" backfill can exceed 10k rows per ticker
+
+# A stock is only worth tracking if it carries at least this weight (%) in
+# one of the ETFs that hold it - below that it barely moves the fund and
+# would bloat the daily fetch job for nothing.
+MIN_HOLDING_WEIGHT_PCT = 1.0
 
 
 def load_holdings_files(paths: list[str]) -> dict[str, dict]:
@@ -280,6 +291,48 @@ def insert_new_tickers(client, candidates, holding_names, dry_run):
     return inserted, rejected, failed, total_price_rows
 
 
+def prune_below_threshold(client, min_weight, dry_run):
+    """Remove every tracked stock whose weight is below min_weight in ALL
+    the ETFs that hold it - the mirror of the insert gate, applied DB-wide.
+
+    Stocks held by no ETF at all (hand-added via scripts/add_ticker.py) are
+    never pruned. Deletion follows the FK order: etf_holdings and prices
+    rows first, then the ticker row itself. Prices are re-fetchable, so a
+    stock crossing back above the threshold later is simply re-inserted and
+    re-backfilled by a future run.
+    """
+    resp = client.table("etf_holdings").select("ticker,weight").execute()
+    max_weight: dict[str, float] = {}
+    for row in resp.data:
+        w = float(row["weight"] or 0)
+        t = row["ticker"]
+        max_weight[t] = max(max_weight.get(t, 0.0), w)
+
+    to_remove = sorted(t for t, w in max_weight.items() if w < min_weight)
+    if not to_remove:
+        print("  nothing to prune")
+        return [], []
+
+    pruned, failed = [], []
+    for sym in to_remove:
+        if dry_run:
+            print(f"  DRY     {sym:8s} would remove (max weight {max_weight[sym]:.2f}%)")
+            pruned.append(sym)
+            continue
+        try:
+            client.table("etf_holdings").delete().eq("ticker", sym).execute()
+            client.table("prices").delete().eq("ticker", sym).execute()
+            client.table("ticker").delete().eq("id", sym).execute()
+        except Exception as e:
+            print(f"  FAILED  {sym:8s} {e}")
+            failed.append(sym)
+            continue
+        print(f"  {sym:8s} removed (max weight {max_weight[sym]:.2f}%)")
+        pruned.append(sym)
+
+    return pruned, failed
+
+
 def upsert_holdings(client, normalized_by_etf, known_tickers, dry_run):
     """Upsert the full constituent lists from the holdings JSON - run after
     the new tickers exist so the etf_holdings.ticker FK is satisfiable.
@@ -323,6 +376,14 @@ def main():
         metavar="ID",
         help="Restrict completion to these ETF ids (must already be in the `etfs` table)",
     )
+    parser.add_argument(
+        "--min-weight",
+        type=float,
+        default=MIN_HOLDING_WEIGHT_PCT,
+        metavar="PCT",
+        help="Minimum weight (%%) a stock must have in one of its ETFs to be tracked "
+             f"(default {MIN_HOLDING_WEIGHT_PCT})",
+    )
     args = parser.parse_args()
 
     client = get_client()
@@ -356,10 +417,19 @@ def main():
     normalized_by_etf, holding_names = normalize_holdings(holdings_by_etf, covered)
 
     existing = {row["id"] for row in client.table("ticker").select("id").execute().data}
-    discovered = {t for weights in normalized_by_etf.values() for t in weights}
-    candidates = discovered - existing
+    max_weight: dict[str, float] = {}
+    for weights in normalized_by_etf.values():
+        for t, w in weights.items():
+            max_weight[t] = max(max_weight.get(t, 0.0), w or 0.0)
+    discovered = set(max_weight)
+    heavy_enough = {t for t, w in max_weight.items() if w >= args.min_weight}
+    below = len((discovered - existing) - heavy_enough)
+    candidates = heavy_enough - existing
 
-    print(f"\n3. Validating and inserting {len(candidates)} new ticker(s)...")
+    print(
+        f"\n3. Validating and inserting {len(candidates)} new ticker(s) "
+        f"({below} below the {args.min_weight:g}% weight threshold, skipped)..."
+    )
     inserted, rejected, ticker_failed, price_rows = insert_new_tickers(
         client, candidates, holding_names, args.dry_run
     )
@@ -367,13 +437,17 @@ def main():
     print("\n4. Upserting ETF holdings...")
     upsert_holdings(client, normalized_by_etf, existing | set(inserted), args.dry_run)
 
+    print(f"\n5. Pruning stocks below {args.min_weight:g}% in every ETF holding them...")
+    pruned, prune_failed = prune_below_threshold(client, args.min_weight, args.dry_run)
+
     label = "would be " if args.dry_run else ""
     print(
         f"\nDone: {meta_updated} ETF(s) metadata {label}updated, "
         f"{len(inserted)} ticker(s) {label}inserted "
-        f"({price_rows} price rows), {len(rejected)} rejected."
+        f"({price_rows} price rows), {len(rejected)} rejected, "
+        f"{len(pruned)} {label}pruned."
     )
-    failed = meta_failed + ticker_failed
+    failed = meta_failed + ticker_failed + prune_failed
     if failed:
         print(f"Failed: {', '.join(failed)}")
         sys.exit(1)
