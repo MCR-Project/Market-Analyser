@@ -36,7 +36,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import yfinance as yf
 
-from services.market_data import get_etf_info, get_etf_holdings, list_etfs, _get_stock_info_live
+from services.market_data import (
+    list_etfs,
+    _get_etf_info_live,
+    _get_etf_holdings_live,
+    _get_stock_info_live,
+)
 from services.supabase_client import get_client
 
 BACKFILL_PERIOD = "max"  # first-ever fetch for a ticker - full available history
@@ -77,43 +82,62 @@ def fetch_ticker_rows(ticker_id: str, period: str) -> list[dict]:
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     """Refresh etfs/etf_holdings for every ETF already tracked in Supabase
     (market_data.list_etfs) - this only ever refreshes existing rows, it
-    doesn't add new ETFs (there's no add_etf.py script yet).
+    doesn't add new ETFs (scripts/complete_database.py does that from the
+    provider holdings files produced by the fetchers in fetcher/).
 
-    aum is deliberately not stored here - it's a live snapshot value, not
-    something that should sit in the DB going stale between daily runs.
-    Callers that need current AUM should call get_etf_info directly.
+    The DB's etf_holdings rows are the full constituent list, so they are
+    the source of truth for what an ETF contains - yfinance only exposes
+    the top ~10 holdings, so the live call is used purely to refresh the
+    weights it knows about and never shrinks the DB set. Full-portfolio
+    weights refresh whenever the fetch-holdings workflow runs. Since
+    etf_holdings.ticker has an FK to ticker.id, every constituent in the
+    DB also gets its prices/metadata refreshed by the main loop below.
 
-    Holdings for tickers we don't track yet are skipped (etf_holdings.ticker
-    has an FK to ticker.id) rather than failing the whole ETF - they'll show
-    up once that ticker is added via scripts/add_ticker.py.
+    The live (not DB-first) lookups are deliberate: this job is what keeps
+    the DB fresh, so reading the DB back here would just write the same
+    rows in a circle. Metadata fields that come back empty from yfinance
+    are left out of the upsert so a flaky response can't blank out values
+    the completion script already filled. aum is deliberately not stored -
+    it's a live snapshot value; callers needing it use get_etf_info.
+
+    Live holdings for tickers we don't track yet are skipped
+    (etf_holdings.ticker has an FK to ticker.id) rather than failing the
+    whole ETF - they'll show up once that ticker is added.
     """
     failed = []
     for etf_id in list_etfs():
         try:
-            info = get_etf_info(etf_id)
-            holdings = get_etf_holdings(etf_id)
+            info = _get_etf_info_live(etf_id)
+            live_holdings = _get_etf_holdings_live(etf_id)
         except Exception as e:
             print(f"  FAILED  {etf_id:8s} {e}")
             failed.append(etf_id)
             continue
 
-        client.table("etfs").upsert({
-            "id": etf_id,
-            "name": info["name"],
-            "cat": info["cat"],
-            "desc": info["desc"],
-        }).execute()
+        etf_row = {"id": etf_id}
+        if info["name"] and info["name"] != etf_id:
+            etf_row["name"] = info["name"]
+        if info["cat"]:
+            etf_row["cat"] = info["cat"]
+        if info["desc"]:
+            etf_row["desc"] = info["desc"]
+        if len(etf_row) > 1:
+            client.table("etfs").upsert(etf_row).execute()
+
+        db_resp = client.table("etf_holdings").select("ticker").eq("etf_id", etf_id).execute()
+        db_tickers = {row["ticker"] for row in db_resp.data}
 
         holding_rows = [
             {"etf_id": etf_id, "ticker": t, "weight": w}
-            for t, w in holdings if t in known_tickers
+            for t, w in live_holdings if t in known_tickers
         ]
-        skipped = len(holdings) - len(holding_rows)
+        skipped = len(live_holdings) - len(holding_rows)
         if holding_rows:
             client.table("etf_holdings").upsert(holding_rows).execute()
 
+        total = len(db_tickers | {r["ticker"] for r in holding_rows})
         note = f", {skipped} skipped (untracked ticker)" if skipped else ""
-        print(f"  {etf_id:8s} {len(holding_rows):4d} holdings{note}")
+        print(f"  {etf_id:8s} {total:4d} holdings ({len(holding_rows)} weights refreshed){note}")
 
     return failed
 
