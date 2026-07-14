@@ -1,24 +1,30 @@
 """
-Complete the tracked universe in Supabase from financedatabase + yfinance.
+Complete the tracked universe in Supabase from provider holdings JSON files.
 
 Where scripts/add_ticker.py adds one ticker by hand and scripts/fetch_daily.py
 only refreshes rows that already exist, this script fills the gaps around the
-ETFs already tracked in the `etfs` table:
+ETFs already tracked in the `etfs` table, using the full holdings scraped
+from provider websites by the fetchers in fetcher/ (schema documented in
+fetcher/common.py):
 
-  1. Load the financedatabase catalogs (fd.ETFs() / fd.Equities()) - free,
-     no API key, downloaded as DataFrames at startup.
-  2. Complete ETF metadata: intersect the fd ETF catalog with the ids in the
-     `etfs` table and fill missing name/cat/desc (fd has rich per-ETF
-     metadata but no constituent lists).
-  3. Retrieve each ETF's constituents via yfinance top holdings (the same
-     live path fetch_daily.py syncs from - top ~10 per fund).
-  4. For every constituent not yet in the `ticker` table, validate it two
-     ways - present in the fd equities catalog AND yfinance returns price
-     history - then insert it with fd metadata (name, sector, currency,
-     exchange, website) plus numeric market cap / logo from yfinance, and
-     backfill its full price history into `prices`.
-  5. Re-upsert `etf_holdings` so holdings previously skipped by the
-     etf_holdings.ticker -> ticker.id FK constraint now land.
+  1. Load one or more holdings JSON files (--holdings-json), skipping ETF
+     entries the fetcher flagged with an error or that carry no holdings
+     (e.g. fixed-income funds).
+  2. Intersect the JSON's ETFs with the ids tracked in the `etfs` table -
+     the DB stays the source of truth for WHICH ETFs are tracked; the JSON
+     only completes them. Uncovered DB ETFs are reported and left to the
+     daily job's yfinance top-10 sync.
+  3. Complete ETF metadata: fill missing etfs.name from the JSON, missing
+     cat/desc from a live yfinance lookup.
+  4. Normalize each ETF's holdings tickers: non-US listings (Bloomberg-style
+     ids containing a space, e.g. "NPN SJ") are skipped upfront; slash
+     share classes are dotted (BRK/B -> BRK.B); duplicate share classes are
+     merged via market_data.DUPLICATE_TICKERS.
+  5. For every holding not yet in the `ticker` table, validate that yfinance
+     actually returns price history for it, then insert it with live
+     yfinance metadata and backfill its full price history into `prices`.
+  6. Upsert `etf_holdings` from the JSON weights - full constituent lists,
+     not just the top ~10 that yfinance exposes.
 
 Only columns that already exist in the DB are written - no new columns, no
 schema changes, and AUM stays a live-only value (see market_data._compute_aum).
@@ -30,27 +36,25 @@ them a normal 5-day top-up (not another full backfill) and takes over their
 metadata refresh. If a price backfill fails halfway, last_fetch stays null
 and the next daily run re-backfills that ticker automatically.
 
-Run manually with:   python scripts/complete_database.py
-                     python scripts/complete_database.py --dry-run
-                     python scripts/complete_database.py --etfs SPY QQQ
-                     python scripts/complete_database.py --force-etf-metadata
-Runs on demand via .github/workflows/complete-database.yml (manual dispatch).
+Run manually with:   python scripts/complete_database.py --holdings-json ../vaneck_holdings.json
+                     python scripts/complete_database.py --holdings-json ../vaneck_holdings.json --dry-run
+                     python scripts/complete_database.py --holdings-json ../vaneck_holdings.json --etfs SMH
+Runs end-to-end (fetch + complete) via .github/workflows/fetch-holdings.yml
+(manual dispatch).
 """
 
 import argparse
+import json
 import sys
 from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import financedatabase as fd
-import pandas as pd
-
 from scripts.fetch_daily import BACKFILL_PERIOD, fetch_ticker_rows
 from services.market_data import (
+    DUPLICATE_TICKERS,
     _get_etf_info_live,
-    _get_etf_holdings_live,
     _get_stock_info_live,
     list_etfs,
 )
@@ -59,50 +63,96 @@ from services.supabase_client import get_client
 PRICE_UPSERT_CHUNK = 5000  # a "max" backfill can exceed 10k rows per ticker
 
 
-def _clean(v):
-    """financedatabase DataFrames hold NaN for missing fields - PostgREST
-    payloads need None instead."""
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return None
-    return v
+def load_holdings_files(paths: list[str]) -> dict[str, dict]:
+    """Merge fetcher JSON files into {ETF_ID: {"name", "holdings"}}.
+
+    Skips entries the fetcher flagged with an error and entries without
+    holdings (their note says why - typically non-equity funds). If the same
+    ETF appears in several files, the first occurrence with holdings wins.
+    """
+    holdings_by_etf: dict[str, dict] = {}
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        for entry in data["etfs"]:
+            etf_id = (entry.get("ticker") or "").strip().upper()
+            if not etf_id:
+                continue
+            if entry.get("error"):
+                print(f"  SKIP    {etf_id:8s} fetch error: {entry['error']}")
+                continue
+            if not entry.get("holdings"):
+                note = entry.get("note") or "no holdings in file"
+                print(f"  SKIP    {etf_id:8s} {note}")
+                continue
+            if etf_id in holdings_by_etf:
+                print(f"  WARN    {etf_id:8s} already loaded from an earlier file - keeping the first")
+                continue
+            holdings_by_etf[etf_id] = {
+                "name": (entry.get("name") or "").strip(),
+                "holdings": entry["holdings"],
+            }
+    return holdings_by_etf
 
 
-def _swap_convention(symbol: str) -> str:
-    """Bridge share-class conventions: our canonical ids use dots (BRK.B,
-    per market_data.DUPLICATE_TICKERS) while catalogs may use dashes."""
-    if "." in symbol:
-        return symbol.replace(".", "-")
-    return symbol.replace("-", ".")
+def normalize_symbol(sym: str) -> tuple[str | None, str | None]:
+    """Return (canonical_symbol, None) or (None, skip_reason).
+
+    Bloomberg-style ids with an exchange qualifier ("NPN SJ") are non-US
+    listings yfinance won't resolve - skipped without burning a call.
+    Slash share classes become the repo's canonical dot form (BRK/B ->
+    BRK.B), then DUPLICATE_TICKERS merges known share-class aliases.
+    """
+    sym = sym.strip().upper()
+    if " " in sym:
+        return None, "non-US listing (Bloomberg-style ticker)"
+    sym = sym.replace("/", ".")
+    canonical = DUPLICATE_TICKERS.get(sym) or DUPLICATE_TICKERS.get(sym.replace(".", "-")) or sym
+    return canonical, None
 
 
-def fd_lookup(catalog: pd.DataFrame, symbol: str) -> pd.Series | None:
-    """Exact symbol lookup in a fd catalog, retrying the dot/dash-swapped
-    variant on a miss. Returns None if the symbol isn't in the catalog."""
-    for sym in (symbol, _swap_convention(symbol)):
-        if sym in catalog.index:
-            row = catalog.loc[sym]
-            if isinstance(row, pd.DataFrame):  # duplicate index entries
-                row = row.iloc[0]
-            return row
-    return None
+def normalize_holdings(holdings_by_etf, etf_ids) -> tuple[dict, dict]:
+    """Normalize holdings tickers for the given ETFs.
+
+    Returns ({etf_id: {canonical: weight_pct | None}}, {canonical: name}).
+    Duplicate canonical tickers within an ETF get their weights summed;
+    skipped symbols are logged once each across all ETFs.
+    """
+    normalized: dict[str, dict] = {}
+    names: dict[str, str] = {}
+    skipped_logged: set[str] = set()
+
+    for etf_id in etf_ids:
+        weights: dict[str, float | None] = {}
+        for holding in holdings_by_etf[etf_id]["holdings"]:
+            raw = holding.get("ticker") or ""
+            canonical, reason = normalize_symbol(raw)
+            if canonical is None:
+                if raw not in skipped_logged:
+                    print(f"  SKIP    {raw:12s} {reason}")
+                    skipped_logged.add(raw)
+                continue
+            weight = holding.get("weight_pct")
+            if canonical in weights:
+                if weight is not None:
+                    weights[canonical] = (weights[canonical] or 0) + weight
+            else:
+                weights[canonical] = weight
+            if holding.get("name") and canonical not in names:
+                names[canonical] = holding["name"].strip()
+        normalized[etf_id] = weights
+        note = f" ({len(holdings_by_etf[etf_id]['holdings']) - len(weights)} skipped/merged)" if len(weights) != len(holdings_by_etf[etf_id]["holdings"]) else ""
+        print(f"  {etf_id:8s} {len(weights):4d} holdings{note}")
+
+    return normalized, names
 
 
-def load_fd_catalogs() -> tuple[pd.DataFrame, pd.DataFrame]:
-    try:
-        etfs = fd.ETFs().select()
-        equities = fd.Equities().select()
-    except Exception as e:
-        raise SystemExit(f"Failed to load the financedatabase catalogs: {e}")
-    print(f"Loaded financedatabase catalogs: {len(etfs)} ETFs, {len(equities)} equities.")
-    return etfs, equities
-
-
-def complete_etf_metadata(client, fd_etfs, etf_ids, dry_run, force) -> tuple[int, list[str]]:
-    """Fill missing name/cat/desc on `etfs` rows from the fd ETF catalog,
-    falling back to a live yfinance lookup for ETFs fd doesn't know.
+def complete_etf_metadata(client, holdings_by_etf, etf_ids, dry_run) -> tuple[int, list[str]]:
+    """Fill missing name/cat/desc on `etfs` rows - name from the holdings
+    JSON, cat/desc from a live yfinance lookup.
 
     A field counts as missing when it's null/empty (or, for name, still equal
-    to the raw id). --force-etf-metadata overwrites from fd even when set.
+    to the raw id).
     """
     resp = client.table("etfs").select("id,name,cat,desc").in_("id", etf_ids).execute()
     current = {row["id"]: row for row in resp.data}
@@ -110,25 +160,15 @@ def complete_etf_metadata(client, fd_etfs, etf_ids, dry_run, force) -> tuple[int
     updated, failed = 0, []
     for etf_id in etf_ids:
         row = current.get(etf_id, {"id": etf_id, "name": None, "cat": None, "desc": None})
-        fd_row = fd_lookup(fd_etfs, etf_id)
-
-        fd_values = {}
-        if fd_row is not None:
-            fd_values = {
-                "name": _clean(fd_row.get("name")),
-                "cat": _clean(fd_row.get("category")) or _clean(fd_row.get("category_group")),
-                "desc": _clean(fd_row.get("summary")),
-            }
 
         def missing(field):
             value = row.get(field)
             return not value or (field == "name" and value == etf_id)
 
-        payload = {
-            field: value
-            for field, value in fd_values.items()
-            if value and (force or missing(field))
-        }
+        payload = {}
+        json_name = holdings_by_etf[etf_id]["name"]
+        if missing("name") and json_name:
+            payload["name"] = json_name
 
         still_missing = [f for f in ("name", "cat", "desc") if missing(f) and f not in payload]
         if still_missing:
@@ -146,70 +186,59 @@ def complete_etf_metadata(client, fd_etfs, etf_ids, dry_run, force) -> tuple[int
             print(f"  {etf_id:8s} already complete")
             continue
 
-        source = "fd" if fd_row is not None else "yfinance"
         if dry_run:
-            print(f"  DRY     {etf_id:8s} would set {sorted(payload)} (from {source})")
+            print(f"  DRY     {etf_id:8s} would set {sorted(payload)}")
         else:
             client.table("etfs").update(payload).eq("id", etf_id).execute()
-            print(f"  {etf_id:8s} set {sorted(payload)} (from {source})")
+            print(f"  {etf_id:8s} set {sorted(payload)}")
         updated += 1
 
     return updated, failed
 
 
-def discover_constituents(etf_ids) -> dict[str, list[list]]:
-    """Live yfinance top holdings per ETF - deliberately NOT the DB-first
-    get_etf_holdings, which would only echo back the already-tracked subset."""
-    holdings_by_etf = {}
-    for etf_id in etf_ids:
-        holdings = _get_etf_holdings_live(etf_id)
-        if holdings:
-            print(f"  {etf_id:8s} {len(holdings):3d} holdings")
-        else:
-            print(f"  WARN    {etf_id:8s} no holdings exposed by yfinance")
-        holdings_by_etf[etf_id] = holdings
-    return holdings_by_etf
-
-
-def validate_and_build_ticker(sym, fd_equities):
+def validate_and_build_ticker(sym, holding_names):
     """Validate a candidate and assemble its `ticker` row + price backfill.
 
     Returns (row, price_rows, None) on success, (None, None, reason) on
     rejection. The single fetch_ticker_rows call doubles as the "yfinance
     actually has data" validation and the backfill payload.
     """
-    fd_row = fd_lookup(fd_equities, sym)
-    if fd_row is None:
-        return None, None, "not in financedatabase equities (cash/bond/futures line?)"
-
     price_rows = fetch_ticker_rows(sym, BACKFILL_PERIOD)
     if not price_rows:
         return None, None, "no yfinance price history"
 
-    row = {
-        "id": sym,
-        "name": _clean(fd_row.get("name")) or sym,
-        "active": True,
-        "sector": _clean(fd_row.get("sector")),
-        "currency": _clean(fd_row.get("currency")),
-        "exchange": _clean(fd_row.get("exchange")),
-        "website": _clean(fd_row.get("website")),
-        "market_cap": None,
-        "logo": None,
-    }
-    # fd's market_cap is a categorical string ("Large Cap") - the numeric
-    # value and the logo only exist on the yfinance side.
     try:
         live = _get_stock_info_live(sym)
-        row["market_cap"] = live["marketCap"]
-        row["logo"] = live["logo"]
+        row = {
+            "id": sym,
+            "name": live["name"],
+            "active": True,
+            "sector": live["sector"],
+            "market_cap": live["marketCap"],
+            "currency": live["currency"],
+            "exchange": live["exchange"],
+            "logo": live["logo"],
+            "website": live["website"],
+        }
     except Exception:
-        pass  # left null; the next fetch_daily run repairs them
+        # Insert with the name from the holdings file and null metadata -
+        # the null sector sentinel makes the next fetch_daily run repair it.
+        row = {
+            "id": sym,
+            "name": holding_names.get(sym) or sym,
+            "active": True,
+            "sector": None,
+            "market_cap": None,
+            "currency": None,
+            "exchange": None,
+            "logo": None,
+            "website": None,
+        }
 
     return row, price_rows, None
 
 
-def insert_new_tickers(client, candidates, fd_equities, dry_run):
+def insert_new_tickers(client, candidates, holding_names, dry_run):
     """Validate, insert, and backfill each candidate ticker independently -
     one bad symbol shouldn't sink the batch."""
     today = date.today().isoformat()
@@ -218,7 +247,7 @@ def insert_new_tickers(client, candidates, fd_equities, dry_run):
 
     for sym in sorted(candidates):
         try:
-            row, price_rows, reason = validate_and_build_ticker(sym, fd_equities)
+            row, price_rows, reason = validate_and_build_ticker(sym, holding_names)
         except Exception as e:
             print(f"  FAILED  {sym:8s} {e}")
             failed.append(sym)
@@ -251,15 +280,19 @@ def insert_new_tickers(client, candidates, fd_equities, dry_run):
     return inserted, rejected, failed, total_price_rows
 
 
-def upsert_holdings(client, holdings_by_etf, known_tickers, dry_run):
-    """Same shape as fetch_daily.sync_etfs' holdings block, but run after the
-    new tickers exist so previously FK-skipped holdings now land."""
-    for etf_id, holdings in holdings_by_etf.items():
+def upsert_holdings(client, normalized_by_etf, known_tickers, dry_run):
+    """Upsert the full constituent lists from the holdings JSON - run after
+    the new tickers exist so the etf_holdings.ticker FK is satisfiable.
+
+    A null weight is stored as 0 rather than null (readers do float(weight))
+    or dropped - the holding stays visible either way.
+    """
+    for etf_id, weights in normalized_by_etf.items():
         holding_rows = [
-            {"etf_id": etf_id, "ticker": t, "weight": w}
-            for t, w in holdings if t in known_tickers
+            {"etf_id": etf_id, "ticker": t, "weight": w if w is not None else 0}
+            for t, w in weights.items() if t in known_tickers
         ]
-        skipped = len(holdings) - len(holding_rows)
+        skipped = len(weights) - len(holding_rows)
         if holding_rows and not dry_run:
             client.table("etf_holdings").upsert(holding_rows).execute()
 
@@ -273,9 +306,16 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
+        "--holdings-json",
+        nargs="+",
+        required=True,
+        metavar="PATH",
+        help="One or more holdings JSON files produced by the fetchers in fetcher/",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Read everything (Supabase, financedatabase, yfinance) but write nothing",
+        help="Read everything (Supabase, holdings files, yfinance) but write nothing",
     )
     parser.add_argument(
         "--etfs",
@@ -283,15 +323,13 @@ def main():
         metavar="ID",
         help="Restrict completion to these ETF ids (must already be in the `etfs` table)",
     )
-    parser.add_argument(
-        "--force-etf-metadata",
-        action="store_true",
-        help="Overwrite etfs.name/cat/desc from financedatabase even when already set",
-    )
     args = parser.parse_args()
 
     client = get_client()
-    fd_etfs, fd_equities = load_fd_catalogs()
+
+    print("Loading holdings files...")
+    holdings_by_etf = load_holdings_files(args.holdings_json)
+    print(f"{len(holdings_by_etf)} ETF(s) with holdings loaded.")
 
     etf_ids = list_etfs()
     if args.etfs:
@@ -300,31 +338,34 @@ def main():
         if unknown:
             print(f"Ignoring ETFs not tracked in Supabase: {', '.join(unknown)}")
         etf_ids = [e for e in etf_ids if e in requested]
-    if not etf_ids:
-        print("No ETFs to complete - insert ids into the `etfs` table first.")
+
+    covered = [e for e in etf_ids if e in holdings_by_etf]
+    uncovered = [e for e in etf_ids if e not in holdings_by_etf]
+    if uncovered:
+        print(f"DB ETFs not covered by any holdings file (left to the daily sync): {', '.join(uncovered)}")
+    if not covered:
+        print("No tracked ETF is covered by the holdings file(s) - nothing to do.")
         return
 
-    print(f"Completing {len(etf_ids)} ETF(s): {', '.join(etf_ids)}")
+    print(f"\nCompleting {len(covered)} ETF(s): {', '.join(covered)}")
 
-    print("\n1. Completing ETF metadata (financedatabase)...")
-    meta_updated, meta_failed = complete_etf_metadata(
-        client, fd_etfs, etf_ids, args.dry_run, args.force_etf_metadata
-    )
+    print("\n1. Completing ETF metadata...")
+    meta_updated, meta_failed = complete_etf_metadata(client, holdings_by_etf, covered, args.dry_run)
 
-    print("\n2. Retrieving constituents (yfinance top holdings)...")
-    holdings_by_etf = discover_constituents(etf_ids)
+    print("\n2. Normalizing holdings tickers...")
+    normalized_by_etf, holding_names = normalize_holdings(holdings_by_etf, covered)
 
     existing = {row["id"] for row in client.table("ticker").select("id").execute().data}
-    discovered = {t for holdings in holdings_by_etf.values() for t, _ in holdings}
+    discovered = {t for weights in normalized_by_etf.values() for t in weights}
     candidates = discovered - existing
 
     print(f"\n3. Validating and inserting {len(candidates)} new ticker(s)...")
     inserted, rejected, ticker_failed, price_rows = insert_new_tickers(
-        client, candidates, fd_equities, args.dry_run
+        client, candidates, holding_names, args.dry_run
     )
 
     print("\n4. Upserting ETF holdings...")
-    upsert_holdings(client, holdings_by_etf, existing | set(inserted), args.dry_run)
+    upsert_holdings(client, normalized_by_etf, existing | set(inserted), args.dry_run)
 
     label = "would be " if args.dry_run else ""
     print(
