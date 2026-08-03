@@ -28,7 +28,7 @@ automatically fetch tickers and etfs" issue).
 """
 
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -41,6 +41,13 @@ from services.supabase_client import get_client
 
 BACKFILL_PERIOD = "max"  # first-ever fetch for a ticker - full available history
 TOPUP_PERIOD = "5d"      # every subsequent daily run
+
+# Age tiers for `prices` granularity (see sql/001_optimize_prices_storage.sql):
+# rows younger than WEEKLY_TIER_START_DAYS stay daily ('D'); rows between
+# that and MONTHLY_TIER_START_DAYS get compacted into weekly ('W') OHLC
+# candles; older rows get compacted into monthly ('M') candles.
+WEEKLY_TIER_START_DAYS = 365
+MONTHLY_TIER_START_DAYS = 5 * 365
 
 
 def _safe_float(v):
@@ -87,6 +94,89 @@ def fetch_ticker_rows(ticker_id: str, period: str) -> tuple[list[dict], list[dic
             split_events.append({"ticker": ticker_id, "date": date_str, "splits": split})
 
     return rows, dividend_events, split_events
+
+
+def _week_start(d: date) -> date:
+    return d - timedelta(days=d.weekday())  # Monday of d's ISO week
+
+
+def _month_start(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _month_end(d: date) -> date:
+    next_month = d.replace(day=28) + timedelta(days=4)  # jump into next month
+    return _month_start(next_month) - timedelta(days=1)
+
+
+def _agg(bucket_rows: list[dict], key: str, fn) -> float | None:
+    values = [r[key] for r in bucket_rows if r[key] is not None]
+    return fn(values) if values else None
+
+
+def _resample(bucket_rows: list[dict], bucket_date: date, granularity: str) -> dict:
+    """Collapse same-ticker daily rows sharing a bucket into one OHLCV row:
+    open = the bucket's first open, high = max of the bucket's highs,
+    low = min of the bucket's lows, close = the bucket's last close,
+    volume = summed daily volume."""
+    bucket_rows = sorted(bucket_rows, key=lambda r: r["date"])
+    return {
+        "ticker": bucket_rows[0]["ticker"],
+        "date": bucket_date.isoformat(),
+        "granularity": granularity,
+        "open": bucket_rows[0]["open"],
+        "high": _agg(bucket_rows, "high", max),
+        "low": _agg(bucket_rows, "low", min),
+        "close": bucket_rows[-1]["close"],
+        "volume": sum(r["volume"] for r in bucket_rows),
+    }
+
+
+def bucket_by_age(rows: list[dict], today: date) -> list[dict]:
+    """Classify daily {ticker,date,open,high,low,close,volume} rows into
+    tiered `prices` granularity based on age relative to `today`:
+      - Younger than WEEKLY_TIER_START_DAYS: kept as individual daily
+        ('D') rows.
+      - Fully-elapsed ISO weeks between the weekly and monthly cutoffs:
+        OHLC-resampled into one weekly ('W') row per week.
+      - Fully-elapsed calendar months past the monthly cutoff: resampled
+        into one monthly ('M') row per month.
+
+    A week/month is only ever compacted once it has FULLY elapsed past its
+    cutoff (every one of its days is already older than the cutoff) - so
+    each bucket gets aggregated exactly once, from complete data, whether
+    it's compacted here (on a fresh backfill fetch) or later by
+    compact_ticker (sweeping rows already sitting in the DB as they age).
+    A day whose week/month hasn't fully elapsed yet is left daily for now;
+    a later run's compact_ticker sweep will catch it once it has.
+    """
+    weekly_cutoff = today - timedelta(days=WEEKLY_TIER_START_DAYS)
+    monthly_cutoff = today - timedelta(days=MONTHLY_TIER_START_DAYS)
+
+    daily_rows = []
+    week_buckets: dict[date, list[dict]] = {}
+    month_buckets: dict[date, list[dict]] = {}
+
+    for row in rows:
+        d = date.fromisoformat(row["date"])
+        if d >= weekly_cutoff:
+            daily_rows.append({**row, "granularity": "D"})
+            continue
+
+        if _month_end(d) < monthly_cutoff:
+            month_buckets.setdefault(_month_start(d), []).append(row)
+            continue
+
+        week_end = _week_start(d) + timedelta(days=6)
+        if week_end < weekly_cutoff:
+            week_buckets.setdefault(_week_start(d), []).append(row)
+        else:
+            daily_rows.append({**row, "granularity": "D"})
+
+    result = daily_rows
+    result += [_resample(rs, d, "W") for d, rs in week_buckets.items()]
+    result += [_resample(rs, d, "M") for d, rs in month_buckets.items()]
+    return result
 
 
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
