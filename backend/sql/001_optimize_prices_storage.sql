@@ -8,8 +8,11 @@
 --      column ('D'/'W'/'M') distinguishes daily rows from weekly/monthly
 --      OHLC-resampled rows, since a coarse row's `date` is a bucket anchor
 --      (Monday of the ISO week / 1st of the month), not one trading day.
---   3. Narrows numeric column types now that the table is being emptied
---      anyway (numeric -> real for prices, bigint -> integer for volume).
+--   3. Narrows open/high/low/close from numeric to real now that the table
+--      is being emptied anyway. volume STAYS bigint - a monthly bucket sums
+--      ~21 trading days of daily volume, which overflows int4 (~2.1B) for
+--      any reasonably high-volume ticker (confirmed: AAPL's own history
+--      overflowed it during verification).
 --   4. Truncates `prices` — old rows don't carry a `granularity` value and
 --      mix daily data across all history; scripts/fetch_daily.py repopulates
 --      everything under the new scheme on its next run.
@@ -49,7 +52,7 @@ alter table prices
     alter column high type real,
     alter column low type real,
     alter column close type real,
-    alter column volume type integer;
+    alter column volume type bigint;
 
 alter table prices add primary key (ticker, date, granularity);
 
