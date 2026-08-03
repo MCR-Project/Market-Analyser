@@ -52,3 +52,12 @@ alter table prices
     alter column volume type integer;
 
 alter table prices add primary key (ticker, date, granularity);
+
+-- Truncating `prices` alone isn't enough to trigger a real refill:
+-- scripts/fetch_daily.py picks backfill vs top-up purely off whether
+-- ticker.last_fetch is null, and every already-tracked ticker still has it
+-- set from before this migration. Without this, the next run would only
+-- pull a 5-day top-up per ticker and leave `prices` almost empty. Reset it
+-- so every ticker gets a full backfill (tiered by age per bucket_by_age)
+-- on the next run.
+update ticker set last_fetch = null;
