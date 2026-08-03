@@ -50,28 +50,43 @@ def _safe_float(v):
     return round(f, 4) if not np.isnan(f) else None
 
 
-def fetch_ticker_rows(ticker_id: str, period: str) -> list[dict]:
+def fetch_ticker_rows(ticker_id: str, period: str) -> tuple[list[dict], list[dict], list[dict]]:
+    """Fetch OHLCV history for a ticker, split into three upsert-ready
+    payloads: price rows (open/high/low/close/volume only - dividends and
+    splits live in their own sparse `dividends`/`splits` tables now, see
+    sql/001_optimize_prices_storage.sql), and dividend/split events (only
+    non-zero occurrences - most rows have neither)."""
     hist = yf.Ticker(ticker_id).history(period=period, auto_adjust=False)
     if hist.empty:
-        return []
+        return [], [], []
 
     hist = hist.dropna(subset=["Close"])
 
     rows = []
+    dividend_events = []
+    split_events = []
     for idx, r in hist.iterrows():
+        date_str = idx.strftime("%Y-%m-%d")
         volume = r.get("Volume", 0)
         rows.append({
             "ticker": ticker_id,
-            "date": idx.strftime("%Y-%m-%d"),
+            "date": date_str,
             "open": _safe_float(r.get("Open")),
             "high": _safe_float(r.get("High")),
             "low": _safe_float(r.get("Low")),
             "close": _safe_float(r.get("Close")),
             "volume": int(volume) if volume is not None and not np.isnan(volume) else 0,
-            "dividends": _safe_float(r.get("Dividends")) or 0,
-            "splits": _safe_float(r.get("Stock Splits")) or 0,
         })
-    return rows
+
+        dividend = _safe_float(r.get("Dividends")) or 0
+        if dividend:
+            dividend_events.append({"ticker": ticker_id, "date": date_str, "dividends": dividend})
+
+        split = _safe_float(r.get("Stock Splits")) or 0
+        if split:
+            split_events.append({"ticker": ticker_id, "date": date_str, "splits": split})
+
+    return rows, dividend_events, split_events
 
 
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
@@ -146,7 +161,7 @@ def main():
         ticker_id = ticker["id"]
         period = BACKFILL_PERIOD if not ticker["last_fetch"] else TOPUP_PERIOD
         try:
-            rows = fetch_ticker_rows(ticker_id, period)
+            rows, dividend_events, split_events = fetch_ticker_rows(ticker_id, period)
         except Exception as e:
             print(f"  FAILED  {ticker_id:8s} {e}")
             failed.append(ticker_id)
@@ -155,6 +170,10 @@ def main():
         if rows:
             client.table("prices").upsert(rows).execute()
             total_rows += len(rows)
+        if dividend_events:
+            client.table("dividends").upsert(dividend_events).execute()
+        if split_events:
+            client.table("splits").upsert(split_events).execute()
 
         client.table("ticker").update({"last_fetch": today}).eq("id", ticker_id).execute()
 
