@@ -1,7 +1,11 @@
 """
 Daily data-refresh job:
   - Fetches OHLCV history for every active ticker from yfinance and upserts
-    it into Supabase, then stamps ticker.last_fetch.
+    it into Supabase, then stamps ticker.last_fetch. Dividend/split events
+    go into their own sparse `dividends`/`splits` tables, not `prices`.
+  - Compacts aged price rows for every known ticker (active or not) into
+    coarser granularity, so `prices` doesn't grow unbounded with history
+    the product never displays past 5 years (see issue #10).
   - Refreshes each active ticker's stock metadata (sector, market cap,
     currency, exchange, logo, website) so get_stock_info can be fully
     DB-read - market cap will be as fresh as this run.
@@ -15,11 +19,26 @@ Runs on a schedule via .github/workflows/fetch-daily.yml.
 Backfill vs top-up:
   - A ticker whose last_fetch is null gets a full-history backfill, back to
     the ticker's origin (null is the column default, so this is true for
-    any ticker scripts/add_ticker.py has just added).
+    any ticker scripts/add_ticker.py has just added). The fetched history
+    is immediately tiered by age (see bucket_by_age) rather than stored
+    flat, so a long-lived ticker's backfill never even transiently holds
+    years of raw daily rows.
   - A ticker that's already been fetched gets a 5-day top-up, which covers
-    weekends, holidays, and the odd missed run. (ticker, date) is the
-    primary key on `prices`, so upserting is idempotent - re-fetched days
-    just overwrite the same rows.
+    weekends, holidays, and the odd missed run - always within the daily
+    tier. (ticker, date, granularity) is the primary key on `prices`, so
+    upserting is idempotent - re-fetched days just overwrite the same rows.
+
+Tiered price storage (see sql/001_optimize_prices_storage.sql and
+bucket_by_age's docstring for the exact rules):
+  - Younger than 1 year: individual daily ('D') rows, as before.
+  - 1-5 years: OHLC-resampled into one weekly ('W') row per fully-elapsed
+    ISO week.
+  - 5+ years: OHLC-resampled into one monthly ('M') row per fully-elapsed
+    calendar month.
+  compact_ticker sweeps every known ticker's already-stored rows on each
+  run, promoting buckets to a coarser tier as they age past a cutoff -
+  this is what keeps `prices` from re-growing back to its pre-migration
+  size as time passes.
 
 Which ETFs/stocks are tracked is entirely DB-driven, not a hardcoded list -
 see market_data.list_etfs for ETFs and scripts/add_ticker.py for stocks -
