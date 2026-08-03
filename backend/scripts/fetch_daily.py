@@ -243,7 +243,7 @@ def main():
         return
 
     print("\nSyncing stock prices...")
-    today = date.today().isoformat()
+    today_date = date.today()
     total_rows = 0
     failed = list(etf_failures)
 
@@ -257,15 +257,24 @@ def main():
             failed.append(ticker_id)
             continue
 
-        if rows:
-            client.table("prices").upsert(rows).execute()
-            total_rows += len(rows)
+        if period == BACKFILL_PERIOD:
+            # Full history - tier it by age so a brand-new ticker never
+            # even transiently stores years of raw daily rows.
+            price_rows = bucket_by_age(rows, today_date)
+        else:
+            # Top-up fetches only ever cover the last few days, always
+            # within the daily tier.
+            price_rows = [{**row, "granularity": "D"} for row in rows]
+
+        if price_rows:
+            client.table("prices").upsert(price_rows).execute()
+            total_rows += len(price_rows)
         if dividend_events:
             client.table("dividends").upsert(dividend_events).execute()
         if split_events:
             client.table("splits").upsert(split_events).execute()
 
-        client.table("ticker").update({"last_fetch": today}).eq("id", ticker_id).execute()
+        client.table("ticker").update({"last_fetch": today_date.isoformat()}).eq("id", ticker_id).execute()
 
         metadata_note = ""
         try:
@@ -283,7 +292,7 @@ def main():
             failed.append(ticker_id)
             metadata_note = ", metadata failed"
 
-        print(f"  {ticker_id:8s} {len(rows):4d} rows  ({period}){metadata_note}")
+        print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){metadata_note}")
 
     print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
     if failed:
