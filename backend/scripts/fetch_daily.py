@@ -179,6 +179,71 @@ def bucket_by_age(rows: list[dict], today: date) -> list[dict]:
     return result
 
 
+def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
+    """Sweep rows already stored for one ticker, compacting any bucket that
+    has fully elapsed past its cutoff since the last run: daily rows into
+    weekly candles once their ISO week is fully past WEEKLY_TIER_START_DAYS,
+    and daily/weekly rows into monthly candles once their calendar month is
+    fully past MONTHLY_TIER_START_DAYS (see bucket_by_age's docstring for
+    why "fully elapsed" matters). A bucket with no matching source rows
+    left - already compacted by a prior run - is naturally skipped, so this
+    is safe to call for every known ticker on every daily job run. Returns
+    (weeks_compacted, months_compacted).
+    """
+    weekly_cutoff = today - timedelta(days=WEEKLY_TIER_START_DAYS)
+    monthly_cutoff = today - timedelta(days=MONTHLY_TIER_START_DAYS)
+
+    # ── Daily -> weekly ──
+    daily_rows = (
+        client.table("prices")
+        .select("ticker,date,open,high,low,close,volume")
+        .eq("ticker", ticker_id)
+        .eq("granularity", "D")
+        .lt("date", weekly_cutoff.isoformat())
+        .execute()
+    ).data
+
+    week_groups: dict[date, list[dict]] = {}
+    for row in daily_rows:
+        d = date.fromisoformat(row["date"])
+        week_start = _week_start(d)
+        if week_start + timedelta(days=6) < weekly_cutoff:
+            week_groups.setdefault(week_start, []).append(row)
+
+    for week_start, bucket_rows in week_groups.items():
+        client.table("prices").upsert(_resample(bucket_rows, week_start, "W")).execute()
+        client.table("prices").delete().eq("ticker", ticker_id).eq("granularity", "D").in_(
+            "date", [r["date"] for r in bucket_rows]
+        ).execute()
+
+    # ── Daily/weekly -> monthly ──
+    coarse_rows = (
+        client.table("prices")
+        .select("ticker,date,open,high,low,close,volume,granularity")
+        .eq("ticker", ticker_id)
+        .in_("granularity", ["D", "W"])
+        .lt("date", monthly_cutoff.isoformat())
+        .execute()
+    ).data
+
+    month_groups: dict[date, list[dict]] = {}
+    for row in coarse_rows:
+        d = date.fromisoformat(row["date"])
+        if _month_end(d) < monthly_cutoff:
+            month_groups.setdefault(_month_start(d), []).append(row)
+
+    for month_start, bucket_rows in month_groups.items():
+        client.table("prices").upsert(_resample(bucket_rows, month_start, "M")).execute()
+        for granularity in ("D", "W"):
+            dates = [r["date"] for r in bucket_rows if r["granularity"] == granularity]
+            if dates:
+                client.table("prices").delete().eq("ticker", ticker_id).eq(
+                    "granularity", granularity
+                ).in_("date", dates).execute()
+
+    return len(week_groups), len(month_groups)
+
+
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     """Refresh etfs/etf_holdings for every ETF already tracked in Supabase
     (market_data.list_etfs) - this only ever refreshes existing rows, it
@@ -295,6 +360,25 @@ def main():
         print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){metadata_note}")
 
     print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
+
+    # Compact aged rows for every known ticker, not just active ones -
+    # inactive tickers stop getting top-ups but their old data still needs
+    # to shrink over time.
+    print("\nCompacting aged price rows...")
+    weeks_compacted = months_compacted = 0
+    for ticker_id in sorted(all_ticker_ids):
+        try:
+            weeks, months = compact_ticker(client, ticker_id, today_date)
+        except Exception as e:
+            print(f"  FAILED  {ticker_id:8s} {e}")
+            failed.append(ticker_id)
+            continue
+        weeks_compacted += weeks
+        months_compacted += months
+        if weeks or months:
+            print(f"  {ticker_id:8s} {weeks} week(s), {months} month(s) compacted")
+    print(f"Done: {weeks_compacted} week(s), {months_compacted} month(s) compacted overall.")
+
     if failed:
         print(f"Failed: {', '.join(failed)}")
         sys.exit(1)
