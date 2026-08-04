@@ -9,6 +9,7 @@ on:
         options:
           - vaneck
           - spdr
+          - ark
         default: vaneck
       dry_run:
         description: "Preview changes without writing to Supabase"
