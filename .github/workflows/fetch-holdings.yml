@@ -11,6 +11,7 @@ on:
           - spdr
           - ark
           - ishares
+          - vanguard
         default: vaneck
       dry_run:
         description: "Preview changes without writing to Supabase"
