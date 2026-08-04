@@ -57,7 +57,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.fetch_daily import BACKFILL_PERIOD, fetch_ticker_rows
+from scripts.fetch_daily import BACKFILL_PERIOD, bucket_by_age, fetch_ticker_rows
 from services.market_data import (
     DUPLICATE_TICKERS,
     _get_etf_info_live,
@@ -208,15 +208,19 @@ def complete_etf_metadata(client, holdings_by_etf, etf_ids, dry_run) -> tuple[in
 
 
 def validate_and_build_ticker(sym, holding_names):
-    """Validate a candidate and assemble its `ticker` row + price backfill.
+    """Validate a candidate and assemble its `ticker` row + backfill payloads.
 
-    Returns (row, price_rows, None) on success, (None, None, reason) on
-    rejection. The single fetch_ticker_rows call doubles as the "yfinance
-    actually has data" validation and the backfill payload.
+    Returns (row, price_rows, dividend_events, split_events, None) on
+    success, (None, None, None, None, reason) on rejection. The single
+    fetch_ticker_rows call doubles as the "yfinance actually has data"
+    validation and the backfill payload; price rows are tiered by age via
+    bucket_by_age, same as fetch_daily's own backfill path, so a long
+    history is never stored flat.
     """
-    price_rows = fetch_ticker_rows(sym, BACKFILL_PERIOD)
-    if not price_rows:
-        return None, None, "no yfinance price history"
+    rows, dividend_events, split_events = fetch_ticker_rows(sym, BACKFILL_PERIOD)
+    if not rows:
+        return None, None, None, None, "no yfinance price history"
+    price_rows = bucket_by_age(rows, date.today())
 
     try:
         live = _get_stock_info_live(sym)
@@ -246,7 +250,7 @@ def validate_and_build_ticker(sym, holding_names):
             "website": None,
         }
 
-    return row, price_rows, None
+    return row, price_rows, dividend_events, split_events, None
 
 
 def insert_new_tickers(client, candidates, holding_names, dry_run):
@@ -258,7 +262,7 @@ def insert_new_tickers(client, candidates, holding_names, dry_run):
 
     for sym in sorted(candidates):
         try:
-            row, price_rows, reason = validate_and_build_ticker(sym, holding_names)
+            row, price_rows, dividend_events, split_events, reason = validate_and_build_ticker(sym, holding_names)
         except Exception as e:
             print(f"  FAILED  {sym:8s} {e}")
             failed.append(sym)
@@ -276,6 +280,10 @@ def insert_new_tickers(client, candidates, holding_names, dry_run):
                 client.table("ticker").upsert(row).execute()
                 for i in range(0, len(price_rows), PRICE_UPSERT_CHUNK):
                     client.table("prices").upsert(price_rows[i:i + PRICE_UPSERT_CHUNK]).execute()
+                if dividend_events:
+                    client.table("dividends").upsert(dividend_events).execute()
+                if split_events:
+                    client.table("splits").upsert(split_events).execute()
                 client.table("ticker").update({"last_fetch": today}).eq("id", sym).execute()
             except Exception as e:
                 # last_fetch is only stamped after a full backfill, so a
@@ -296,10 +304,11 @@ def prune_below_threshold(client, min_weight, dry_run):
     the ETFs that hold it - the mirror of the insert gate, applied DB-wide.
 
     Stocks held by no ETF at all (hand-added via scripts/add_ticker.py) are
-    never pruned. Deletion follows the FK order: etf_holdings and prices
-    rows first, then the ticker row itself. Prices are re-fetchable, so a
-    stock crossing back above the threshold later is simply re-inserted and
-    re-backfilled by a future run.
+    never pruned. Deletion follows the FK order: etf_holdings, prices,
+    dividends, and splits rows first (ticker.id can't be deleted while any
+    of them still reference it), then the ticker row itself. Prices are
+    re-fetchable, so a stock crossing back above the threshold later is
+    simply re-inserted and re-backfilled by a future run.
     """
     resp = client.table("etf_holdings").select("ticker,weight").execute()
     max_weight: dict[str, float] = {}
@@ -322,6 +331,8 @@ def prune_below_threshold(client, min_weight, dry_run):
         try:
             client.table("etf_holdings").delete().eq("ticker", sym).execute()
             client.table("prices").delete().eq("ticker", sym).execute()
+            client.table("dividends").delete().eq("ticker", sym).execute()
+            client.table("splits").delete().eq("ticker", sym).execute()
             client.table("ticker").delete().eq("id", sym).execute()
         except Exception as e:
             print(f"  FAILED  {sym:8s} {e}")
