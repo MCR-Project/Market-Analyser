@@ -1,7 +1,11 @@
 """
 Daily data-refresh job:
   - Fetches OHLCV history for every active ticker from yfinance and upserts
-    it into Supabase, then stamps ticker.last_fetch.
+    it into Supabase, then stamps ticker.last_fetch. Dividend/split events
+    go into their own sparse `dividends`/`splits` tables, not `prices`.
+  - Compacts aged price rows for every known ticker (active or not) into
+    coarser granularity, so `prices` doesn't grow unbounded with history
+    the product never displays past 5 years (see issue #10).
   - Refreshes each active ticker's stock metadata (sector, market cap,
     currency, exchange, logo, website) so get_stock_info can be fully
     DB-read - market cap will be as fresh as this run.
@@ -15,11 +19,26 @@ Runs on a schedule via .github/workflows/fetch-daily.yml.
 Backfill vs top-up:
   - A ticker whose last_fetch is null gets a full-history backfill, back to
     the ticker's origin (null is the column default, so this is true for
-    any ticker scripts/add_ticker.py has just added).
+    any ticker scripts/add_ticker.py has just added). The fetched history
+    is immediately tiered by age (see bucket_by_age) rather than stored
+    flat, so a long-lived ticker's backfill never even transiently holds
+    years of raw daily rows.
   - A ticker that's already been fetched gets a 5-day top-up, which covers
-    weekends, holidays, and the odd missed run. (ticker, date) is the
-    primary key on `prices`, so upserting is idempotent - re-fetched days
-    just overwrite the same rows.
+    weekends, holidays, and the odd missed run - always within the daily
+    tier. (ticker, date, granularity) is the primary key on `prices`, so
+    upserting is idempotent - re-fetched days just overwrite the same rows.
+
+Tiered price storage (see sql/001_optimize_prices_storage.sql and
+bucket_by_age's docstring for the exact rules):
+  - Younger than 1 year: individual daily ('D') rows, as before.
+  - 1-5 years: OHLC-resampled into one weekly ('W') row per fully-elapsed
+    ISO week.
+  - 5+ years: OHLC-resampled into one monthly ('M') row per fully-elapsed
+    calendar month.
+  compact_ticker sweeps every known ticker's already-stored rows on each
+  run, promoting buckets to a coarser tier as they age past a cutoff -
+  this is what keeps `prices` from re-growing back to its pre-migration
+  size as time passes.
 
 Which ETFs/stocks are tracked is entirely DB-driven, not a hardcoded list -
 see market_data.list_etfs for ETFs and scripts/add_ticker.py for stocks -
@@ -28,7 +47,7 @@ automatically fetch tickers and etfs" issue).
 """
 
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -42,6 +61,13 @@ from services.supabase_client import get_client
 BACKFILL_PERIOD = "max"  # first-ever fetch for a ticker - full available history
 TOPUP_PERIOD = "5d"      # every subsequent daily run
 
+# Age tiers for `prices` granularity (see sql/001_optimize_prices_storage.sql):
+# rows younger than WEEKLY_TIER_START_DAYS stay daily ('D'); rows between
+# that and MONTHLY_TIER_START_DAYS get compacted into weekly ('W') OHLC
+# candles; older rows get compacted into monthly ('M') candles.
+WEEKLY_TIER_START_DAYS = 365
+MONTHLY_TIER_START_DAYS = 5 * 365
+
 
 def _safe_float(v):
     if v is None:
@@ -50,28 +76,191 @@ def _safe_float(v):
     return round(f, 4) if not np.isnan(f) else None
 
 
-def fetch_ticker_rows(ticker_id: str, period: str) -> list[dict]:
+def fetch_ticker_rows(ticker_id: str, period: str) -> tuple[list[dict], list[dict], list[dict]]:
+    """Fetch OHLCV history for a ticker, split into three upsert-ready
+    payloads: price rows (open/high/low/close/volume only - dividends and
+    splits live in their own sparse `dividends`/`splits` tables now, see
+    sql/001_optimize_prices_storage.sql), and dividend/split events (only
+    non-zero occurrences - most rows have neither)."""
     hist = yf.Ticker(ticker_id).history(period=period, auto_adjust=False)
     if hist.empty:
-        return []
+        return [], [], []
 
     hist = hist.dropna(subset=["Close"])
 
     rows = []
+    dividend_events = []
+    split_events = []
     for idx, r in hist.iterrows():
+        date_str = idx.strftime("%Y-%m-%d")
         volume = r.get("Volume", 0)
         rows.append({
             "ticker": ticker_id,
-            "date": idx.strftime("%Y-%m-%d"),
+            "date": date_str,
             "open": _safe_float(r.get("Open")),
             "high": _safe_float(r.get("High")),
             "low": _safe_float(r.get("Low")),
             "close": _safe_float(r.get("Close")),
             "volume": int(volume) if volume is not None and not np.isnan(volume) else 0,
-            "dividends": _safe_float(r.get("Dividends")) or 0,
-            "splits": _safe_float(r.get("Stock Splits")) or 0,
         })
-    return rows
+
+        dividend = _safe_float(r.get("Dividends")) or 0
+        if dividend:
+            dividend_events.append({"ticker": ticker_id, "date": date_str, "dividends": dividend})
+
+        split = _safe_float(r.get("Stock Splits")) or 0
+        if split:
+            split_events.append({"ticker": ticker_id, "date": date_str, "splits": split})
+
+    return rows, dividend_events, split_events
+
+
+def _week_start(d: date) -> date:
+    return d - timedelta(days=d.weekday())  # Monday of d's ISO week
+
+
+def _month_start(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _month_end(d: date) -> date:
+    next_month = d.replace(day=28) + timedelta(days=4)  # jump into next month
+    return _month_start(next_month) - timedelta(days=1)
+
+
+def _agg(bucket_rows: list[dict], key: str, fn) -> float | None:
+    values = [r[key] for r in bucket_rows if r[key] is not None]
+    return fn(values) if values else None
+
+
+def _resample(bucket_rows: list[dict], bucket_date: date, granularity: str) -> dict:
+    """Collapse same-ticker daily rows sharing a bucket into one OHLCV row:
+    open = the bucket's first open, high = max of the bucket's highs,
+    low = min of the bucket's lows, close = the bucket's last close,
+    volume = summed daily volume."""
+    bucket_rows = sorted(bucket_rows, key=lambda r: r["date"])
+    return {
+        "ticker": bucket_rows[0]["ticker"],
+        "date": bucket_date.isoformat(),
+        "granularity": granularity,
+        "open": bucket_rows[0]["open"],
+        "high": _agg(bucket_rows, "high", max),
+        "low": _agg(bucket_rows, "low", min),
+        "close": bucket_rows[-1]["close"],
+        "volume": sum(r["volume"] for r in bucket_rows),
+    }
+
+
+def bucket_by_age(rows: list[dict], today: date) -> list[dict]:
+    """Classify daily {ticker,date,open,high,low,close,volume} rows into
+    tiered `prices` granularity based on age relative to `today`:
+      - Younger than WEEKLY_TIER_START_DAYS: kept as individual daily
+        ('D') rows.
+      - Fully-elapsed ISO weeks between the weekly and monthly cutoffs:
+        OHLC-resampled into one weekly ('W') row per week.
+      - Fully-elapsed calendar months past the monthly cutoff: resampled
+        into one monthly ('M') row per month.
+
+    A week/month is only ever compacted once it has FULLY elapsed past its
+    cutoff (every one of its days is already older than the cutoff) - so
+    each bucket gets aggregated exactly once, from complete data, whether
+    it's compacted here (on a fresh backfill fetch) or later by
+    compact_ticker (sweeping rows already sitting in the DB as they age).
+    A day whose week/month hasn't fully elapsed yet is left daily for now;
+    a later run's compact_ticker sweep will catch it once it has.
+    """
+    weekly_cutoff = today - timedelta(days=WEEKLY_TIER_START_DAYS)
+    monthly_cutoff = today - timedelta(days=MONTHLY_TIER_START_DAYS)
+
+    daily_rows = []
+    week_buckets: dict[date, list[dict]] = {}
+    month_buckets: dict[date, list[dict]] = {}
+
+    for row in rows:
+        d = date.fromisoformat(row["date"])
+        if d >= weekly_cutoff:
+            daily_rows.append({**row, "granularity": "D"})
+            continue
+
+        if _month_end(d) < monthly_cutoff:
+            month_buckets.setdefault(_month_start(d), []).append(row)
+            continue
+
+        week_end = _week_start(d) + timedelta(days=6)
+        if week_end < weekly_cutoff:
+            week_buckets.setdefault(_week_start(d), []).append(row)
+        else:
+            daily_rows.append({**row, "granularity": "D"})
+
+    result = daily_rows
+    result += [_resample(rs, d, "W") for d, rs in week_buckets.items()]
+    result += [_resample(rs, d, "M") for d, rs in month_buckets.items()]
+    return result
+
+
+def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
+    """Sweep rows already stored for one ticker, compacting any bucket that
+    has fully elapsed past its cutoff since the last run: daily rows into
+    weekly candles once their ISO week is fully past WEEKLY_TIER_START_DAYS,
+    and daily/weekly rows into monthly candles once their calendar month is
+    fully past MONTHLY_TIER_START_DAYS (see bucket_by_age's docstring for
+    why "fully elapsed" matters). A bucket with no matching source rows
+    left - already compacted by a prior run - is naturally skipped, so this
+    is safe to call for every known ticker on every daily job run. Returns
+    (weeks_compacted, months_compacted).
+    """
+    weekly_cutoff = today - timedelta(days=WEEKLY_TIER_START_DAYS)
+    monthly_cutoff = today - timedelta(days=MONTHLY_TIER_START_DAYS)
+
+    # ── Daily -> weekly ──
+    daily_rows = (
+        client.table("prices")
+        .select("ticker,date,open,high,low,close,volume")
+        .eq("ticker", ticker_id)
+        .eq("granularity", "D")
+        .lt("date", weekly_cutoff.isoformat())
+        .execute()
+    ).data
+
+    week_groups: dict[date, list[dict]] = {}
+    for row in daily_rows:
+        d = date.fromisoformat(row["date"])
+        week_start = _week_start(d)
+        if week_start + timedelta(days=6) < weekly_cutoff:
+            week_groups.setdefault(week_start, []).append(row)
+
+    for week_start, bucket_rows in week_groups.items():
+        client.table("prices").upsert(_resample(bucket_rows, week_start, "W")).execute()
+        client.table("prices").delete().eq("ticker", ticker_id).eq("granularity", "D").in_(
+            "date", [r["date"] for r in bucket_rows]
+        ).execute()
+
+    # ── Daily/weekly -> monthly ──
+    coarse_rows = (
+        client.table("prices")
+        .select("ticker,date,open,high,low,close,volume,granularity")
+        .eq("ticker", ticker_id)
+        .in_("granularity", ["D", "W"])
+        .lt("date", monthly_cutoff.isoformat())
+        .execute()
+    ).data
+
+    month_groups: dict[date, list[dict]] = {}
+    for row in coarse_rows:
+        d = date.fromisoformat(row["date"])
+        if _month_end(d) < monthly_cutoff:
+            month_groups.setdefault(_month_start(d), []).append(row)
+
+    for month_start, bucket_rows in month_groups.items():
+        client.table("prices").upsert(_resample(bucket_rows, month_start, "M")).execute()
+        for granularity in ("D", "W"):
+            dates = [r["date"] for r in bucket_rows if r["granularity"] == granularity]
+            if dates:
+                client.table("prices").delete().eq("ticker", ticker_id).eq(
+                    "granularity", granularity
+                ).in_("date", dates).execute()
+
+    return len(week_groups), len(month_groups)
 
 
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
@@ -138,7 +327,7 @@ def main():
         return
 
     print("\nSyncing stock prices...")
-    today = date.today().isoformat()
+    today_date = date.today()
     total_rows = 0
     failed = list(etf_failures)
 
@@ -146,17 +335,30 @@ def main():
         ticker_id = ticker["id"]
         period = BACKFILL_PERIOD if not ticker["last_fetch"] else TOPUP_PERIOD
         try:
-            rows = fetch_ticker_rows(ticker_id, period)
+            rows, dividend_events, split_events = fetch_ticker_rows(ticker_id, period)
         except Exception as e:
             print(f"  FAILED  {ticker_id:8s} {e}")
             failed.append(ticker_id)
             continue
 
-        if rows:
-            client.table("prices").upsert(rows).execute()
-            total_rows += len(rows)
+        if period == BACKFILL_PERIOD:
+            # Full history - tier it by age so a brand-new ticker never
+            # even transiently stores years of raw daily rows.
+            price_rows = bucket_by_age(rows, today_date)
+        else:
+            # Top-up fetches only ever cover the last few days, always
+            # within the daily tier.
+            price_rows = [{**row, "granularity": "D"} for row in rows]
 
-        client.table("ticker").update({"last_fetch": today}).eq("id", ticker_id).execute()
+        if price_rows:
+            client.table("prices").upsert(price_rows).execute()
+            total_rows += len(price_rows)
+        if dividend_events:
+            client.table("dividends").upsert(dividend_events).execute()
+        if split_events:
+            client.table("splits").upsert(split_events).execute()
+
+        client.table("ticker").update({"last_fetch": today_date.isoformat()}).eq("id", ticker_id).execute()
 
         metadata_note = ""
         try:
@@ -174,9 +376,28 @@ def main():
             failed.append(ticker_id)
             metadata_note = ", metadata failed"
 
-        print(f"  {ticker_id:8s} {len(rows):4d} rows  ({period}){metadata_note}")
+        print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){metadata_note}")
 
     print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
+
+    # Compact aged rows for every known ticker, not just active ones -
+    # inactive tickers stop getting top-ups but their old data still needs
+    # to shrink over time.
+    print("\nCompacting aged price rows...")
+    weeks_compacted = months_compacted = 0
+    for ticker_id in sorted(all_ticker_ids):
+        try:
+            weeks, months = compact_ticker(client, ticker_id, today_date)
+        except Exception as e:
+            print(f"  FAILED  {ticker_id:8s} {e}")
+            failed.append(ticker_id)
+            continue
+        weeks_compacted += weeks
+        months_compacted += months
+        if weeks or months:
+            print(f"  {ticker_id:8s} {weeks} week(s), {months} month(s) compacted")
+    print(f"Done: {weeks_compacted} week(s), {months_compacted} month(s) compacted overall.")
+
     if failed:
         print(f"Failed: {', '.join(failed)}")
         sys.exit(1)
