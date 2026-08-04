@@ -26,7 +26,7 @@ in `.env` — see `.env.example`):
   run from the repo root (deps in `fetcher/requirements.txt`, no API key):
   scrapes the provider's website for its full ETF holdings and writes them
   as JSON (schema in `fetcher/common.py`). One fetcher per provider lives
-  in `fetcher/` (`vaneck.py`, `spdr.py`, `ark.py`).
+  in `fetcher/` (`vaneck.py`, `spdr.py`, `ark.py`, `ishares.py`).
 - `python scripts/complete_database.py --holdings-json ../vaneck_holdings.json
   [--dry-run] [--etfs SMH]` — complete the ETFs already in the `etfs` table
   from a holdings JSON: fill missing metadata, validate each new constituent
