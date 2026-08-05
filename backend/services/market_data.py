@@ -47,10 +47,10 @@ def list_etfs() -> list[str]:
 
     This is the source of truth for "which ETFs does this app track" -
     there's no hardcoded list. New ETFs enter the tracked set by being
-    inserted into `etfs` (there's no add_etf.py script yet, unlike
-    scripts/add_ticker.py for stocks - for now that means an insert via the
-    Supabase dashboard/SQL, then the next scripts/fetch_daily.py run
-    refreshes its info/holdings).
+    inserted into `etfs` (an insert via the Supabase dashboard/SQL), then
+    scripts/complete_database.py completes their metadata, constituent
+    tickers, and price history, and scripts/fetch_daily.py keeps them
+    fresh from then on.
 
     Returns an empty list if Supabase is unreachable or unconfigured -
     callers should treat that as "nothing to track" rather than crashing.
