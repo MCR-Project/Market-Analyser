@@ -7,9 +7,12 @@ Automatically retrieves:
   2. The holdings of each ETF (stocks held + weights, when applicable)
 
 No API key required: relies on ark-funds.com's public pages and the AJAX
-endpoint behind their "Full Holdings CSV" download link.
+endpoint behind their "Full Holdings CSV" download link. Talks to them
+through fetcher/common.py's Playwright-backed BrowserSession rather than
+plain requests - see that module's docstring.
 
-Usage (from the repo root, deps in fetcher/requirements.txt):
+Usage (from the repo root, deps in fetcher/requirements.txt, plus a
+one-time `playwright install chromium`):
     python fetcher/ark.py
     python fetcher/ark.py --output ark_holdings.json --delay 1.5
     python fetcher/ark.py --limit 3           # quick test on 3 ETFs
@@ -47,9 +50,8 @@ import time
 from typing import List, Optional, Tuple
 
 import pandas as pd
-import requests
 
-from common import HEADERS, EtfFund, EtfHolding, EtfResult, write_output
+from common import BrowserSession, EtfFund, EtfHolding, EtfResult, browser_session, write_output
 
 FUND_LIST_URL = "https://ark-funds.com/"
 FUND_PAGE_TEMPLATE = "https://ark-funds.com/funds/{slug}"
@@ -162,17 +164,16 @@ def parse_holdings_csv(csv_bytes: bytes) -> Tuple[List[EtfHolding], Optional[str
     return holdings, None
 
 
-def fetch_etf_list(session: requests.Session, delay: float = 0.0) -> List[EtfFund]:
-    resp = session.get(FUND_LIST_URL, headers=HEADERS, timeout=20)
+def fetch_etf_list(session: BrowserSession, delay: float = 0.0) -> List[EtfFund]:
+    resp = session.get(FUND_LIST_URL, timeout=20)
     resp.raise_for_status()
     slugs = get_fund_slugs(resp.text)
 
     funds: List[EtfFund] = []
     for slug in slugs:
-        page = session.get(FUND_PAGE_TEMPLATE.format(slug=slug), headers=HEADERS, timeout=20)
-        page.raise_for_status()
-        page.encoding = "utf-8"
-        fund = get_fund_details(slug, page.text)
+        fund_resp = session.get(FUND_PAGE_TEMPLATE.format(slug=slug), timeout=20)
+        fund_resp.raise_for_status()
+        fund = get_fund_details(slug, fund_resp.text)
         if fund is not None:
             funds.append(fund)
         if delay:
@@ -180,10 +181,9 @@ def fetch_etf_list(session: requests.Session, delay: float = 0.0) -> List[EtfFun
     return funds
 
 
-def fetch_etf_holdings(session: requests.Session, fund_id: str) -> Tuple[List[EtfHolding], Optional[str]]:
+def fetch_etf_holdings(session: BrowserSession, fund_id: str) -> Tuple[List[EtfHolding], Optional[str]]:
     resp = session.get(
         HOLDINGS_API_TEMPLATE.format(fund_id=fund_id),
-        headers=HEADERS,
         params={"fundHoldingData": json.dumps(HOLDINGS_API_PAYLOAD)},
         timeout=20,
     )
@@ -196,7 +196,7 @@ def fetch_etf_holdings(session: requests.Session, fund_id: str) -> Tuple[List[Et
     # Fund names with a "&" (e.g. ARKQ's "Tech. & Robotics") come back
     # HTML-entity-escaped ("&amp;") in the href - unescape before requesting.
     csv_url = html.unescape(csv_m.group(1))
-    csv_resp = session.get(csv_url, headers=HEADERS, timeout=30)
+    csv_resp = session.get(csv_url, timeout=30)
     csv_resp.raise_for_status()
     return parse_holdings_csv(csv_resp.content)
 
@@ -209,35 +209,34 @@ def main():
     parser.add_argument("--tickers", nargs="+", metavar="ID", help="Only fetch these fund tickers (e.g. ARKK ARKQ)")
     args = parser.parse_args()
 
-    session = requests.Session()
+    with browser_session() as session:
+        print("Fetching the ARK ETF list...")
+        funds = fetch_etf_list(session, delay=args.delay)
+        print(f"{len(funds)} ETFs found.")
 
-    print("Fetching the ARK ETF list...")
-    funds = fetch_etf_list(session, delay=args.delay)
-    print(f"{len(funds)} ETFs found.")
+        if args.tickers:
+            wanted = {t.strip().upper() for t in args.tickers}
+            funds = [f for f in funds if f.ticker.upper() in wanted]
+            missing = wanted - {f.ticker.upper() for f in funds}
+            if missing:
+                print(f"Not in the ARK fund list: {', '.join(sorted(missing))}")
+        if args.limit:
+            funds = funds[: args.limit]
 
-    if args.tickers:
-        wanted = {t.strip().upper() for t in args.tickers}
-        funds = [f for f in funds if f.ticker.upper() in wanted]
-        missing = wanted - {f.ticker.upper() for f in funds}
-        if missing:
-            print(f"Not in the ARK fund list: {', '.join(sorted(missing))}")
-    if args.limit:
-        funds = funds[: args.limit]
-
-    results: List[EtfResult] = []
-    for i, fund in enumerate(funds, start=1):
-        print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
-        try:
-            holdings, note = fetch_etf_holdings(session, fund.holdings_url)
-            results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
-            if note:
-                print(f"OK - {note}")
-            else:
-                print(f"OK ({len(holdings)} positions)")
-        except Exception as exc:  # keep going even if one fund fails
-            results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
-            print(f"FAILED ({exc})")
-        time.sleep(args.delay)
+        results: List[EtfResult] = []
+        for i, fund in enumerate(funds, start=1):
+            print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
+            try:
+                holdings, note = fetch_etf_holdings(session, fund.holdings_url)
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
+                if note:
+                    print(f"OK - {note}")
+                else:
+                    print(f"OK ({len(holdings)} positions)")
+            except Exception as exc:  # keep going even if one fund fails
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
+                print(f"FAILED ({exc})")
+            time.sleep(args.delay)
 
     write_output(results, args.output)
 
