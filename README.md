@@ -23,10 +23,18 @@ in `.env` — see `.env.example`):
 - `python scripts/add_ticker.py NVDA "AAPL:Apple Inc."` — manually add or
   update tickers.
 - `python fetcher/vaneck.py --output vaneck_holdings.json [--limit N]` —
-  run from the repo root (deps in `fetcher/requirements.txt`, no API key):
-  scrapes the provider's website for its full ETF holdings and writes them
-  as JSON (schema in `fetcher/common.py`). One fetcher per provider lives
-  in `fetcher/` (`vaneck.py`, `spdr.py`, `ark.py`, `ishares.py`, `vanguard.py`).
+  run from the repo root (deps in `fetcher/requirements.txt`, plus a
+  one-time `playwright install chromium`; no API key): scrapes the
+  provider's website for its full ETF holdings and writes them as JSON
+  (schema in `fetcher/common.py`). Each fetcher talks to its provider
+  through `fetcher/common.py`'s `BrowserSession`, a Playwright-backed
+  session — a real browser context for every provider, not just the ones
+  that need it, which is what makes `fetcher/invesco.py` possible: unlike
+  the others, invesco.com blocks plain HTTP clients outright, and only a
+  real page load (not just a normal HTTP request, even with borrowed
+  cookies) gets past it. One fetcher per provider lives in `fetcher/`
+  (`vaneck.py`, `spdr.py`, `ark.py`, `ishares.py`, `vanguard.py`,
+  `invesco.py`).
 - `python scripts/complete_database.py --holdings-json ../vaneck_holdings.json
   [--dry-run] [--etfs SMH]` — complete the ETFs already in the `etfs` table
   from a holdings JSON: fill missing metadata, validate each new constituent

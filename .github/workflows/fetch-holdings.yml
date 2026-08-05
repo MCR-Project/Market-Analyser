@@ -12,6 +12,7 @@ on:
           - ark
           - ishares
           - vanguard
+          - invesco
         default: vaneck
       dry_run:
         description: "Preview changes without writing to Supabase"
@@ -36,6 +37,7 @@ jobs:
         run: |
           pip install -r fetcher/requirements.txt
           pip install -r backend/requirements.txt
+          playwright install --with-deps chromium
 
       - name: Fetch holdings from ${{ inputs.provider }}
         run: python fetcher/${{ inputs.provider }}.py --output holdings.json ${{ inputs.limit != '' && format('--limit {0}', inputs.limit) || '' }}
