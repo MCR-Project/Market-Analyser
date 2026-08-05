@@ -7,9 +7,12 @@ Automatically retrieves:
   2. The stock holdings of each ETF (stocks held + weights, when applicable)
 
 No API key required: relies on investor.vanguard.com's public endpoints -
-the same ones the fund profile pages themselves call.
+the same ones the fund profile pages themselves call. Talks to them
+through fetcher/common.py's Playwright-backed BrowserSession rather than
+plain requests - see that module's docstring.
 
-Usage (from the repo root, deps in fetcher/requirements.txt):
+Usage (from the repo root, deps in fetcher/requirements.txt, plus a
+one-time `playwright install chromium`):
     python fetcher/vanguard.py
     python fetcher/vanguard.py --output vanguard_holdings.json --delay 1.5
     python fetcher/vanguard.py --limit 5             # quick test on 5 ETFs
@@ -47,9 +50,7 @@ import argparse
 import time
 from typing import List, Optional, Tuple
 
-import requests
-
-from common import HEADERS, EtfFund, EtfHolding, EtfResult, write_output
+from common import BrowserSession, EtfFund, EtfHolding, EtfResult, browser_session, write_output
 
 BASE_URL = "https://investor.vanguard.com"
 FUND_LIST_URL = "https://investor.vanguard.com/investment-products/list/funddetail/all"
@@ -130,16 +131,15 @@ def parse_holdings_response(payload: dict) -> Tuple[List[EtfHolding], Optional[s
     return holdings, None
 
 
-def fetch_etf_list(session: requests.Session) -> List[EtfFund]:
-    resp = session.get(FUND_LIST_URL, headers=HEADERS, timeout=30)
+def fetch_etf_list(session: BrowserSession) -> List[EtfFund]:
+    resp = session.get(FUND_LIST_URL, timeout=30)
     resp.raise_for_status()
     return get_etf_list(resp.json())
 
 
-def fetch_etf_holdings(session: requests.Session, ticker: str) -> Tuple[List[EtfHolding], Optional[str]]:
+def fetch_etf_holdings(session: BrowserSession, ticker: str) -> Tuple[List[EtfHolding], Optional[str]]:
     resp = session.get(
         HOLDINGS_URL_TEMPLATE.format(ticker=ticker),
-        headers=HEADERS,
         params=HOLDINGS_PARAMS,
         timeout=20,
     )
@@ -155,35 +155,34 @@ def main():
     parser.add_argument("--tickers", nargs="+", metavar="ID", help="Only fetch these fund tickers (e.g. VTI VXUS)")
     args = parser.parse_args()
 
-    session = requests.Session()
+    with browser_session() as session:
+        print("Fetching the Vanguard ETF list...")
+        funds = fetch_etf_list(session)
+        print(f"{len(funds)} ETFs found.")
 
-    print("Fetching the Vanguard ETF list...")
-    funds = fetch_etf_list(session)
-    print(f"{len(funds)} ETFs found.")
+        if args.tickers:
+            wanted = {t.strip().upper() for t in args.tickers}
+            funds = [f for f in funds if f.ticker.upper() in wanted]
+            missing = wanted - {f.ticker.upper() for f in funds}
+            if missing:
+                print(f"Not in the Vanguard fund list: {', '.join(sorted(missing))}")
+        if args.limit:
+            funds = funds[: args.limit]
 
-    if args.tickers:
-        wanted = {t.strip().upper() for t in args.tickers}
-        funds = [f for f in funds if f.ticker.upper() in wanted]
-        missing = wanted - {f.ticker.upper() for f in funds}
-        if missing:
-            print(f"Not in the Vanguard fund list: {', '.join(sorted(missing))}")
-    if args.limit:
-        funds = funds[: args.limit]
-
-    results: List[EtfResult] = []
-    for i, fund in enumerate(funds, start=1):
-        print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
-        try:
-            holdings, note = fetch_etf_holdings(session, fund.holdings_url)
-            results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
-            if note:
-                print(f"OK - {note}")
-            else:
-                print(f"OK ({len(holdings)} positions)")
-        except Exception as exc:  # keep going even if one fund fails
-            results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
-            print(f"FAILED ({exc})")
-        time.sleep(args.delay)
+        results: List[EtfResult] = []
+        for i, fund in enumerate(funds, start=1):
+            print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
+            try:
+                holdings, note = fetch_etf_holdings(session, fund.holdings_url)
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
+                if note:
+                    print(f"OK - {note}")
+                else:
+                    print(f"OK ({len(holdings)} positions)")
+            except Exception as exc:  # keep going even if one fund fails
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
+                print(f"FAILED ({exc})")
+            time.sleep(args.delay)
 
     write_output(results, args.output)
 
