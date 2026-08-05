@@ -5,9 +5,12 @@ Automatically retrieves:
   1. The full list of US SPDR ETFs (from ssga.com's fund-finder JSON API)
   2. The holdings of each ETF (stocks held + weights, when applicable)
 
-No API key required: relies on ssga.com's public endpoints.
+No API key required: relies on ssga.com's public endpoints. Talks to them
+through fetcher/common.py's Playwright-backed BrowserSession rather than
+plain requests - see that module's docstring.
 
-Usage (from the repo root, deps in fetcher/requirements.txt):
+Usage (from the repo root, deps in fetcher/requirements.txt, plus a
+one-time `playwright install chromium`):
     python fetcher/spdr.py
     python fetcher/spdr.py --output spdr_holdings.json --delay 1.5
     python fetcher/spdr.py --limit 5          # quick test on 5 ETFs
@@ -38,9 +41,8 @@ from typing import List, Optional, Tuple
 from urllib.parse import urljoin
 
 import pandas as pd
-import requests
 
-from common import HEADERS, EtfFund, EtfHolding, EtfResult, write_output
+from common import BrowserSession, EtfFund, EtfHolding, EtfResult, browser_session, write_output
 
 BASE_URL = "https://www.ssga.com"
 FUND_FINDER_URL = (
@@ -157,17 +159,17 @@ def parse_holdings_xlsx(xlsx_bytes: bytes) -> Tuple[List[EtfHolding], Optional[s
     return holdings, None
 
 
-def fetch_etf_list(session: requests.Session) -> List[EtfFund]:
-    resp = session.get(FUND_FINDER_URL, headers=HEADERS, timeout=20)
+def fetch_etf_list(session: BrowserSession) -> List[EtfFund]:
+    resp = session.get(FUND_FINDER_URL, timeout=20)
     resp.raise_for_status()
     return get_etf_list(resp.json())
 
 
-def fetch_etf_holdings(session: requests.Session, holdings_url: str) -> Tuple[List[EtfHolding], Optional[str]]:
-    resp = session.get(holdings_url, headers=HEADERS, timeout=30)
+def fetch_etf_holdings(session: BrowserSession, holdings_url: str) -> Tuple[List[EtfHolding], Optional[str]]:
+    resp = session.get(holdings_url, timeout=30)
     resp.raise_for_status()
 
-    content_type = resp.headers.get("Content-Type", "")
+    content_type = resp.headers.get("content-type", "")
     if "spreadsheet" not in content_type and "excel" not in content_type:
         raise ValueError(f"Unexpected response (Content-Type: {content_type}), not a valid XLSX file.")
 
@@ -182,35 +184,34 @@ def main():
     parser.add_argument("--tickers", nargs="+", metavar="ID", help="Only fetch these fund tickers (e.g. SPY MDY)")
     args = parser.parse_args()
 
-    session = requests.Session()
+    with browser_session() as session:
+        print("Fetching the SPDR ETF list...")
+        funds = fetch_etf_list(session)
+        print(f"{len(funds)} ETFs found.")
 
-    print("Fetching the SPDR ETF list...")
-    funds = fetch_etf_list(session)
-    print(f"{len(funds)} ETFs found.")
+        if args.tickers:
+            wanted = {t.strip().upper() for t in args.tickers}
+            funds = [f for f in funds if f.ticker.upper() in wanted]
+            missing = wanted - {f.ticker.upper() for f in funds}
+            if missing:
+                print(f"Not in the SPDR fund list: {', '.join(sorted(missing))}")
+        if args.limit:
+            funds = funds[: args.limit]
 
-    if args.tickers:
-        wanted = {t.strip().upper() for t in args.tickers}
-        funds = [f for f in funds if f.ticker.upper() in wanted]
-        missing = wanted - {f.ticker.upper() for f in funds}
-        if missing:
-            print(f"Not in the SPDR fund list: {', '.join(sorted(missing))}")
-    if args.limit:
-        funds = funds[: args.limit]
-
-    results: List[EtfResult] = []
-    for i, fund in enumerate(funds, start=1):
-        print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
-        try:
-            holdings, note = fetch_etf_holdings(session, fund.holdings_url)
-            results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
-            if note:
-                print(f"OK - {note}")
-            else:
-                print(f"OK ({len(holdings)} positions)")
-        except Exception as exc:  # keep going even if one fund fails
-            results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
-            print(f"FAILED ({exc})")
-        time.sleep(args.delay)
+        results: List[EtfResult] = []
+        for i, fund in enumerate(funds, start=1):
+            print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
+            try:
+                holdings, note = fetch_etf_holdings(session, fund.holdings_url)
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
+                if note:
+                    print(f"OK - {note}")
+                else:
+                    print(f"OK ({len(holdings)} positions)")
+            except Exception as exc:  # keep going even if one fund fails
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
+                print(f"FAILED ({exc})")
+            time.sleep(args.delay)
 
     write_output(results, args.output)
 
