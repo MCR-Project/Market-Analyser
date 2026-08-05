@@ -49,6 +49,11 @@
   --color-danger: #ff4d6d;
   --color-info: #4ea2ff;
 
+  /* Semantic status (theme-invariant - same accent/soft/ring pattern as --accent) */
+  --warning: var(--color-warning);
+  --warning-soft: color-mix(in oklab, var(--color-warning) 16%, transparent);
+  --warning-ring: color-mix(in oklab, var(--color-warning) 45%, transparent);
+
   /* Fonts */
   --font-display: "Manrope", ui-sans-serif, system-ui, sans-serif;
   --font-body: "Manrope", ui-sans-serif, system-ui, sans-serif;

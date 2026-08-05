@@ -17,10 +17,15 @@ export function useLiveEtf() {
   const switchEtf = useEtfStore((s) => s.switchEtf);
 
   const { data: etf, loading, error, retry } = useFetch(
-    () => api.getEtf(etfId),
+    (signal, force) => api.getEtf(etfId, { refresh: force }),
     [etfId],
     { fallback: null }
   );
+
+  // Bypasses the backend cache outright (see /api/etf's `refresh` param) -
+  // for the "this looks stale/incomplete" manual refresh action, where
+  // waiting out the normal retry()'s cache hit wouldn't help.
+  const forceRefresh = useCallback(() => retry(true), [retry]);
 
   const tickers = useMemo(() => etf?.holdings?.map(h => h[0]) ?? [], [etf]);
 
@@ -42,7 +47,7 @@ export function useLiveEtf() {
 
   return {
     etf, etfId, tickers, weightOf, combinedWeight, switchEtf,
-    allEtfs: allEtfs || [], loading, error, retry,
+    allEtfs: allEtfs || [], loading, error, retry, forceRefresh,
     isLive: !!etf?.holdings?.length,
   };
 }

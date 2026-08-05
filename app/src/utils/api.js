@@ -8,7 +8,7 @@ async function fetchJson(path) {
 
 export const api = {
   listEtfs: () => fetchJson('/etfs'),
-  getEtf: (id) => fetchJson(`/etf/${id}`),
+  getEtf: (id, { refresh = false } = {}) => fetchJson(`/etf/${id}${refresh ? '?refresh=true' : ''}`),
   getStock: (ticker) => fetchJson(`/stock/${ticker}`),
   getStocks: (tickers) => fetchJson(`/stocks?tickers=${tickers.join(',')}`),
   getSeries: (ticker, period = '1y', interval = '1d') =>

@@ -32,6 +32,7 @@ from services.supabase_client import get_client_optional
 from config import (
     CACHE_TTL_SECONDS,
     CACHE_TTL_HOLDINGS,
+    CACHE_TTL_HOLDINGS_FALLBACK,
     CORRELATION_PERIOD,
     CORRELATION_INTERVAL,
     PERIOD_TO_DAYS,
@@ -111,22 +112,30 @@ def _get_etf_info_db(etf_id: str) -> dict | None:
     }
 
 
-def get_etf_info(etf_id: str) -> dict:
+def get_etf_info(etf_id: str, force_refresh: bool = False) -> dict:
     """Fetch ETF name, category, AUM, and description.
 
-    Returns a flat dict; cached for CACHE_TTL_HOLDINGS seconds.
-    AUM is converted from raw totalAssets (int) to billions (float).
+    Returns a flat dict; cached for CACHE_TTL_HOLDINGS seconds - unless the
+    DB had no row and this fell back to a live call, in which case it's
+    cached for just CACHE_TTL_HOLDINGS_FALLBACK seconds so the next request
+    retries the DB almost immediately instead of being stuck behind a
+    stale/partial live snapshot for a full hour. AUM is converted from raw
+    totalAssets (int) to billions (float). force_refresh skips the cache
+    read entirely (used by the frontend's manual refresh action).
     """
     key = f"etf_info:{etf_id}"
-    cached = cache.get(key)
-    if cached:
-        return cached
+    if not force_refresh:
+        cached = cache.get(key)
+        if cached:
+            return cached
 
     result = _get_etf_info_db(etf_id)
+    ttl = CACHE_TTL_HOLDINGS
     if result is None:
         result = _get_etf_info_live(etf_id)
+        ttl = CACHE_TTL_HOLDINGS_FALLBACK
 
-    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    cache.set(key, result, ttl)
     return result
 
 
@@ -184,24 +193,49 @@ def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
     return [[row["ticker"], round(float(row["weight"]), 2)] for row in resp.data]
 
 
-def get_etf_holdings(etf_id: str) -> list[list]:
+def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> list[list]:
     """Fetch top holdings for an ETF as [[ticker, weight%], ...].
 
     Holdings are sorted by weight descending. Read from Supabase when
-    available, falling back to a live yfinance fetch otherwise.
+    available, falling back to a live yfinance fetch otherwise - yfinance
+    only exposes the top ~10, so a DB miss/error is a materially worse
+    result. That fallback is cached for just CACHE_TTL_HOLDINGS_FALLBACK
+    seconds (rather than the full CACHE_TTL_HOLDINGS) so the next request
+    retries the DB almost immediately instead of pinning the top-~10 result
+    in place for an hour. force_refresh skips the cache read entirely
+    (used by the frontend's manual refresh action).
+
+    Whether this call's result came from the DB or the live fallback is
+    recorded under a sibling cache key - see is_etf_holdings_stale().
     """
     key = f"etf_holdings:{etf_id}"
-    cached = cache.get(key)
-    if cached:
-        return cached
+    source_key = f"etf_holdings_source:{etf_id}"
+    if not force_refresh:
+        cached = cache.get(key)
+        if cached:
+            return cached
 
     holdings = _get_etf_holdings_db(etf_id)
+    ttl = CACHE_TTL_HOLDINGS
+    source = "db"
     if holdings is None:
         holdings = _get_etf_holdings_live(etf_id)
+        ttl = CACHE_TTL_HOLDINGS_FALLBACK
+        source = "live"
 
     # Cache even an empty result to avoid re-fetching live on every request
-    cache.set(key, holdings, CACHE_TTL_HOLDINGS)
+    cache.set(key, holdings, ttl)
+    cache.set(source_key, source, ttl)
     return holdings
+
+
+def is_etf_holdings_stale(etf_id: str) -> bool:
+    """True if the most recently served holdings for this ETF came from the
+    live yfinance fallback (DB miss or error) rather than Supabase - i.e.
+    likely an incomplete top-~10 rather than the full constituent list.
+    Only meaningful right after get_etf_holdings() has populated the cache
+    for this ETF; defaults to False (not stale) otherwise."""
+    return cache.get(f"etf_holdings_source:{etf_id}") == "live"
 
 
 # ── Stock metadata ────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ from fastapi import APIRouter, Query, HTTPException
 from services.market_data import (
     get_etf_info,
     get_etf_holdings,
+    is_etf_holdings_stale,
     get_stock_info,
     get_price_series,
     compute_correlation_matrix,
@@ -49,18 +50,25 @@ def get_etfs():
 
 
 @router.get("/etf/{etf_id}")
-def get_etf(etf_id: str):
+def get_etf(
+    etf_id: str,
+    refresh: bool = Query(False, description="Bypass the cache and re-fetch info/holdings now"),
+):
     """Full ETF detail including the holdings array.
 
     Returns 404 if yfinance returns no meaningful name (indicates the
-    ticker doesn't exist or isn't an ETF).
+    ticker doesn't exist or isn't an ETF). `refresh=true` bypasses the
+    cache on both underlying fetches - used by the frontend's manual
+    refresh action to force a retry rather than waiting out the TTL.
     """
     etf_id = etf_id.upper()
-    info = get_etf_info(etf_id)
-    holdings = get_etf_holdings(etf_id)
+    info = get_etf_info(etf_id, force_refresh=refresh)
+    holdings = get_etf_holdings(etf_id, force_refresh=refresh)
     if not info["name"] or info["name"] == etf_id:
         raise HTTPException(404, f"ETF '{etf_id}' not found or no data available")
-    return {**info, "holdings": holdings}
+    # True when holdings came from the live yfinance fallback (DB miss/error)
+    # rather than Supabase - flags a likely-incomplete top-~10 to the frontend.
+    return {**info, "holdings": holdings, "stale": is_etf_holdings_stale(etf_id)}
 
 
 # ── Stock endpoints ───────────────────────────────────────────────────────────

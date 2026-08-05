@@ -12,6 +12,13 @@ known variants to a short uppercase tag for display.
 CACHE_TTL_SECONDS = 900      # 15 min — price series, correlations
 CACHE_TTL_HOLDINGS = 3600    # 1 hour — ETF holdings, stock metadata
 
+# Short TTL used when an ETF info/holdings fetch fell back to a live
+# yfinance call because Supabase returned no row (miss or transient error).
+# Caching that fallback for the full hour above would keep serving a
+# stale/partial result long after the DB is actually able to answer -
+# 10s means the next request naturally retries the DB almost immediately.
+CACHE_TTL_HOLDINGS_FALLBACK = 10
+
 # Default parameters for correlation computation
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations

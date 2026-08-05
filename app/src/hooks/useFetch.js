@@ -4,7 +4,10 @@
  * Uses a ref for the fetcher to avoid stale closure issues.
  * Clears data immediately when dependencies change.
  * `retry()` re-runs the current fetch (e.g. from an error state's
- * Retry button) without needing a full page reload.
+ * Retry button) without needing a full page reload. `retry(true)` marks
+ * that one re-run as a forced refresh (passed as the fetcher's second
+ * arg) - fetchers that support bypassing their own cache (e.g. a
+ * `refresh` API param) can read it to do so.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 
@@ -14,12 +17,16 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
   const fetcherRef = useRef(fetcher);
+  const forceRef = useRef(false);
   const abortRef = useRef(null);
 
   // Always keep the latest fetcher in the ref
   fetcherRef.current = fetcher;
 
-  const retry = useCallback(() => setAttempt(a => a + 1), []);
+  const retry = useCallback((force = false) => {
+    forceRef.current = force;
+    setAttempt(a => a + 1);
+  }, []);
 
   useEffect(() => {
     // Abort any in-flight request
@@ -32,8 +39,12 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
     setLoading(true);
     setError(null);
 
+    // Consume the force flag so only this one run is forced
+    const force = forceRef.current;
+    forceRef.current = false;
+
     // Call the latest fetcher from the ref (never stale)
-    fetcherRef.current(controller.signal)
+    fetcherRef.current(controller.signal, force)
       .then(result => {
         if (!controller.signal.aborted) {
           setData(result);
