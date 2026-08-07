@@ -82,7 +82,7 @@ export default function App() {
     <div className="h-screen overflow-hidden flex flex-col bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
       <Header theme={theme} onToggleTheme={toggleTheme} isLive={etfLive || corrData.isLive} />
 
-      <main className="max-w-[1280px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-hidden flex flex-col">
+      <main className="max-w-[1280px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
         {/* Every child below assumes a loaded ETF (non-null etf, populated
             tickers), so the whole main area is gated on that one fetch:
             skeleton while loading, explicit error panel on failure —
