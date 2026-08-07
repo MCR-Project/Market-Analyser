@@ -96,7 +96,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
       ) : !etf ? (
         <ErrorState onRetry={etfRetry} />
       ) : (
-        <div className="flex gap-5 items-start flex-wrap">
+        <div className="flex-1 min-h-0 flex gap-5 items-start flex-wrap">
           <section className="flex-1 min-w-[320px] bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
             <div className="p-2 pb-4 relative">
               <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block" style={{ maxHeight: 460 }}>

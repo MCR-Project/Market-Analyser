@@ -43,10 +43,10 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
   const maxSecCount = useMemo(() => Math.max(...Object.values(sectorData.sectorCounts)), [sectorData]);
 
   return (
-    <aside className="w-[320px] flex-none bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-[18px] self-stretch">
+    <aside className="w-[320px] flex-none min-h-0 max-h-full flex flex-col overflow-hidden bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-[18px]">
       {selData ? (
-        <div>
-          <div className="flex items-start justify-between gap-2">
+        <>
+          <div className="flex-none flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="font-[var(--font-mono)] text-[13px] font-bold text-[var(--accent)]">{selData.ticker}</div>
               <div className="text-lg font-bold text-[var(--fg)] tracking-tight mt-0.5">{selData.name}</div>
@@ -57,7 +57,7 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
             </button>
           </div>
 
-          <div className="flex gap-2.5 mt-4 mb-1">
+          <div className="flex-none flex gap-2.5 mt-4 mb-1">
             <div className="flex-1 bg-[var(--bg-3)] rounded-[var(--radius-sm)] p-[10px_12px]">
               <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] mb-[3px]">VALUE</div>
               <div className="text-lg font-bold text-[var(--fg)] tabular-nums">{selData.value}</div>
@@ -68,19 +68,19 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
             </div>
           </div>
 
-          <div className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] mt-4 mb-2.5">CORRELATION TO PEERS</div>
-          <div className="flex flex-col gap-2">
+          <div className="flex-none font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] mt-4 mb-2.5">CORRELATION TO PEERS</div>
+          <div className="corr-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 pr-1 -mr-1">
             {peers.map(p => (
-              <button key={p.ticker} onClick={() => onSelect(p.ticker)} className="flex items-center gap-2.5 bg-transparent border-none p-0 cursor-pointer text-left">
+              <button key={p.ticker} onClick={() => onSelect(p.ticker)} className="flex-none flex items-center gap-2.5 bg-transparent border-none p-0 cursor-pointer text-left">
                 <span className="w-[52px] flex-none font-[var(--font-mono)] text-xs text-[var(--fg-1)]">{p.ticker}</span>
                 <span className="flex-1 h-2 rounded-full bg-[var(--bg-3)] overflow-hidden"><span className="block h-full bg-[var(--accent)] rounded-full" style={{ width: Math.round(p.val * 100) + '%' }} /></span>
                 <span className="w-8 flex-none text-right text-xs tabular-nums text-[var(--fg)]">{fmtCorr(p.val)}</span>
               </button>
             ))}
           </div>
-        </div>
+        </>
       ) : (
-        <div>
+        <div className="corr-scroll flex-1 min-h-0 overflow-y-auto flex flex-col">
           <div className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] mb-3.5">PAIR INSIGHTS</div>
           <p className="text-sm text-[var(--fg-1)] leading-relaxed m-0 mb-4">
             Daily-return correlation across <strong className="text-[var(--fg)]">{etf.id}</strong> holdings — how tightly they move together, beyond their sector labels.

@@ -56,13 +56,13 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
       ) : !etf ? (
         <ErrorState onRetry={etfRetry} />
       ) : (
-        <div className="flex gap-5 items-start flex-wrap">
-          <section className="flex-1 min-w-[320px] bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
-            <div className="p-[18px_20px_20px]">
-              <div className="corr-scroll overflow-x-auto pb-1.5">
+        <div className="flex-1 min-h-0 flex gap-5 items-start flex-wrap">
+          <section className="flex-1 min-w-[320px] min-h-0 max-h-full flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+            <div className="flex-1 min-h-0 flex flex-col p-[18px_20px_20px]">
+              <div className="corr-scroll flex-1 min-h-0 overflow-auto pb-1.5">
                 <div className="inline-block min-w-full">
-                  {/* Header */}
-                  <div className="flex">
+                  {/* Header — sticky so it stays visible while rows scroll vertically */}
+                  <div className="flex sticky top-0 z-10 bg-[var(--bg-1)]">
                     <div className="w-[60px] flex-none" />
                     {matrixTickers.map(t => (
                       <div key={t} className="w-[44px] flex-none text-center font-[var(--font-mono)] text-[10px] font-semibold text-[var(--fg-2)] pb-2 overflow-hidden text-ellipsis">{t}</div>
@@ -110,7 +110,7 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
               </div>
 
               {/* Legend */}
-              <div className="flex items-center gap-3 mt-4 pt-3.5 border-t border-[var(--divider)]">
+              <div className="flex-none flex items-center gap-3 mt-4 pt-3.5 border-t border-[var(--divider)]">
                 <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)]">CORRELATION</span>
                 <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">0.0</span>
                 <div className="flex-1 max-w-[220px] h-2 rounded-full border border-[var(--border)]" style={{ background: 'linear-gradient(90deg, var(--bg-1), color-mix(in oklab, var(--accent) 92%, var(--bg-1)))' }} />
