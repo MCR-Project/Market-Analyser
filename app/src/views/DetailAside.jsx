@@ -73,7 +73,7 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
             {peers.map(p => (
               <button key={p.ticker} onClick={() => onSelect(p.ticker)} className="flex-none flex items-center gap-2.5 bg-transparent border-none p-0 cursor-pointer text-left">
                 <span className="w-[52px] flex-none font-[var(--font-mono)] text-xs text-[var(--fg-1)]">{p.ticker}</span>
-                <span className="flex-1 h-2 rounded-full bg-[var(--bg-3)] overflow-hidden"><span className="block h-full bg-[var(--accent)] rounded-full" style={{ width: Math.round(p.val * 100) + '%' }} /></span>
+                <span className="flex-1 h-2 rounded-full bg-[var(--bg-3)] overflow-hidden"><span className="block h-full rounded-full" style={{ width: Math.round(Math.abs(p.val) * 100) + '%', background: p.val < 0 ? 'var(--negative)' : 'var(--accent)' }} /></span>
                 <span className="w-8 flex-none text-right text-xs tabular-nums text-[var(--fg)]">{fmtCorr(p.val)}</span>
               </button>
             ))}

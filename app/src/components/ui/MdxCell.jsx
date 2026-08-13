@@ -23,17 +23,23 @@ import * as runtime from 'react/jsx-runtime';
 
 /** Shared visual vocabulary available to every measurement's MDX. */
 const MDX_COMPONENTS = {
-  /** A 0–1 value as a filled bar + a pill showing `label`. */
-  Bar: ({ value = 0, label, color = 'var(--accent)' }) => (
-    <div className="flex items-center gap-2.5">
-      <div className="flex-1 h-[7px] rounded-full bg-[var(--bg-3)] overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: Math.round(Math.max(0, Math.min(1, value)) * 100) + '%', background: color }} />
+  /** A -1–1 value as a filled bar (by magnitude) + a pill showing `label`.
+   * Negative values render in `--negative` (purple) unless `color` is
+   * explicitly overridden, so an inverse correlation reads as visually
+   * distinct from a positive one rather than just an empty bar. */
+  Bar: ({ value = 0, label, color }) => {
+    const resolvedColor = color ?? (value < 0 ? 'var(--negative)' : 'var(--accent)');
+    return (
+      <div className="flex items-center gap-2.5">
+        <div className="flex-1 h-[7px] rounded-full bg-[var(--bg-3)] overflow-hidden">
+          <div className="h-full rounded-full" style={{ width: Math.round(Math.min(1, Math.abs(value)) * 100) + '%', background: resolvedColor }} />
+        </div>
+        <span className="font-[var(--font-mono)] text-[13px] font-bold rounded-full px-2.5 py-0.5" style={{ color: resolvedColor, background: 'color-mix(in oklab, ' + resolvedColor + ' 18%, transparent)' }}>
+          {label}
+        </span>
       </div>
-      <span className="font-[var(--font-mono)] text-[13px] font-bold rounded-full px-2.5 py-0.5" style={{ color, background: 'color-mix(in oklab, ' + color + ' 18%, transparent)' }}>
-        {label}
-      </span>
-    </div>
-  ),
+    );
+  },
   /** A bold, tabular-nums stat — the default look for a plain formatted value. */
   Stat: ({ text, color = 'var(--fg)' }) => (
     <span className="text-[15px] font-bold tabular-nums" style={{ color }}>{text}</span>

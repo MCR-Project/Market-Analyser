@@ -94,6 +94,13 @@
   --accent-ring: color-mix(in oklab, var(--color-violet-500) 50%, transparent);
   --accent-fg: #fff;
 
+  /* Negative correlation — mirrored against --accent: sky-blue here since
+     --accent is already violet in dark mode, so a negative ρ stays
+     visually distinct from a positive one. */
+  --negative: var(--color-sky-500);
+  --negative-soft: color-mix(in oklab, var(--color-sky-500) 18%, transparent);
+  --negative-ring: color-mix(in oklab, var(--color-sky-500) 50%, transparent);
+
   /* Borders */
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
@@ -129,6 +136,13 @@
   --accent-soft: color-mix(in oklab, var(--color-sky-500) 14%, transparent);
   --accent-ring: color-mix(in oklab, var(--color-sky-500) 40%, transparent);
   --accent-fg: #fff;
+
+  /* Negative correlation — mirrored against --accent: violet here since
+     --accent is sky-blue in light mode, so a negative ρ stays visually
+     distinct from a positive one. */
+  --negative: var(--color-violet-500);
+  --negative-soft: color-mix(in oklab, var(--color-violet-500) 14%, transparent);
+  --negative-ring: color-mix(in oklab, var(--color-violet-500) 40%, transparent);
 
   /* Borders */
   --border: rgba(0, 0, 0, 0.08);
