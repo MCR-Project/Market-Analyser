@@ -34,10 +34,13 @@ Backfill vs top-up:
     weekends, holidays, and the odd missed run - always within the daily
     tier. (ticker, date, granularity) is the primary key on `prices`, so
     upserting is idempotent - re-fetched days just overwrite the same rows.
-  - Exception: if a top-up's fetch reports a new split event, the ticker is
-    escalated to a full backfill on the spot instead. Prices are stored
-    adjusted, so a split changes the adjustment factor for the ticker's
-    entire history, not just the days the top-up covers.
+  - Exception: if a top-up's fetch reports a new split and/or dividend
+    event (checked against `splits`/`dividends` so a date still merely
+    sitting inside the 5-day window isn't re-escalated every run), the
+    ticker is escalated to a full backfill on the spot instead. Prices are
+    stored adjusted, and yfinance's adjustment factor incorporates both
+    splits and dividends - either one changes the adjustment factor for the
+    ticker's entire history, not just the days the top-up covers.
 
 Tiered price storage (see sql/001_optimize_prices_storage.sql and
 bucket_by_age's docstring for the exact rules):
@@ -347,6 +350,52 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     return failed
 
 
+def _has_new_events(client, table: str, ticker_id: str, events: list[dict]) -> bool:
+    """True if any of `events` (each a {"ticker", "date", ...} dict from
+    fetch_ticker_rows) isn't already present in the sparse `dividends`/
+    `splits` table for this ticker - i.e. a genuinely new corporate action
+    this run hasn't already escalated to a full backfill for, not one whose
+    date is merely still inside the 5-day top-up window from a prior run."""
+    if not events:
+        return False
+    dates = [e["date"] for e in events]
+    existing = (
+        client.table(table)
+        .select("date")
+        .eq("ticker", ticker_id)
+        .in_("date", dates)
+        .execute()
+    ).data
+    existing_dates = {row["date"] for row in existing}
+    return any(d not in existing_dates for d in dates)
+
+
+def _needs_full_backfill(
+    client, ticker_id: str, split_events: list[dict], dividend_events: list[dict]
+) -> str | None:
+    """Returns "split", "dividend", "split+dividend", or None, describing
+    which kind of genuinely-new corporate action (not already recorded in
+    `splits`/`dividends`) a top-up fetch turned up for this ticker.
+
+    Both kinds force escalation to a full backfill: `prices` stores
+    adjusted OHLC (fetch_ticker_rows's auto_adjust=True), and yfinance's
+    adjustment factor is Adj Close / Close, which incorporates BOTH splits
+    AND dividends - a new dividend retroactively rescales every prior
+    stored close exactly like a split does, just by a smaller amount. A
+    5-day top-up only refreshes the days it covers, so either event type
+    needs the ticker's entire history re-fetched and re-tiered.
+    """
+    has_new_split = _has_new_events(client, "splits", ticker_id, split_events)
+    has_new_dividend = _has_new_events(client, "dividends", ticker_id, dividend_events)
+    if has_new_split and has_new_dividend:
+        return "split+dividend"
+    if has_new_split:
+        return "split"
+    if has_new_dividend:
+        return "dividend"
+    return None
+
+
 def main():
     client = get_client()
 
@@ -382,20 +431,22 @@ def main():
             continue
 
         resplit_note = ""
-        if period == TOPUP_PERIOD and split_events:
-            # A new split landed inside the top-up window. `prices` stores
-            # adjusted OHLC, so a split changes the adjustment factor for
-            # every prior row, not just the ones this 5-day top-up covers -
-            # re-backfill the ticker's full history so old rows don't stay
-            # stuck under the pre-split scale.
-            try:
-                rows, dividend_events, split_events = fetch_ticker_rows(ticker_id, BACKFILL_PERIOD)
-            except Exception as e:
-                print(f"  FAILED  {ticker_id:8s} re-backfill after split: {e}")
-                failed.append(ticker_id)
-                continue
-            period = BACKFILL_PERIOD
-            resplit_note = ", split detected -> full re-backfill"
+        if period == TOPUP_PERIOD and (split_events or dividend_events):
+            # A split and/or dividend inside the top-up window may be new -
+            # check against what's already recorded so a date that's simply
+            # still inside the rolling 5-day window (already escalated on a
+            # prior run) doesn't force a full re-backfill every single run
+            # until it ages out of that window.
+            reason = _needs_full_backfill(client, ticker_id, split_events, dividend_events)
+            if reason:
+                try:
+                    rows, dividend_events, split_events = fetch_ticker_rows(ticker_id, BACKFILL_PERIOD)
+                except Exception as e:
+                    print(f"  FAILED  {ticker_id:8s} re-backfill after {reason}: {e}")
+                    failed.append(ticker_id)
+                    continue
+                period = BACKFILL_PERIOD
+                resplit_note = f", new {reason} detected -> full re-backfill"
 
         if period == BACKFILL_PERIOD:
             # Full history - tier it by age so a brand-new ticker never
