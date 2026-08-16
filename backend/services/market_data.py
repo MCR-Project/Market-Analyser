@@ -28,7 +28,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from services.cache import cache
-from services.supabase_client import get_client_optional
+from services.supabase_client import get_client_optional, paginated_select
 from config import (
     CACHE_TTL_SECONDS,
     CACHE_TTL_HOLDINGS,
@@ -60,10 +60,10 @@ def list_etfs() -> list[str]:
     if db is None:
         return []
     try:
-        resp = db.table("etfs").select("id").order("id").execute()
+        rows = paginated_select(lambda: db.table("etfs").select("id").order("id"))
     except Exception:
         return []
-    return [row["id"] for row in resp.data]
+    return [row["id"] for row in rows]
 
 
 # ── ETF metadata ──────────────────────────────────────────────────────────────
@@ -179,18 +179,18 @@ def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
     if db is None:
         return None
     try:
-        resp = (
-            db.table("etf_holdings")
+        rows = paginated_select(
+            lambda: db.table("etf_holdings")
             .select("ticker,weight")
             .eq("etf_id", etf_id)
             .order("weight", desc=True)
-            .execute()
+            .order("ticker")
         )
     except Exception:
         return None
-    if not resp.data:
+    if not rows:
         return None
-    return [[row["ticker"], round(float(row["weight"]), 2)] for row in resp.data]
+    return [[row["ticker"], round(float(row["weight"]), 2)] for row in rows]
 
 
 def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> list[list]:
@@ -347,21 +347,26 @@ def _get_price_series_db(ticker_symbol: str, period: str) -> list[dict] | None:
     db = get_client_optional()
     if db is None:
         return None
-    try:
+    days = PERIOD_TO_DAYS.get(period)
+    cutoff = (date.today() - timedelta(days=days)).isoformat() if days is not None else None
+
+    def build_query():
         q = (
             db.table("prices")
             .select("date,close,volume")
             .eq("ticker", ticker_symbol)
             .order("date")
+            .order("granularity")
         )
-        days = PERIOD_TO_DAYS.get(period)
-        if days is not None:
-            cutoff = (date.today() - timedelta(days=days)).isoformat()
+        if cutoff is not None:
             q = q.gte("date", cutoff)
-        resp = q.execute()
+        return q
+
+    try:
+        rows = paginated_select(build_query)
     except Exception:
         return None
-    if not resp.data:
+    if not rows:
         return None
 
     return [
@@ -370,7 +375,7 @@ def _get_price_series_db(ticker_symbol: str, period: str) -> list[dict] | None:
             "close": round(float(row["close"]), 2),
             "volume": int(row["volume"] or 0),
         }
-        for row in resp.data
+        for row in rows
     ]
 
 
@@ -502,19 +507,30 @@ def _closes_db(tickers: list[str], period: str) -> pd.DataFrame | None:
     db = get_client_optional()
     if db is None:
         return None
-    try:
-        q = db.table("prices").select("ticker,date,close").in_("ticker", tickers).order("date")
-        days = PERIOD_TO_DAYS.get(period)
-        if days is not None:
-            cutoff = (date.today() - timedelta(days=days)).isoformat()
+    days = PERIOD_TO_DAYS.get(period)
+    cutoff = (date.today() - timedelta(days=days)).isoformat() if days is not None else None
+
+    def build_query():
+        q = (
+            db.table("prices")
+            .select("ticker,date,close")
+            .in_("ticker", tickers)
+            .order("date")
+            .order("ticker")
+            .order("granularity")
+        )
+        if cutoff is not None:
             q = q.gte("date", cutoff)
-        resp = q.execute()
+        return q
+
+    try:
+        rows = paginated_select(build_query)
     except Exception:
         return None
-    if not resp.data:
+    if not rows:
         return None
 
-    df = pd.DataFrame(resp.data)
+    df = pd.DataFrame(rows)
     df["close"] = df["close"].astype(float)
     closes = df.pivot(index="date", columns="ticker", values="close")
 
