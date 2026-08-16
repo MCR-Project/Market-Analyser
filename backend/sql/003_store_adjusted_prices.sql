@@ -1,0 +1,65 @@
+-- Store split-adjusted prices, not raw closes (issue #13).
+--
+-- scripts/fetch_daily.py's fetch_ticker_rows previously fetched with
+-- auto_adjust=False (raw closes), while the live fallback in
+-- services/market_data.py (_get_price_series_live) used yfinance's default
+-- (auto_adjust=True). The same ticker returned different values depending
+-- on which path answered. Worse, compute_correlation_matrix runs
+-- pct_change() over `prices.close`, so a stock split read as a huge
+-- one-day return - NVDA's June 2024 10:1 split corrupted its correlation
+-- against every peer for anyone whose window included it.
+--
+-- Both fetch_ticker_rows and _get_price_series_live (and the correlation
+-- live path, _closes_live) now call yfinance with auto_adjust=True
+-- explicitly, so `prices` holds split/dividend-ADJUSTED open/high/low/close
+-- exclusively - readers need no adjustment logic, and both paths agree by
+-- construction. dividends/splits stay as the sparse event record; they were
+-- never adjusted and don't need to change.
+--
+-- Existing rows were stored under the old (raw) convention. Reset
+-- last_fetch so every ticker gets a full backfill under the new convention
+-- on the next scripts/fetch_daily.py run - same approach 001 used after
+-- restructuring `prices`.
+--
+-- Applied via Supabase's apply_migration; kept here for review/history.
+
+update ticker set last_fetch = null;
+
+-- ── Addendum (added after the statement above was already applied via
+-- apply_migration) ──────────────────────────────────────────────────────
+-- Everything below this point is follow-up documentation written after the
+-- fact, not something that was itself executed - only the plain `update`
+-- statement above ran. Don't assume this file's current contents are a
+-- verbatim record of what was applied; check the commit history if that
+-- matters.
+--
+-- Caveat: this only resets last_fetch - it doesn't touch existing `prices`
+-- rows directly. The next full backfill re-upserts every date it gets back
+-- from yfinance's 'max' period, keyed on (ticker, date, granularity), which
+-- overwrites old raw-close rows in place. But if 'max' ever returns fewer
+-- dates than what's already stored for a ticker (very old delisted-adjacent
+-- history, provider gaps), rows for the dates NOT in that fresh response
+-- would silently stay under the old raw-close convention forever, mixed in
+-- with adjusted rows for every other date.
+--
+-- This reset applies to every ticker, active or not - scripts/fetch_daily.py's
+-- _select_tickers_needing_sync gives an inactive ticker whose last_fetch is
+-- still null (which this statement makes true for all of them) its one-time
+-- backfill too, rather than active=False leaving it stuck on the old
+-- convention forever. Fixed after this migration was first applied - re-run
+-- fetch_daily.py once that fix is deployed if it hasn't run since.
+--
+-- One-time verification after the next scripts/fetch_daily.py run - list
+-- each ticker's oldest stored date:
+--
+--   select ticker, min(date) as oldest_stored
+--   from prices
+--   group by ticker
+--   order by oldest_stored;
+--
+-- ...and spot-check a handful (especially older/thinly-traded tickers)
+-- against yf.Ticker(ticker).history(period="max").index.min() - they should
+-- match post-backfill. A ticker whose oldest_stored predates what 'max'
+-- actually returns has orphaned pre-migration rows that need a manual fix
+-- (e.g. delete prices older than the fresh fetch's earliest date for that
+-- ticker, or re-run scripts/complete_database.py's backfill logic for it).
