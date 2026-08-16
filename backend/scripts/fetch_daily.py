@@ -84,7 +84,7 @@ from services.market_data import (
     _get_etf_holdings_live,
     _get_stock_info_live,
 )
-from services.supabase_client import get_client
+from services.supabase_client import assert_not_truncated, get_client, paginated_select
 
 BACKFILL_PERIOD = "max"  # first-ever fetch for a ticker - full available history
 TOPUP_PERIOD = "5d"      # every subsequent daily run
@@ -246,14 +246,14 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
     monthly_cutoff = today - timedelta(days=MONTHLY_TIER_START_DAYS)
 
     # ── Daily -> weekly ──
-    daily_rows = (
-        client.table("prices")
+    daily_rows = paginated_select(
+        lambda: client.table("prices")
         .select("ticker,date,open,high,low,close,volume")
         .eq("ticker", ticker_id)
         .eq("granularity", "D")
         .lt("date", weekly_cutoff.isoformat())
-        .execute()
-    ).data
+        .order("date")
+    )
 
     week_groups: dict[date, list[dict]] = {}
     for row in daily_rows:
@@ -269,14 +269,15 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
         ).execute()
 
     # ── Daily/weekly -> monthly ──
-    coarse_rows = (
-        client.table("prices")
+    coarse_rows = paginated_select(
+        lambda: client.table("prices")
         .select("ticker,date,open,high,low,close,volume,granularity")
         .eq("ticker", ticker_id)
         .in_("granularity", ["D", "W"])
         .lt("date", monthly_cutoff.isoformat())
-        .execute()
-    ).data
+        .order("date")
+        .order("granularity")
+    )
 
     month_groups: dict[date, list[dict]] = {}
     for row in coarse_rows:
@@ -341,8 +342,10 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
         if len(etf_row) > 1:
             client.table("etfs").upsert(etf_row).execute()
 
-        db_resp = client.table("etf_holdings").select("ticker").eq("etf_id", etf_id).execute()
-        db_tickers = {row["ticker"] for row in db_resp.data}
+        db_rows = paginated_select(
+            lambda: client.table("etf_holdings").select("ticker").eq("etf_id", etf_id).order("ticker")
+        )
+        db_tickers = {row["ticker"] for row in db_rows}
 
         holding_rows = [
             {"etf_id": etf_id, "ticker": t, "weight": w}
@@ -368,13 +371,19 @@ def _has_new_events(client, table: str, ticker_id: str, events: list[dict]) -> b
     if not events:
         return False
     dates = [e["date"] for e in events]
-    existing = (
+    # Left unpaginated: `dates` is caller-bounded (currently the handful of
+    # events inside a 5-day top-up window), never a whole-table scan - but
+    # assert_not_truncated still guards against that assumption silently
+    # breaking later (e.g. if this is ever called with a "max"-period event
+    # list) instead of quietly acting on a partial `existing_dates` set.
+    existing = assert_not_truncated(
         client.table(table)
         .select("date")
         .eq("ticker", ticker_id)
         .in_("date", dates)
         .execute()
-    ).data
+        .data
+    )
     existing_dates = {row["date"] for row in existing}
     return any(d not in existing_dates for d in dates)
 
@@ -429,9 +438,11 @@ def _select_tickers_needing_sync(tickers: list[dict]) -> list[dict]:
 def main():
     client = get_client()
 
-    tickers_resp = client.table("ticker").select("id,last_fetch,active").execute()
-    all_ticker_ids = {row["id"] for row in tickers_resp.data}
-    tickers_needing_sync = _select_tickers_needing_sync(tickers_resp.data)
+    ticker_rows = paginated_select(
+        lambda: client.table("ticker").select("id,last_fetch,active").order("id")
+    )
+    all_ticker_ids = {row["id"] for row in ticker_rows}
+    tickers_needing_sync = _select_tickers_needing_sync(ticker_rows)
 
     print("Syncing ETFs (market_data.list_etfs)...")
     etf_failures = sync_etfs(client, all_ticker_ids)
