@@ -318,8 +318,13 @@ def get_stock_info(ticker_symbol: str) -> dict:
 # ── Price series ──────────────────────────────────────────────────────────────
 
 def _get_price_series_live(ticker_symbol: str, period: str, interval: str) -> list[dict]:
+    # auto_adjust=True explicitly, rather than relying on yfinance's default
+    # (which happens to also be True today) - `prices` is populated by
+    # scripts/fetch_daily.py with the same setting (see issue #13), so this
+    # must not silently drift from it if the yfinance default ever changes.
+    # Both paths need to agree by construction: split-adjusted OHLC, always.
     ticker = yf.Ticker(ticker_symbol)
-    hist = ticker.history(period=period, interval=interval)
+    hist = ticker.history(period=period, interval=interval, auto_adjust=True)
     if hist.empty:
         return []
 
@@ -459,9 +464,13 @@ def _correlation_summary(returns: pd.DataFrame, tickers: list[str]) -> dict:
 def _closes_live(tickers: list[str], period: str, interval: str) -> pd.DataFrame | None:
     """yf.download() returns a MultiIndex DataFrame when fetching multiple
     tickers: columns = [("Close", "AAPL"), ("Close", "MSFT"), ...]. We slice
-    out the "Close" level to get a flat ticker-indexed DataFrame."""
+    out the "Close" level to get a flat ticker-indexed DataFrame. auto_adjust
+    explicit for the same reason as _get_price_series_live - a raw close
+    would make pct_change() read a stock split as a huge one-day return
+    (see compute_correlation_matrix, issue #13)."""
     data = yf.download(
-        tickers, period=period, interval=interval, progress=False, threads=True
+        tickers, period=period, interval=interval, progress=False, threads=True,
+        auto_adjust=True,
     )
     if data.empty:
         return None
