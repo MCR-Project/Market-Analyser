@@ -64,7 +64,7 @@ from services.market_data import (
     _get_stock_info_live,
     list_etfs,
 )
-from services.supabase_client import get_client
+from services.supabase_client import get_client, paginated_select
 
 PRICE_UPSERT_CHUNK = 5000  # a "max" backfill can exceed 10k rows per ticker
 
@@ -165,8 +165,10 @@ def complete_etf_metadata(client, holdings_by_etf, etf_ids, dry_run) -> tuple[in
     A field counts as missing when it's null/empty (or, for name, still equal
     to the raw id).
     """
-    resp = client.table("etfs").select("id,name,cat,desc").in_("id", etf_ids).execute()
-    current = {row["id"]: row for row in resp.data}
+    rows = paginated_select(
+        lambda: client.table("etfs").select("id,name,cat,desc").in_("id", etf_ids).order("id")
+    )
+    current = {row["id"]: row for row in rows}
 
     updated, failed = 0, []
     for etf_id in etf_ids:
@@ -310,9 +312,11 @@ def prune_below_threshold(client, min_weight, dry_run):
     re-fetchable, so a stock crossing back above the threshold later is
     simply re-inserted and re-backfilled by a future run.
     """
-    resp = client.table("etf_holdings").select("ticker,weight").execute()
+    rows = paginated_select(
+        lambda: client.table("etf_holdings").select("ticker,weight").order("etf_id").order("ticker")
+    )
     max_weight: dict[str, float] = {}
-    for row in resp.data:
+    for row in rows:
         w = float(row["weight"] or 0)
         t = row["ticker"]
         max_weight[t] = max(max_weight.get(t, 0.0), w)
@@ -427,7 +431,10 @@ def main():
     print("\n2. Normalizing holdings tickers...")
     normalized_by_etf, holding_names = normalize_holdings(holdings_by_etf, covered)
 
-    existing = {row["id"] for row in client.table("ticker").select("id").execute().data}
+    existing = {
+        row["id"]
+        for row in paginated_select(lambda: client.table("ticker").select("id").order("id"))
+    }
     max_weight: dict[str, float] = {}
     for weights in normalized_by_etf.values():
         for t, w in weights.items():
