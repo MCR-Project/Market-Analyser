@@ -1,0 +1,26 @@
+-- Store split-adjusted prices, not raw closes (issue #13).
+--
+-- scripts/fetch_daily.py's fetch_ticker_rows previously fetched with
+-- auto_adjust=False (raw closes), while the live fallback in
+-- services/market_data.py (_get_price_series_live) used yfinance's default
+-- (auto_adjust=True). The same ticker returned different values depending
+-- on which path answered. Worse, compute_correlation_matrix runs
+-- pct_change() over `prices.close`, so a stock split read as a huge
+-- one-day return - NVDA's June 2024 10:1 split corrupted its correlation
+-- against every peer for anyone whose window included it.
+--
+-- Both fetch_ticker_rows and _get_price_series_live (and the correlation
+-- live path, _closes_live) now call yfinance with auto_adjust=True
+-- explicitly, so `prices` holds split/dividend-ADJUSTED open/high/low/close
+-- exclusively - readers need no adjustment logic, and both paths agree by
+-- construction. dividends/splits stay as the sparse event record; they were
+-- never adjusted and don't need to change.
+--
+-- Existing rows were stored under the old (raw) convention. Reset
+-- last_fetch so every ticker gets a full backfill under the new convention
+-- on the next scripts/fetch_daily.py run - same approach 001 used after
+-- restructuring `prices`.
+--
+-- Applied via Supabase's apply_migration; kept here for review/history.
+
+update ticker set last_fetch = null;
