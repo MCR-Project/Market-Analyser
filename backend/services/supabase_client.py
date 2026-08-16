@@ -27,6 +27,61 @@ def get_client() -> Client:
     return create_client(url, key)
 
 
+# PostgREST caps a single response at this many rows by default (Supabase's
+# "Max Rows" setting) and returns the truncated page with no error - a plain
+# .select().execute() over a table/queryset that can grow past this silently
+# acts on partial data (see issue #14). Any read whose row count scales with
+# the data (a whole table, or a filter that isn't inherently tiny) must go
+# through paginated_select() below rather than a bare .execute().
+SUPABASE_PAGE_SIZE = 1000
+
+
+def paginated_select(build_query, page_size: int = SUPABASE_PAGE_SIZE) -> list[dict]:
+    """Run a select to completion by paging with .range() until a short
+    page comes back, so results past PostgREST's row cap are never silently
+    dropped.
+
+    `build_query` must be a zero-arg callable that returns a FRESH query
+    builder every call, e.g.:
+
+        paginated_select(lambda: client.table("t").select("*").eq("x", 1))
+
+    A fresh builder per page is required, not just a reused one re-ranged:
+    postgrest-py's .range() *adds* offset/limit query params rather than
+    replacing them, so calling .range() again on the same builder object
+    would accumulate stale params instead of advancing the window. Callers
+    should also give the query a deterministic ORDER BY (ideally over a
+    unique key, or a key that's unique within the filtered set) - paging
+    with .range() re-issues a separate query per page, and without a stable
+    sort Postgres doesn't guarantee the same row ordering across those
+    calls, which can skip or duplicate rows at page boundaries.
+    """
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        page = build_query().range(offset, offset + page_size - 1).execute().data
+        rows.extend(page)
+        if len(page) < page_size:
+            return rows
+        offset += page_size
+
+
+def assert_not_truncated(rows: list[dict], page_size: int = SUPABASE_PAGE_SIZE) -> list[dict]:
+    """Raise if a deliberately non-paginated read came back with exactly the
+    PostgREST page cap - almost certainly a silent truncation rather than a
+    genuine coincidence. Use this on selects that are expected to always
+    stay well under the cap (so full pagination would be overkill), as a
+    safety net that turns a future truncation loud instead of letting the
+    caller silently act on a partial result.
+    """
+    if len(rows) == page_size:
+        raise RuntimeError(
+            f"read returned exactly {page_size} rows - likely truncated by "
+            "PostgREST's page cap; switch this read to paginated_select()"
+        )
+    return rows
+
+
 _client_singleton: Client | None = None
 _client_init_attempted = False
 
