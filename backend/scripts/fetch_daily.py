@@ -3,6 +3,13 @@ Daily data-refresh job:
   - Fetches OHLCV history for every active ticker from yfinance and upserts
     it into Supabase, then stamps ticker.last_fetch. Dividend/split events
     go into their own sparse `dividends`/`splits` tables, not `prices`.
+  - `prices` stores split/dividend-ADJUSTED OHLC (fetch_ticker_rows calls
+    yfinance with auto_adjust=True), not raw closes - see issue #13. This
+    matches the live fallback in services.market_data._get_price_series_live,
+    so a ticker returns identical values whether Supabase or the live path
+    answers, and pct_change()-based correlation math never mistakes a stock
+    split for a real return. dividends/splits stay populated as a sparse
+    event record even though prices are pre-adjusted.
   - Compacts aged price rows for every known ticker (active or not) into
     coarser granularity, so `prices` doesn't grow unbounded with history
     the product never displays past 5 years (see issue #10).
@@ -86,8 +93,13 @@ def fetch_ticker_rows(ticker_id: str, period: str) -> tuple[list[dict], list[dic
     payloads: price rows (open/high/low/close/volume only - dividends and
     splits live in their own sparse `dividends`/`splits` tables now, see
     sql/001_optimize_prices_storage.sql), and dividend/split events (only
-    non-zero occurrences - most rows have neither)."""
-    hist = yf.Ticker(ticker_id).history(period=period, auto_adjust=False)
+    non-zero occurrences - most rows have neither).
+
+    auto_adjust=True so `prices` stores split/dividend-adjusted OHLC, the
+    same convention services.market_data's live fallback uses (see issue
+    #13) - a raw close makes a stock split look like a ~-90% one-day return
+    to any pct_change()-based reader (compute_correlation_matrix)."""
+    hist = yf.Ticker(ticker_id).history(period=period, auto_adjust=True)
     if hist.empty:
         return [], [], []
 
