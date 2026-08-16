@@ -24,3 +24,27 @@
 -- Applied via Supabase's apply_migration; kept here for review/history.
 
 update ticker set last_fetch = null;
+
+-- Caveat: this only resets last_fetch - it doesn't touch existing `prices`
+-- rows directly. The next full backfill re-upserts every date it gets back
+-- from yfinance's 'max' period, keyed on (ticker, date, granularity), which
+-- overwrites old raw-close rows in place. But if 'max' ever returns fewer
+-- dates than what's already stored for a ticker (very old delisted-adjacent
+-- history, provider gaps), rows for the dates NOT in that fresh response
+-- would silently stay under the old raw-close convention forever, mixed in
+-- with adjusted rows for every other date.
+--
+-- One-time verification after the next scripts/fetch_daily.py run - list
+-- each ticker's oldest stored date:
+--
+--   select ticker, min(date) as oldest_stored
+--   from prices
+--   group by ticker
+--   order by oldest_stored;
+--
+-- ...and spot-check a handful (especially older/thinly-traded tickers)
+-- against yf.Ticker(ticker).history(period="max").index.min() - they should
+-- match post-backfill. A ticker whose oldest_stored predates what 'max'
+-- actually returns has orphaned pre-migration rows that need a manual fix
+-- (e.g. delete prices older than the fresh fetch's earliest date for that
+-- ticker, or re-run scripts/complete_database.py's backfill logic for it).
