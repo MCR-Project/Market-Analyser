@@ -20,7 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from scripts.fetch_daily import _has_new_events, _needs_full_backfill, fetch_ticker_rows
+from scripts.fetch_daily import (
+    _has_new_events,
+    _needs_full_backfill,
+    _select_tickers_needing_sync,
+    fetch_ticker_rows,
+)
 
 
 # ── fetch_ticker_rows ────────────────────────────────────────────────────────
@@ -171,6 +176,43 @@ class NeedsFullBackfillTests(unittest.TestCase):
         self.assertIsNone(
             _needs_full_backfill(client, "NVDA", split_events, dividend_events)
         )
+
+
+# ── _select_tickers_needing_sync ────────────────────────────────────────────
+
+class SelectTickersNeedingSyncTests(unittest.TestCase):
+    """Regression coverage for the review finding: the sync loop used to
+    iterate active tickers only, so an inactive ticker's `prices` rows
+    never got the one-time re-backfill sql/003_store_adjusted_prices.sql's
+    last_fetch=null reset was supposed to trigger, and stayed on the old
+    raw-close convention forever."""
+
+    def test_active_tickers_always_included(self):
+        tickers = [{"id": "AAPL", "active": True, "last_fetch": "2024-01-01"}]
+        self.assertEqual(_select_tickers_needing_sync(tickers), tickers)
+
+    def test_inactive_never_fetched_is_included(self):
+        """An inactive ticker with last_fetch still null - just added via
+        add_ticker.py --inactive, or reset by the adjusted-prices migration -
+        must get its one-time backfill despite being inactive."""
+        tickers = [{"id": "OLDCO", "active": False, "last_fetch": None}]
+        self.assertEqual(_select_tickers_needing_sync(tickers), tickers)
+
+    def test_inactive_already_fetched_is_excluded(self):
+        """Once an inactive ticker has a last_fetch, it goes back to being
+        skipped by daily top-ups, same as before this fix."""
+        tickers = [{"id": "OLDCO", "active": False, "last_fetch": "2024-01-01"}]
+        self.assertEqual(_select_tickers_needing_sync(tickers), [])
+
+    def test_sorted_by_id_and_mixed_set(self):
+        tickers = [
+            {"id": "MSFT", "active": True, "last_fetch": "2024-01-01"},
+            {"id": "OLDCO", "active": False, "last_fetch": None},
+            {"id": "ZZZ", "active": False, "last_fetch": "2024-01-01"},
+            {"id": "AAPL", "active": True, "last_fetch": None},
+        ]
+        result = _select_tickers_needing_sync(tickers)
+        self.assertEqual([t["id"] for t in result], ["AAPL", "MSFT", "OLDCO"])
 
 
 if __name__ == "__main__":

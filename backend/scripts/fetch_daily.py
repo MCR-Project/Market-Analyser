@@ -1,8 +1,14 @@
 """
 Daily data-refresh job:
   - Fetches OHLCV history for every active ticker from yfinance and upserts
-    it into Supabase, then stamps ticker.last_fetch. Dividend/split events
-    go into their own sparse `dividends`/`splits` tables, not `prices`.
+    it into Supabase, then stamps ticker.last_fetch. An inactive ticker
+    whose last_fetch is still null - just added via add_ticker.py
+    --inactive, or reset by a prices-convention migration like
+    sql/003_store_adjusted_prices.sql - also gets this one-time backfill;
+    "active" only starts excluding a ticker from the sync loop once it has
+    a last_fetch. Metadata refresh (below) stays active-only regardless.
+    Dividend/split events go into their own sparse `dividends`/`splits`
+    tables, not `prices`.
   - `prices` stores split/dividend-ADJUSTED OHLC (fetch_ticker_rows calls
     yfinance with auto_adjust=True), not raw closes - see issue #13. This
     matches the live fallback in services.market_data._get_price_series_live,
@@ -26,10 +32,13 @@ Runs on a schedule via .github/workflows/fetch-daily.yml.
 Backfill vs top-up:
   - A ticker whose last_fetch is null gets a full-history backfill, back to
     the ticker's origin (null is the column default, so this is true for
-    any ticker scripts/add_ticker.py has just added). The fetched history
-    is immediately tiered by age (see bucket_by_age) rather than stored
-    flat, so a long-lived ticker's backfill never even transiently holds
-    years of raw daily rows.
+    any ticker scripts/add_ticker.py has just added). This applies
+    regardless of active status - an inactive ticker still needs its data
+    stored under the current adjustment convention even though it won't
+    get further top-ups afterward (see main()'s tickers_needing_sync). The
+    fetched history is immediately tiered by age (see bucket_by_age) rather
+    than stored flat, so a long-lived ticker's backfill never even
+    transiently holds years of raw daily rows.
   - A ticker that's already been fetched gets a 5-day top-up, which covers
     weekends, holidays, and the odd missed run - always within the daily
     tier. (ticker, date, granularity) is the primary key on `prices`, so
@@ -396,21 +405,39 @@ def _needs_full_backfill(
     return None
 
 
+def _select_tickers_needing_sync(tickers: list[dict]) -> list[dict]:
+    """Which `ticker` rows this run's price-sync loop should touch: every
+    active ticker, plus any inactive one that has never been fetched
+    (last_fetch is null) - either a brand-new ticker added via
+    add_ticker.py --inactive, or ANY ticker (active or not) whose
+    last_fetch was reset by a prices-convention migration like
+    sql/003_store_adjusted_prices.sql.
+
+    Without the inactive-and-never-fetched half of this, an inactive
+    ticker's `prices` rows would stay on the old convention forever, since
+    active=False otherwise excludes it from every future run - only the
+    one-time backfill is unconditional; metadata refresh in main() stays
+    active-only, and once last_fetch is set an inactive ticker goes back
+    to being skipped, same as before.
+    """
+    return sorted(
+        (row for row in tickers if row["active"] or not row["last_fetch"]),
+        key=lambda row: row["id"],
+    )
+
+
 def main():
     client = get_client()
 
     tickers_resp = client.table("ticker").select("id,last_fetch,active").execute()
     all_ticker_ids = {row["id"] for row in tickers_resp.data}
-    active_tickers = sorted(
-        (row for row in tickers_resp.data if row["active"]),
-        key=lambda row: row["id"],
-    )
+    tickers_needing_sync = _select_tickers_needing_sync(tickers_resp.data)
 
     print("Syncing ETFs (market_data.list_etfs)...")
     etf_failures = sync_etfs(client, all_ticker_ids)
 
-    if not active_tickers:
-        print("\nNo active tickers found - add some with scripts/add_ticker.py first.")
+    if not tickers_needing_sync:
+        print("\nNo tickers to sync - add some with scripts/add_ticker.py first.")
         if etf_failures:
             sys.exit(1)
         return
@@ -420,8 +447,9 @@ def main():
     total_rows = 0
     failed = list(etf_failures)
 
-    for ticker in active_tickers:
+    for ticker in tickers_needing_sync:
         ticker_id = ticker["id"]
+        is_active = ticker["active"]
         period = BACKFILL_PERIOD if not ticker["last_fetch"] else TOPUP_PERIOD
         try:
             rows, dividend_events, split_events = fetch_ticker_rows(ticker_id, period)
@@ -468,24 +496,27 @@ def main():
         client.table("ticker").update({"last_fetch": today_date.isoformat()}).eq("id", ticker_id).execute()
 
         metadata_note = ""
-        try:
-            info = _get_stock_info_live(ticker_id)
-            client.table("ticker").update({
-                "sector": info["sector"],
-                "market_cap": info["marketCap"],
-                "currency": info["currency"],
-                "exchange": info["exchange"],
-                "logo": info["logo"],
-                "website": info["website"],
-            }).eq("id", ticker_id).execute()
-        except Exception as e:
-            print(f"  METADATA FAILED  {ticker_id:8s} {e}")
-            failed.append(ticker_id)
-            metadata_note = ", metadata failed"
+        if is_active:
+            try:
+                info = _get_stock_info_live(ticker_id)
+                client.table("ticker").update({
+                    "sector": info["sector"],
+                    "market_cap": info["marketCap"],
+                    "currency": info["currency"],
+                    "exchange": info["exchange"],
+                    "logo": info["logo"],
+                    "website": info["website"],
+                }).eq("id", ticker_id).execute()
+            except Exception as e:
+                print(f"  METADATA FAILED  {ticker_id:8s} {e}")
+                failed.append(ticker_id)
+                metadata_note = ", metadata failed"
+        else:
+            metadata_note = ", inactive: metadata skipped"
 
         print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){resplit_note}{metadata_note}")
 
-    print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
+    print(f"\nDone: {len(tickers_needing_sync)} tickers, {total_rows} price rows upserted.")
 
     # Compact aged rows for every known ticker, not just active ones -
     # inactive tickers stop getting top-ups but their old data still needs
