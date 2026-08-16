@@ -34,6 +34,10 @@ Backfill vs top-up:
     weekends, holidays, and the odd missed run - always within the daily
     tier. (ticker, date, granularity) is the primary key on `prices`, so
     upserting is idempotent - re-fetched days just overwrite the same rows.
+  - Exception: if a top-up's fetch reports a new split event, the ticker is
+    escalated to a full backfill on the spot instead. Prices are stored
+    adjusted, so a split changes the adjustment factor for the ticker's
+    entire history, not just the days the top-up covers.
 
 Tiered price storage (see sql/001_optimize_prices_storage.sql and
 bucket_by_age's docstring for the exact rules):
