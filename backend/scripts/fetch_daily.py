@@ -377,6 +377,22 @@ def main():
             failed.append(ticker_id)
             continue
 
+        resplit_note = ""
+        if period == TOPUP_PERIOD and split_events:
+            # A new split landed inside the top-up window. `prices` stores
+            # adjusted OHLC, so a split changes the adjustment factor for
+            # every prior row, not just the ones this 5-day top-up covers -
+            # re-backfill the ticker's full history so old rows don't stay
+            # stuck under the pre-split scale.
+            try:
+                rows, dividend_events, split_events = fetch_ticker_rows(ticker_id, BACKFILL_PERIOD)
+            except Exception as e:
+                print(f"  FAILED  {ticker_id:8s} re-backfill after split: {e}")
+                failed.append(ticker_id)
+                continue
+            period = BACKFILL_PERIOD
+            resplit_note = ", split detected -> full re-backfill"
+
         if period == BACKFILL_PERIOD:
             # Full history - tier it by age so a brand-new ticker never
             # even transiently stores years of raw daily rows.
@@ -412,7 +428,7 @@ def main():
             failed.append(ticker_id)
             metadata_note = ", metadata failed"
 
-        print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){metadata_note}")
+        print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){resplit_note}{metadata_note}")
 
     print(f"\nDone: {len(active_tickers)} tickers, {total_rows} price rows upserted.")
 
