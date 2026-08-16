@@ -25,6 +25,14 @@
 
 update ticker set last_fetch = null;
 
+-- ── Addendum (added after the statement above was already applied via
+-- apply_migration) ──────────────────────────────────────────────────────
+-- Everything below this point is follow-up documentation written after the
+-- fact, not something that was itself executed - only the plain `update`
+-- statement above ran. Don't assume this file's current contents are a
+-- verbatim record of what was applied; check the commit history if that
+-- matters.
+--
 -- Caveat: this only resets last_fetch - it doesn't touch existing `prices`
 -- rows directly. The next full backfill re-upserts every date it gets back
 -- from yfinance's 'max' period, keyed on (ticker, date, granularity), which
@@ -33,6 +41,13 @@ update ticker set last_fetch = null;
 -- history, provider gaps), rows for the dates NOT in that fresh response
 -- would silently stay under the old raw-close convention forever, mixed in
 -- with adjusted rows for every other date.
+--
+-- This reset applies to every ticker, active or not - scripts/fetch_daily.py's
+-- _select_tickers_needing_sync gives an inactive ticker whose last_fetch is
+-- still null (which this statement makes true for all of them) its one-time
+-- backfill too, rather than active=False leaving it stuck on the old
+-- convention forever. Fixed after this migration was first applied - re-run
+-- fetch_daily.py once that fix is deployed if it hasn't run since.
 --
 -- One-time verification after the next scripts/fetch_daily.py run - list
 -- each ticker's oldest stored date:
