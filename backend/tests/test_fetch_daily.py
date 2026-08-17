@@ -420,6 +420,66 @@ class CompactTickerMonthlyTests(unittest.TestCase):
         self.assertEqual(remaining, [correct_month_row])
 
 
+class CompactTickerCombinedCrashRecoveryTests(unittest.TestCase):
+    """The trickiest interaction: a ticker with BOTH a half-finished weekly
+    bucket and a half-finished monthly bucket in the same compact_ticker
+    call. The monthly pass groups whatever W rows exist once the weekly
+    pass has already run - including ones the weekly pass just created
+    fresh in this same call (see CompactTickerMonthlyTests) - so this
+    exercises that the monthly pass's existing-M-row check still correctly
+    protects the month's candle even when part of its input was only
+    created moments earlier by the weekly pass, and that it doesn't
+    interfere with the independent, unrelated half-finished weekly bucket."""
+
+    TODAY = date(2024, 6, 1)
+
+    def test_independent_half_finished_buckets_are_both_recovered_correctly(self):
+        # Half-finished weekly bucket: unrelated week, already has its W
+        # candle, still has its leftover D source.
+        correct_week_row = {
+            "ticker": "NVDA", "date": "2023-01-02", "granularity": "W",
+            "open": 10, "high": 20, "low": 5, "close": 18, "volume": 999,
+        }
+        leftover_daily_for_week = _d("NVDA", "2023-01-03", 11, 13, 10, 12, 200)
+
+        # Half-finished monthly bucket: already has its M candle, still has
+        # leftover D and W sources (a mix, per CompactTickerMonthlyTests).
+        correct_month_row = {
+            "ticker": "NVDA", "date": "2018-01-01", "granularity": "M",
+            "open": 10, "high": 30, "low": 5, "close": 28, "volume": 9999,
+        }
+        leftover_daily_for_month = _d("NVDA", "2018-01-02", 10, 12, 9, 11, 100)
+        leftover_weekly_for_month = {
+            "ticker": "NVDA", "date": "2018-01-08", "granularity": "W",
+            "open": 11, "high": 15, "low": 10, "close": 14, "volume": 500,
+        }
+
+        rows = [
+            correct_week_row, leftover_daily_for_week,
+            correct_month_row, leftover_daily_for_month, leftover_weekly_for_month,
+        ]
+        client = _FakeCompactClient(rows)
+
+        weeks, months, weeks_skipped, months_skipped = compact_ticker(client, "NVDA", self.TODAY)
+
+        # The month's leftover D row (2018-01-02) belongs to a week with no
+        # existing W candle, so the weekly pass legitimately aggregates it
+        # fresh (weeks=1) - that's correct, not a crash-safety violation,
+        # per CompactTickerMonthlyTests. The unrelated week's existing W
+        # candle is correctly left alone and only cleaned (weeks_skipped=1).
+        # The month's existing M candle is correctly left alone and only
+        # cleaned (months_skipped=1) even though one of its two W sources
+        # was only just created by the weekly pass moments earlier.
+        self.assertEqual((weeks, months, weeks_skipped, months_skipped), (1, 0, 1, 1))
+
+        # Both leftover D sources, and the month's leftover/freshly-created W
+        # sources, are gone - only the two correct coarse candles survive,
+        # each exactly as it was before this run (never re-aggregated).
+        remaining = client._prices.rows
+        self.assertEqual([r for r in remaining if r["granularity"] == "D"], [])
+        self.assertCountEqual(remaining, [correct_week_row, correct_month_row])
+
+
 # ── _select_tickers_needing_sync ────────────────────────────────────────────
 
 class SelectTickersNeedingSyncTests(unittest.TestCase):

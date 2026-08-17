@@ -266,25 +266,36 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int, int, 
         .order("date")
     )
 
-    # Read existing W rows up front so a half-finished bucket (coarse row
-    # already upserted, sources not yet deleted by a prior interrupted run)
-    # can be told apart from a fresh one before any aggregation happens.
-    existing_weekly_dates = {
-        row["date"]
-        for row in paginated_select(
-            lambda: client.table("prices")
-            .select("date")
-            .eq("ticker", ticker_id)
-            .eq("granularity", "W")
-        )
-    }
-
     week_groups: dict[date, list[dict]] = {}
     for row in daily_rows:
         d = date.fromisoformat(row["date"])
         week_start = _week_start(d)
         if week_start + timedelta(days=6) < weekly_cutoff:
             week_groups.setdefault(week_start, []).append(row)
+
+    # Read existing W rows for just these candidate bucket dates so a
+    # half-finished bucket (coarse row already upserted, sources not yet
+    # deleted by a prior interrupted run) can be told apart from a fresh one
+    # before any aggregation happens. Scoped with .in_() rather than a bare
+    # per-ticker read - W rows are already bounded (~208/ticker) but this
+    # keeps the round trip small and gives paginated_select's .order("date")
+    # a small, single-page result to page over deterministically, so a
+    # skipped/duplicated row at a page boundary can't misread an
+    # already-compacted bucket as fresh and re-trigger the exact overwrite
+    # this function exists to prevent.
+    existing_weekly_dates = set()
+    if week_groups:
+        existing_weekly_dates = {
+            row["date"]
+            for row in paginated_select(
+                lambda: client.table("prices")
+                .select("date")
+                .eq("ticker", ticker_id)
+                .eq("granularity", "W")
+                .in_("date", [ws.isoformat() for ws in week_groups.keys()])
+                .order("date")
+            )
+        }
 
     weeks_compacted = 0
     weeks_skipped = 0
@@ -312,23 +323,31 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int, int, 
         .order("granularity")
     )
 
-    # Same half-finished-bucket check for the monthly pass, which reads both
-    # D and W sources - a partially compacted month can hold a mix of both.
-    existing_monthly_dates = {
-        row["date"]
-        for row in paginated_select(
-            lambda: client.table("prices")
-            .select("date")
-            .eq("ticker", ticker_id)
-            .eq("granularity", "M")
-        )
-    }
-
     month_groups: dict[date, list[dict]] = {}
     for row in coarse_rows:
         d = date.fromisoformat(row["date"])
         if _month_end(d) < monthly_cutoff:
             month_groups.setdefault(_month_start(d), []).append(row)
+
+    # Same half-finished-bucket check as the weekly pass above, scoped to
+    # just these candidate months - the monthly pass reads both D and W
+    # sources, and a partially compacted month can hold a mix of both. M
+    # rows are unbounded (BACKFILL_PERIOD="max" means a long-history ticker
+    # can plausibly cross the page size over time), so scoping this one
+    # matters even more than for existing_weekly_dates above.
+    existing_monthly_dates = set()
+    if month_groups:
+        existing_monthly_dates = {
+            row["date"]
+            for row in paginated_select(
+                lambda: client.table("prices")
+                .select("date")
+                .eq("ticker", ticker_id)
+                .eq("granularity", "M")
+                .in_("date", [ms.isoformat() for ms in month_groups.keys()])
+                .order("date")
+            )
+        }
 
     months_compacted = 0
     months_skipped = 0
@@ -599,7 +618,7 @@ def main():
         months_skipped_cleaned += months_skipped
         if weeks or months or weeks_skipped or months_skipped:
             skipped_note = (
-                f", {weeks_skipped} week(s)/{months_skipped} month(s) skipped (already compacted, sources cleaned up)"
+                f", {weeks_skipped} week(s), {months_skipped} month(s) skipped (already compacted, sources cleaned up)"
                 if weeks_skipped or months_skipped
                 else ""
             )
