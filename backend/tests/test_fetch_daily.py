@@ -12,6 +12,7 @@ so this sticks to the standard library.
 
 import sys
 import unittest
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -24,6 +25,7 @@ from scripts.fetch_daily import (
     _has_new_events,
     _needs_full_backfill,
     _select_tickers_needing_sync,
+    compact_ticker,
     fetch_ticker_rows,
 )
 
@@ -176,6 +178,246 @@ class NeedsFullBackfillTests(unittest.TestCase):
         self.assertIsNone(
             _needs_full_backfill(client, "NVDA", split_events, dividend_events)
         )
+
+
+# ── compact_ticker ───────────────────────────────────────────────────────────
+
+class _FakePricesQuery:
+    """Minimal stand-in for postgrest-py's fluent query builder, enough to
+    drive compact_ticker (and the paginated_select it reads through) against
+    an in-memory `prices` table without a real Supabase instance."""
+
+    def __init__(self, table_rows: list[dict], mode: str, payload=None):
+        self._table_rows = table_rows  # shared, mutable reference
+        self._mode = mode
+        self._payload = payload
+        self._filters = []  # list of (kind, col, value)
+        self._range = None
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, col, val):
+        self._filters.append(("eq", col, val))
+        return self
+
+    def lt(self, col, val):
+        self._filters.append(("lt", col, val))
+        return self
+
+    def in_(self, col, vals):
+        self._filters.append(("in", col, set(vals)))
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def range(self, start, end):
+        self._range = (start, end)
+        return self
+
+    def _matches(self, row):
+        for kind, col, val in self._filters:
+            if kind == "eq" and row.get(col) != val:
+                return False
+            if kind == "lt" and not (row.get(col) < val):
+                return False
+            if kind == "in" and row.get(col) not in val:
+                return False
+        return True
+
+    def execute(self):
+        if self._mode == "select":
+            matched = [r for r in self._table_rows if self._matches(r)]
+            if self._range is not None:
+                start, end = self._range
+                matched = matched[start:end + 1]
+            return SimpleNamespace(data=matched)
+
+        if self._mode == "upsert":
+            payload = self._payload if isinstance(self._payload, list) else [self._payload]
+            for new_row in payload:
+                key = (new_row["ticker"], new_row["date"], new_row["granularity"])
+                for i, r in enumerate(self._table_rows):
+                    if (r["ticker"], r["date"], r["granularity"]) == key:
+                        self._table_rows[i] = new_row
+                        break
+                else:
+                    self._table_rows.append(new_row)
+            return SimpleNamespace(data=payload)
+
+        # delete
+        removed = [r for r in self._table_rows if self._matches(r)]
+        self._table_rows[:] = [r for r in self._table_rows if not self._matches(r)]
+        return SimpleNamespace(data=removed)
+
+
+class _FakePricesTable:
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+
+    def select(self, *a, **k):
+        return _FakePricesQuery(self.rows, "select")
+
+    def upsert(self, payload):
+        return _FakePricesQuery(self.rows, "upsert", payload=payload)
+
+    def delete(self):
+        return _FakePricesQuery(self.rows, "delete")
+
+
+class _FakeCompactClient:
+    """Stands in for the whole Supabase client, but only ever hands out the
+    `prices` table - compact_ticker never touches any other table."""
+
+    def __init__(self, rows: list[dict]):
+        self._prices = _FakePricesTable(rows)
+
+    def table(self, name):
+        assert name == "prices", f"compact_ticker shouldn't touch table {name!r}"
+        return self._prices
+
+
+def _d(ticker, date_str, o, h, l, c, v):
+    return {
+        "ticker": ticker, "date": date_str, "granularity": "D",
+        "open": o, "high": h, "low": l, "close": c, "volume": v,
+    }
+
+
+class CompactTickerWeeklyTests(unittest.TestCase):
+    # A Monday-anchored week (2023-01-02..2023-01-08) that has fully elapsed
+    # past WEEKLY_TIER_START_DAYS as of this `today`, but is nowhere near old
+    # enough to also fall into the monthly tier.
+    TODAY = date(2024, 6, 1)
+    WEEK_START = "2023-01-02"
+
+    def test_fresh_bucket_is_aggregated(self):
+        """No coarse row exists yet - this is a normal, first-time
+        compaction, so the bucket gets aggregated and its sources removed."""
+        rows = [
+            _d("NVDA", "2023-01-02", 10, 12, 9, 11, 100),
+            _d("NVDA", "2023-01-03", 11, 13, 10, 12, 200),
+        ]
+        client = _FakeCompactClient(rows)
+
+        weeks, months, weeks_skipped, months_skipped = compact_ticker(client, "NVDA", self.TODAY)
+
+        self.assertEqual((weeks, months, weeks_skipped, months_skipped), (1, 0, 0, 0))
+        remaining = client._prices.rows
+        self.assertEqual([r for r in remaining if r["granularity"] == "D"], [])
+        week_rows = [r for r in remaining if r["granularity"] == "W"]
+        self.assertEqual(len(week_rows), 1)
+        self.assertEqual(week_rows[0]["date"], self.WEEK_START)
+        self.assertEqual(week_rows[0]["open"], 10)
+        self.assertEqual(week_rows[0]["close"], 12)
+
+    def test_partially_compacted_bucket_is_cleaned_not_reaggregated(self):
+        """Simulates a run that upserted the W candle and then died before
+        deleting its D sources. A naive re-aggregation over just the
+        leftover sources would silently overwrite the correct candle -
+        instead the existing coarse row must be left untouched and only the
+        leftover sources deleted."""
+        correct_week_row = {
+            "ticker": "NVDA", "date": self.WEEK_START, "granularity": "W",
+            "open": 10, "high": 20, "low": 5, "close": 18, "volume": 999,
+        }
+        leftover_daily_rows = [
+            # These alone would resample to open=11/high=13/low=10/close=12 -
+            # very different from the correct candle above - proving that if
+            # this bucket got re-aggregated, the assertions below would fail.
+            _d("NVDA", "2023-01-03", 11, 13, 10, 12, 200),
+        ]
+        rows = [correct_week_row] + leftover_daily_rows
+        client = _FakeCompactClient(rows)
+
+        weeks, months, weeks_skipped, months_skipped = compact_ticker(client, "NVDA", self.TODAY)
+
+        self.assertEqual((weeks, months, weeks_skipped, months_skipped), (0, 0, 1, 0))
+        remaining = client._prices.rows
+        self.assertEqual([r for r in remaining if r["granularity"] == "D"], [])
+        week_rows = [r for r in remaining if r["granularity"] == "W"]
+        self.assertEqual(week_rows, [correct_week_row])
+
+    def test_second_consecutive_run_is_a_no_op(self):
+        """After a clean (or now-recovered) compaction, re-running against
+        the same state finds nothing left to do."""
+        rows = [
+            _d("NVDA", "2023-01-02", 10, 12, 9, 11, 100),
+            _d("NVDA", "2023-01-03", 11, 13, 10, 12, 200),
+        ]
+        client = _FakeCompactClient(rows)
+        compact_ticker(client, "NVDA", self.TODAY)
+
+        second_run = compact_ticker(client, "NVDA", self.TODAY)
+
+        self.assertEqual(second_run, (0, 0, 0, 0))
+
+
+class CompactTickerMonthlyTests(unittest.TestCase):
+    # A calendar month (2018-01) old enough to have fully elapsed past
+    # MONTHLY_TIER_START_DAYS as of this `today`.
+    TODAY = date(2024, 6, 1)
+    MONTH_START = "2018-01-01"
+
+    def test_mixed_daily_and_weekly_sources_are_aggregated(self):
+        """A partially compacted month can hold a mix of D and W sources.
+        Within one compact_ticker call the weekly pass always runs first
+        and drains any D row old enough for the monthly tier too (its week
+        is unavoidably old enough to already qualify for weekly
+        compaction), so the stray D row becomes a fresh W candle before the
+        monthly pass groups it with the pre-existing W row into one M
+        candle - both granularities feed the same month either way."""
+        rows = [
+            _d("NVDA", "2018-01-02", 10, 12, 9, 11, 100),
+            {
+                "ticker": "NVDA", "date": "2018-01-08", "granularity": "W",
+                "open": 11, "high": 15, "low": 10, "close": 14, "volume": 500,
+            },
+        ]
+        client = _FakeCompactClient(rows)
+
+        weeks, months, weeks_skipped, months_skipped = compact_ticker(client, "NVDA", self.TODAY)
+
+        self.assertEqual((weeks, months, weeks_skipped, months_skipped), (1, 1, 0, 0))
+        remaining = client._prices.rows
+        self.assertEqual([r for r in remaining if r["granularity"] in ("D", "W")], [])
+        month_rows = [r for r in remaining if r["granularity"] == "M"]
+        self.assertEqual(len(month_rows), 1)
+        self.assertEqual(month_rows[0]["date"], self.MONTH_START)
+        self.assertEqual(month_rows[0]["close"], 14)
+
+    def test_partially_compacted_month_is_cleaned_not_reaggregated(self):
+        """Same crash-safety guarantee as the weekly pass: an M row already
+        existing means a prior run died after upserting it but before
+        deleting its leftover D/W sources - don't re-aggregate over the
+        partial leftovers, just finish the cleanup. (The leftover D row
+        still passes through the weekly pass first - see the comment above
+        - but since it belongs to a week with no matching W candle, that
+        pass aggregates it into a normal, freshly correct W row before the
+        monthly pass ever sees it; the monthly pass then finds the existing
+        M row and only deletes both leftover W rows, never overwriting the
+        correct month candle.)"""
+        correct_month_row = {
+            "ticker": "NVDA", "date": self.MONTH_START, "granularity": "M",
+            "open": 10, "high": 30, "low": 5, "close": 28, "volume": 9999,
+        }
+        leftover_sources = [
+            _d("NVDA", "2018-01-02", 10, 12, 9, 11, 100),
+            {
+                "ticker": "NVDA", "date": "2018-01-08", "granularity": "W",
+                "open": 11, "high": 15, "low": 10, "close": 14, "volume": 500,
+            },
+        ]
+        rows = [correct_month_row] + leftover_sources
+        client = _FakeCompactClient(rows)
+
+        weeks, months, weeks_skipped, months_skipped = compact_ticker(client, "NVDA", self.TODAY)
+
+        self.assertEqual((weeks, months, weeks_skipped, months_skipped), (1, 0, 0, 1))
+        remaining = client._prices.rows
+        self.assertEqual([r for r in remaining if r["granularity"] in ("D", "W")], [])
+        self.assertEqual(remaining, [correct_month_row])
 
 
 # ── _select_tickers_needing_sync ────────────────────────────────────────────
