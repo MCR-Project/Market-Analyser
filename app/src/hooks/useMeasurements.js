@@ -3,7 +3,10 @@
  * manages which are active, and fetches per-ticker data for the table.
  *
  * On mount: fetches the manifest, auto-enables measurements marked default_enabled.
- * On ETF change or toggle: fetches results for all active measurements.
+ * On ETF change: refetches every active measurement (their data is tied
+ * to the ETF). On toggle: fetches only the newly-activated measurement(s)
+ * and clears state for the newly-deactivated one(s) — existing columns
+ * are left untouched.
  * Results are stored as:
  *   { [measurementId]: { per_ticker: {NVDA: 7.9, ...}, per_ticker_mdx: {NVDA: "**7.9%**", ...}, ... } }
  * `per_ticker` (raw numbers) drives sorting/filtering; `per_ticker_mdx`
@@ -19,12 +22,17 @@ export function useMeasurements(etfId) {
   const [loading, setLoading] = useState({});
   const abortRefs = useRef({});
   const initializedRef = useRef(false);
+  // Tracks what was fetched last time the results effect ran, so it can
+  // diff against the new activeIds/etfId and only fetch what's actually
+  // new instead of re-running every active measurement on every toggle.
+  const prevActiveIdsRef = useRef([]);
+  const prevEtfIdRef = useRef(etfId);
 
   // Fetch the manifest via useFetch so a failed attempt (e.g. the page
   // loaded before the backend was up) can be re-run through retryManifest
   // instead of leaving the measurement list empty until a full reload.
   const { data: manifestData, retry: retryManifest } = useFetch(
-    () => api.listMeasurements(),
+    (signal) => api.listMeasurements({ signal }),
     [],
     { fallback: null }
   );
@@ -48,14 +56,30 @@ export function useMeasurements(etfId) {
     });
   }, []);
 
-  // Fetch results for active measurements when etfId or activeIds change
+  // Fetch results for active measurements when etfId or activeIds change.
+  // Diffs against what was active last run: an ETF change invalidates
+  // every currently-active measurement (all refetch), but a plain toggle
+  // only fetches the newly-added id(s) and clears the newly-removed
+  // one(s) — enabling a fourth column shouldn't abort and re-run the
+  // three already loaded.
   useEffect(() => {
     const ids = activeIds || [];
+    const prevIds = prevActiveIdsRef.current;
+    const etfChanged = prevEtfIdRef.current !== etfId;
 
-    for (const ctrl of Object.values(abortRefs.current)) ctrl.abort();
-    abortRefs.current = {};
+    const idsToFetch = etfChanged ? ids : ids.filter(id => !prevIds.includes(id));
+    const idsToAbort = etfChanged ? prevIds : prevIds.filter(id => !ids.includes(id));
+    // Only clear state for ids that are truly gone, not ones being
+    // refetched under a new etfId (those get fresh state from the fetch
+    // below instead of a delete-then-set race).
+    const idsToClear = idsToAbort.filter(id => !idsToFetch.includes(id));
 
-    for (const id of ids) {
+    for (const id of idsToAbort) {
+      abortRefs.current[id]?.abort();
+      delete abortRefs.current[id];
+    }
+
+    for (const id of idsToFetch) {
       const m = manifest.find(x => x.id === id);
       if (!m) continue;
 
@@ -63,7 +87,7 @@ export function useMeasurements(etfId) {
       abortRefs.current[id] = ctrl;
       setLoading(prev => ({ ...prev, [id]: true }));
 
-      api.runMeasurement(m.route, { etf_id: etfId })
+      api.runMeasurement(m.route, { etf_id: etfId }, { signal: ctrl.signal })
         .then(data => {
           if (!ctrl.signal.aborted) {
             setResults(prev => ({ ...prev, [id]: data }));
@@ -78,19 +102,33 @@ export function useMeasurements(etfId) {
         });
     }
 
-    // Remove results for deactivated measurements
-    setResults(prev => {
-      const next = {};
-      for (const id of ids) {
-        if (id in prev) next[id] = prev[id];
-      }
-      return next;
-    });
+    // Remove results/loading for deactivated measurements — otherwise a
+    // toggled-off measurement's stale value (and a stuck `loading: true`)
+    // lingers in the map indefinitely.
+    if (idsToClear.length) {
+      setResults(prev => {
+        const next = { ...prev };
+        for (const id of idsToClear) delete next[id];
+        return next;
+      });
+      setLoading(prev => {
+        const next = { ...prev };
+        for (const id of idsToClear) delete next[id];
+        return next;
+      });
+    }
 
-    return () => {
-      for (const ctrl of Object.values(abortRefs.current)) ctrl.abort();
-    };
+    prevActiveIdsRef.current = ids;
+    prevEtfIdRef.current = etfId;
   }, [activeIds, etfId, manifest]);
+
+  // Abort any still in-flight measurement requests on unmount.
+  useEffect(() => {
+    const refs = abortRefs.current;
+    return () => {
+      for (const ctrl of Object.values(refs)) ctrl.abort();
+    };
+  }, []);
 
   // Build a lookup: ticker → { measurementId: rawValue }
   // Raw values are only used for client-side sorting/filtering.
