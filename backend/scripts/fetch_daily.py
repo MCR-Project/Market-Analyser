@@ -231,7 +231,7 @@ def bucket_by_age(rows: list[dict], today: date) -> list[dict]:
     return result
 
 
-def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
+def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int, int, int]:
     """Sweep rows already stored for one ticker, compacting any bucket that
     has fully elapsed past its cutoff since the last run: daily rows into
     weekly candles once their ISO week is fully past WEEKLY_TIER_START_DAYS,
@@ -239,8 +239,19 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
     fully past MONTHLY_TIER_START_DAYS (see bucket_by_age's docstring for
     why "fully elapsed" matters). A bucket with no matching source rows
     left - already compacted by a prior run - is naturally skipped, so this
-    is safe to call for every known ticker on every daily job run. Returns
-    (weeks_compacted, months_compacted).
+    is safe to call for every known ticker on every daily job run.
+
+    A bucket can also be left half-finished: a prior run upserted the coarse
+    W/M row but died (timeout, failed Action, network drop) before deleting
+    the daily/weekly sources it was built from. Re-aggregating those
+    leftover sources here would silently overwrite the correct candle with
+    one built from only a fraction of the period, so each pass first reads
+    which coarse rows already exist and, for a bucket that already has one,
+    only deletes the leftover sources instead of re-aggregating.
+
+    Returns (weeks_compacted, months_compacted, weeks_skipped_cleaned,
+    months_skipped_cleaned) - the skipped-cleaned counts are buckets that
+    already had a coarse row and only got their leftover sources deleted.
     """
     weekly_cutoff = today - timedelta(days=WEEKLY_TIER_START_DAYS)
     monthly_cutoff = today - timedelta(days=MONTHLY_TIER_START_DAYS)
@@ -262,8 +273,41 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
         if week_start + timedelta(days=6) < weekly_cutoff:
             week_groups.setdefault(week_start, []).append(row)
 
+    # Read existing W rows for just these candidate bucket dates so a
+    # half-finished bucket (coarse row already upserted, sources not yet
+    # deleted by a prior interrupted run) can be told apart from a fresh one
+    # before any aggregation happens. Scoped with .in_() rather than a bare
+    # per-ticker read - W rows are already bounded (~208/ticker) but this
+    # keeps the round trip small and gives paginated_select's .order("date")
+    # a small, single-page result to page over deterministically, so a
+    # skipped/duplicated row at a page boundary can't misread an
+    # already-compacted bucket as fresh and re-trigger the exact overwrite
+    # this function exists to prevent.
+    existing_weekly_dates = set()
+    if week_groups:
+        existing_weekly_dates = {
+            row["date"]
+            for row in paginated_select(
+                lambda: client.table("prices")
+                .select("date")
+                .eq("ticker", ticker_id)
+                .eq("granularity", "W")
+                .in_("date", [ws.isoformat() for ws in week_groups.keys()])
+                .order("date")
+            )
+        }
+
+    weeks_compacted = 0
+    weeks_skipped = 0
     for week_start, bucket_rows in week_groups.items():
-        client.table("prices").upsert(_resample(bucket_rows, week_start, "W")).execute()
+        if week_start.isoformat() in existing_weekly_dates:
+            # Already compacted by a prior run that died before cleaning up
+            # its sources - don't re-aggregate over a partial bucket, just
+            # finish the cleanup.
+            weeks_skipped += 1
+        else:
+            client.table("prices").upsert(_resample(bucket_rows, week_start, "W")).execute()
+            weeks_compacted += 1
         client.table("prices").delete().eq("ticker", ticker_id).eq("granularity", "D").in_(
             "date", [r["date"] for r in bucket_rows]
         ).execute()
@@ -285,8 +329,34 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
         if _month_end(d) < monthly_cutoff:
             month_groups.setdefault(_month_start(d), []).append(row)
 
+    # Same half-finished-bucket check as the weekly pass above, scoped to
+    # just these candidate months - the monthly pass reads both D and W
+    # sources, and a partially compacted month can hold a mix of both. M
+    # rows are unbounded (BACKFILL_PERIOD="max" means a long-history ticker
+    # can plausibly cross the page size over time), so scoping this one
+    # matters even more than for existing_weekly_dates above.
+    existing_monthly_dates = set()
+    if month_groups:
+        existing_monthly_dates = {
+            row["date"]
+            for row in paginated_select(
+                lambda: client.table("prices")
+                .select("date")
+                .eq("ticker", ticker_id)
+                .eq("granularity", "M")
+                .in_("date", [ms.isoformat() for ms in month_groups.keys()])
+                .order("date")
+            )
+        }
+
+    months_compacted = 0
+    months_skipped = 0
     for month_start, bucket_rows in month_groups.items():
-        client.table("prices").upsert(_resample(bucket_rows, month_start, "M")).execute()
+        if month_start.isoformat() in existing_monthly_dates:
+            months_skipped += 1
+        else:
+            client.table("prices").upsert(_resample(bucket_rows, month_start, "M")).execute()
+            months_compacted += 1
         for granularity in ("D", "W"):
             dates = [r["date"] for r in bucket_rows if r["granularity"] == granularity]
             if dates:
@@ -294,7 +364,7 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int]:
                     "granularity", granularity
                 ).in_("date", dates).execute()
 
-    return len(week_groups), len(month_groups)
+    return weeks_compacted, months_compacted, weeks_skipped, months_skipped
 
 
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
@@ -534,18 +604,34 @@ def main():
     # to shrink over time.
     print("\nCompacting aged price rows...")
     weeks_compacted = months_compacted = 0
+    weeks_skipped_cleaned = months_skipped_cleaned = 0
     for ticker_id in sorted(all_ticker_ids):
         try:
-            weeks, months = compact_ticker(client, ticker_id, today_date)
+            weeks, months, weeks_skipped, months_skipped = compact_ticker(client, ticker_id, today_date)
         except Exception as e:
             print(f"  FAILED  {ticker_id:8s} {e}")
             failed.append(ticker_id)
             continue
         weeks_compacted += weeks
         months_compacted += months
-        if weeks or months:
-            print(f"  {ticker_id:8s} {weeks} week(s), {months} month(s) compacted")
+        weeks_skipped_cleaned += weeks_skipped
+        months_skipped_cleaned += months_skipped
+        if weeks or months or weeks_skipped or months_skipped:
+            skipped_note = (
+                f", {weeks_skipped} week(s), {months_skipped} month(s) skipped (already compacted, sources cleaned up)"
+                if weeks_skipped or months_skipped
+                else ""
+            )
+            print(f"  {ticker_id:8s} {weeks} week(s), {months} month(s) compacted{skipped_note}")
     print(f"Done: {weeks_compacted} week(s), {months_compacted} month(s) compacted overall.")
+    if weeks_skipped_cleaned or months_skipped_cleaned:
+        # A recurring nonzero count here across runs signals a job that keeps
+        # dying mid-compaction (timeout, failed Action, network drop) rather
+        # than one-off leftovers - worth investigating if it persists.
+        print(
+            f"  {weeks_skipped_cleaned} week(s), {months_skipped_cleaned} month(s) already "
+            "compacted by a prior interrupted run - leftover sources cleaned up."
+        )
 
     if failed:
         print(f"Failed: {', '.join(failed)}")
