@@ -1,25 +1,87 @@
 const API_BASE = 'http://localhost:8000/api';
 
-async function fetchJson(path) {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
-  return res.json();
+// Requests are deduplicated by URL: concurrent callers for the same URL
+// share one in-flight fetch, and a short TTL cache serves repeats that
+// land just after the first one resolves (e.g. sibling components each
+// calling their own useLiveEtf/useLiveCorrelation/useLiveSectors on the
+// same render). This collapses the fan-out of independent hooks into one
+// network request per distinct URL without touching any call site.
+const CACHE_TTL_MS = 2000;
+
+const cache = new Map(); // url -> { data, expiresAt }
+const inFlight = new Map(); // url -> { promise, controller, refCount }
+
+function getCached(url) {
+  const entry = cache.get(url);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    cache.delete(url);
+    return undefined;
+  }
+  return entry.data;
+}
+
+// Ref-counts callers against the shared in-flight request so one caller's
+// abort (e.g. a component unmounting) doesn't cancel the network request
+// out from under other callers still waiting on the same URL. Only the
+// signal is used to opt out of the shared response — the caller's own
+// AbortController still keeps working with useFetch's aborted-check.
+function attachSignal(entry, signal) {
+  if (!signal) return;
+
+  const release = () => {
+    entry.refCount -= 1;
+    if (entry.refCount <= 0) entry.controller.abort();
+  };
+
+  if (signal.aborted) {
+    release();
+    return;
+  }
+  signal.addEventListener('abort', release, { once: true });
+  entry.refCount += 1;
+}
+
+async function fetchJson(path, { signal } = {}) {
+  const cached = getCached(path);
+  if (cached !== undefined) return cached;
+
+  let entry = inFlight.get(path);
+  if (!entry) {
+    const controller = new AbortController();
+    entry = { controller, refCount: 0 };
+    entry.promise = fetch(`${API_BASE}${path}`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+        const data = await res.json();
+        cache.set(path, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+        return data;
+      })
+      .finally(() => {
+        if (inFlight.get(path) === entry) inFlight.delete(path);
+      });
+    inFlight.set(path, entry);
+  }
+
+  attachSignal(entry, signal);
+  return entry.promise;
 }
 
 export const api = {
-  listEtfs: () => fetchJson('/etfs'),
-  getEtf: (id, { refresh = false } = {}) => fetchJson(`/etf/${id}${refresh ? '?refresh=true' : ''}`),
-  getStock: (ticker) => fetchJson(`/stock/${ticker}`),
-  getStocks: (tickers) => fetchJson(`/stocks?tickers=${tickers.join(',')}`),
-  getSeries: (ticker, period = '1y', interval = '1d') =>
-    fetchJson(`/series/${ticker}?period=${period}&interval=${interval}`),
-  getCorrelation: (etfId, period = '1y', threshold = 0) =>
-    fetchJson(`/correlation/${etfId}?period=${period}&threshold=${threshold}`),
-  getSectors: (etfId) => fetchJson(`/sectors/${etfId}`),
+  listEtfs: (opts = {}) => fetchJson('/etfs', opts),
+  getEtf: (id, { refresh = false, signal } = {}) =>
+    fetchJson(`/etf/${id}${refresh ? '?refresh=true' : ''}`, { signal }),
+  getStock: (ticker, opts = {}) => fetchJson(`/stock/${ticker}`, opts),
+  getStocks: (tickers, opts = {}) => fetchJson(`/stocks?tickers=${tickers.join(',')}`, opts),
+  getSeries: (ticker, period = '1y', interval = '1d', opts = {}) =>
+    fetchJson(`/series/${ticker}?period=${period}&interval=${interval}`, opts),
+  getCorrelation: (etfId, period = '1y', opts = {}) =>
+    fetchJson(`/correlation/${etfId}?period=${period}`, opts),
+  getSectors: (etfId, opts = {}) => fetchJson(`/sectors/${etfId}`, opts),
 
   // Measurement plugin system
-  listMeasurements: () => fetchJson('/measurements'),
-  runMeasurement: (route, params = {}) => {
+  listMeasurements: (opts = {}) => fetchJson('/measurements', opts),
+  runMeasurement: (route, params = {}, { signal } = {}) => {
     let url = route;
     // Replace {etf_id} and other path params
     for (const [key, value] of Object.entries(params)) {
@@ -31,6 +93,6 @@ export const api = {
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join('&');
     const fullUrl = queryParams ? `${url}?${queryParams}` : url;
-    return fetchJson(fullUrl);
+    return fetchJson(fullUrl, { signal });
   },
 };
