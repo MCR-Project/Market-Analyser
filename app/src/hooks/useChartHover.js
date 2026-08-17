@@ -8,7 +8,7 @@
  * the API) — no mock/computed label fallback.
  */
 import { useState, useCallback } from 'react';
-import { fmtMoney } from '../utils/format';
+import { fmtPrice } from '../utils/format';
 
 const W = 360, PAD = 4;
 
@@ -45,7 +45,7 @@ export function useChartHover(arr, timeframe, dates = null) {
     tooltip = {
       label,
       rawValue: val,
-      formattedValue: fmtMoney(val),
+      formattedValue: fmtPrice(val),
       returnPct: (runPos ? '+' : '') + runReturn.toFixed(2) + '%',
       runPos,
       deltaPos,
