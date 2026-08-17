@@ -75,8 +75,18 @@ def main():
     # columns present in the payload, so this insert leaves those columns
     # (and last_fetch) at their defaults / untouched on conflict - backfilled
     # by the next fetch_daily.py run either way.
+    #
+    # Rows are upserted one at a time rather than in a single bulk call:
+    # named and unnamed tickers produce different column sets, and PostgREST
+    # rejects bulk payloads whose objects don't all share the same keys.
+    # Padding every row to a common key set would work around that, but the
+    # padding would either send nulls for the missing metadata columns
+    # (clobbering existing values on conflict) or require reasoning about
+    # PostgREST's column-default handling per row - upserting individually
+    # keeps each row's payload exactly as built above.
     client = get_client()
-    client.table("ticker").upsert(rows).execute()
+    for row in rows:
+        client.table("ticker").upsert(row).execute()
 
     for row in rows:
         status = "active" if row["active"] else "inactive"
