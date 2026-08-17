@@ -13,7 +13,7 @@ export function useLiveSeries(ticker, timeframe = '1Y') {
   const period = PERIOD_MAP[timeframe] || '1y';
 
   const { data: liveData, loading } = useFetch(
-    () => api.getSeries(ticker, period),
+    (signal) => api.getSeries(ticker, period, '1d', { signal }),
     [ticker, period],
     { fallback: null }
   );
