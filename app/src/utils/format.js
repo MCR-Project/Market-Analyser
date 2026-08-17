@@ -8,3 +8,7 @@ export function fmtMoney(b) {
   if (b >= 1) return '$' + b.toFixed(1) + 'B';
   return '$' + Math.round(b * 1000) + 'M';
 }
+
+export function fmtPrice(v) {
+  return '$' + v.toFixed(2);
+}
