@@ -44,10 +44,10 @@ export default function App() {
   const [stockPopup, setStockPopup] = useState(null);
   const [measurePickerOpen, setMeasurePickerOpen] = useState(false);
 
-  // threshold=0 here is unrelated to NetworkView's own edge-ρ threshold —
-  // this copy is only used for the Header's live badge and StockPopup's
-  // peer correlations, neither of which cares about edge filtering.
-  const corrData = useLiveCorrelation(etfId, tickers, 0);
+  // This copy is unrelated to NetworkView's own edge-ρ threshold — it's
+  // only used for the Header's live badge and StockPopup's peer
+  // correlations, neither of which cares about edge filtering.
+  const corrData = useLiveCorrelation(etfId);
   const measurements = useMeasurements(etfId);
 
   // Reset the matrix/network selection whenever the active ETF changes

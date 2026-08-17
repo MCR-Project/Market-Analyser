@@ -13,10 +13,10 @@ const EMPTY = { matrix: {}, tickers: [], averages: {}, strongest: null, weakest:
  * and render a loading indicator rather than assume the fields are
  * populated.
  */
-export function useLiveCorrelation(etfId, tickers, threshold = 0) {
+export function useLiveCorrelation(etfId) {
   const { data, loading, error } = useFetch(
-    () => api.getCorrelation(etfId, '1y', threshold),
-    [etfId, threshold],
+    (signal) => api.getCorrelation(etfId, '1y', { signal }),
+    [etfId],
     { fallback: null }
   );
 
