@@ -26,20 +26,26 @@ function getCached(url) {
 // out from under other callers still waiting on the same URL. Only the
 // signal is used to opt out of the shared response — the caller's own
 // AbortController still keeps working with useFetch's aborted-check.
-function attachSignal(entry, signal) {
-  if (!signal) return;
+function attachSignal(entry, path, signal) {
+  if (!signal || signal.aborted) return;
 
-  const release = () => {
-    entry.refCount -= 1;
-    if (entry.refCount <= 0) entry.controller.abort();
-  };
-
-  if (signal.aborted) {
-    release();
-    return;
-  }
-  signal.addEventListener('abort', release, { once: true });
   entry.refCount += 1;
+  signal.addEventListener('abort', () => {
+    entry.refCount -= 1;
+    if (entry.refCount <= 0) {
+      entry.controller.abort();
+      // Drop the entry synchronously — not just in the fetch's `.finally()`,
+      // which only runs once the abort rejection is processed as a
+      // microtask. Without this, a caller whose mount/cleanup/remount
+      // happens synchronously in the same tick (React StrictMode's dev
+      // double-invoke, or any rapid remount) can find this now-dead entry
+      // still sitting in `inFlight`, attach to it, and inherit its
+      // AbortError even though its own signal was never aborted — surfacing
+      // as a false "backend unreachable" for a request that never actually
+      // ran, let alone failed.
+      if (inFlight.get(path) === entry) inFlight.delete(path);
+    }
+  }, { once: true });
 }
 
 async function fetchJson(path, { signal } = {}) {
@@ -63,7 +69,7 @@ async function fetchJson(path, { signal } = {}) {
     inFlight.set(path, entry);
   }
 
-  attachSignal(entry, signal);
+  attachSignal(entry, path, signal);
   return entry.promise;
 }
 
