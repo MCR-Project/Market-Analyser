@@ -17,7 +17,7 @@ export function useLiveEtf() {
   const switchEtf = useEtfStore((s) => s.switchEtf);
 
   const { data: etf, loading, error, retry } = useFetch(
-    (signal, force) => api.getEtf(etfId, { refresh: force }),
+    (signal, force) => api.getEtf(etfId, { refresh: force, signal }),
     [etfId],
     { fallback: null }
   );
@@ -40,7 +40,7 @@ export function useLiveEtf() {
   );
 
   const { data: allEtfs } = useFetch(
-    () => api.listEtfs(),
+    (signal) => api.listEtfs({ signal }),
     [],
     { fallback: null }
   );

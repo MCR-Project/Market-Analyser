@@ -15,7 +15,7 @@ const EMPTY = { sectorWeights: {}, topSector: null, ranking: [], sectorLabel: 'T
  */
 export function useLiveSectors(etfId) {
   const { data, loading, error } = useFetch(
-    () => api.getSectors(etfId),
+    (signal) => api.getSectors(etfId, { signal }),
     [etfId],
     { fallback: null }
   );

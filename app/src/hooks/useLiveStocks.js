@@ -10,7 +10,7 @@ import { api } from '../utils/api';
  */
 export function useLiveStocks(tickers) {
   const { data, loading, error } = useFetch(
-    () => (tickers.length ? api.getStocks(tickers) : Promise.resolve([])),
+    (signal) => (tickers.length ? api.getStocks(tickers, { signal }) : Promise.resolve([])),
     [tickers.join(',')],
     { fallback: null }
   );

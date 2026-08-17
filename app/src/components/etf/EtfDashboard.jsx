@@ -45,9 +45,9 @@ export const EtfDashboard = memo(function EtfDashboard() {
   // in services/market_data.py.
   const stale = !!etf?.stale;
 
-  // threshold=0 — this card only needs the per-ticker averages, not the
-  // edge count used elsewhere by the network view's threshold slider.
-  const corrData = useLiveCorrelation(etfId, tickers, 0);
+  // This card only needs the per-ticker averages, not the edge count
+  // used elsewhere by the network view's threshold slider.
+  const corrData = useLiveCorrelation(etfId);
   const sectors = useLiveSectors(etfId);
 
   const avgCorr = useMemo(() => {

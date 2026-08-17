@@ -21,6 +21,7 @@
 import { memo, useState, useMemo } from 'react';
 import { fmtMoney } from '../../utils/format';
 import { useFetch } from '../../hooks/useFetch';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { api } from '../../utils/api';
 import { Loading } from '../ui/Loading';
 
@@ -34,16 +35,20 @@ export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect,
     return q ? etfs.filter(e => e.id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || (e.cat || '').toLowerCase().includes(q)) : etfs;
   }, [query, etfs]);
 
-  const previewId = hovered || filtered[0]?.id || currentId;
+  // Debounced so sweeping the mouse across the list doesn't fire a
+  // preview + sectors request per hovered row — only the row the pointer
+  // settles on for a beat triggers a fetch.
+  const rawPreviewId = hovered || filtered[0]?.id || currentId;
+  const previewId = useDebouncedValue(rawPreviewId, 150);
 
   const { data: preview, loading: previewLoading } = useFetch(
-    () => api.getEtf(previewId),
+    (signal) => api.getEtf(previewId, { signal }),
     [previewId],
     { fallback: null }
   );
 
   const { data: sectorData, loading: sectorLoading } = useFetch(
-    () => api.getSectors(previewId),
+    (signal) => api.getSectors(previewId, { signal }),
     [previewId],
     { fallback: null }
   );

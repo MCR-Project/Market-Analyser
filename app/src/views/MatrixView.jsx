@@ -25,9 +25,9 @@ import { ErrorState } from '../components/ui/ErrorState';
 
 export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
   const { etf, etfId, tickers, loading: etfLoading, retry: etfRetry } = useLiveEtf();
-  // threshold=0 — the matrix always shows the full correlation range,
-  // it doesn't filter by an edge threshold like the network view does.
-  const corrData = useLiveCorrelation(etfId, tickers, 0);
+  // The matrix always shows the full correlation range, it doesn't
+  // filter by an edge threshold like the network view does.
+  const corrData = useLiveCorrelation(etfId);
   const sectors = useLiveSectors(etfId);
 
   const [matrixCount, setMatrixCount] = useState(10);

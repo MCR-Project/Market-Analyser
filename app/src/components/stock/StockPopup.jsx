@@ -39,7 +39,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
 
   // Stock identity (name, sector, exchange) — live from the API
   const { data: stockInfo, loading: stockLoading } = useFetch(
-    () => api.getStock(ticker),
+    (signal) => api.getStock(ticker, { signal }),
     [ticker],
     { fallback: null }
   );
@@ -56,7 +56,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
 
   // Batch-fetch names for every holding, used to label peer cards
   const { data: peerInfos, loading: peerNamesLoading } = useFetch(
-    () => api.getStocks(tickers),
+    (signal) => api.getStocks(tickers, { signal }),
     [tickers.join(',')],
     { fallback: [] }
   );
@@ -73,7 +73,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
     for (const tf of TF_LIST) {
       const ctrl = new AbortController();
       controllers.push(ctrl);
-      api.getSeries(ticker, PERIOD_MAP[tf])
+      api.getSeries(ticker, PERIOD_MAP[tf], '1d', { signal: ctrl.signal })
         .then(data => {
           if (!ctrl.signal.aborted && data?.length > 1) {
             const first = data[0].close;

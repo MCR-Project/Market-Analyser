@@ -49,7 +49,7 @@ function nodeRadius(weightPct) {
 export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   const [threshold, setThreshold] = useState(0.5);
-  const corrData = useLiveCorrelation(etfId, tickers, threshold);
+  const corrData = useLiveCorrelation(etfId);
   const sectors = useLiveSectors(etfId);
   const { stockMap } = useLiveStocks(tickers);
 
@@ -86,7 +86,7 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
         <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">edge ρ ≥</span>
         <input type="range" className="corr-range flex-1 max-w-[300px]" min={0.2} max={0.9} step={0.01} value={threshold} onInput={e => setThreshold(parseFloat(e.target.value))} />
         <span className="font-[var(--font-mono)] text-[13px] font-semibold text-[var(--fg)] w-9 tabular-nums">{fmtCorr(threshold)}</span>
-        <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">· {corrData.loading ? '…' : corrData.edgeCount} links</span>
+        <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">· {corrData.loading ? '…' : edges.length} links</span>
       </div>
 
       {/* This view fetches its own copy of the ETF (see useLiveEtf), so it
