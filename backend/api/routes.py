@@ -24,7 +24,7 @@ from services.market_data import (
     get_stock_info,
     get_price_series,
     compute_correlation_matrix,
-    list_etfs,
+    list_etf_summaries,
 )
 from config import SECTOR_TAG
 
@@ -35,18 +35,15 @@ router = APIRouter(prefix="/api")
 
 @router.get("/etfs")
 def get_etfs():
-    """List all tracked ETFs with summary info (no holdings array).
+    """List all tracked ETFs with summary info (no holdings array, no AUM).
 
-    Iterates every ETF id in Supabase's `etfs` table (list_etfs), fetching
-    info + holding count for each. The holding count comes from
-    get_etf_holdings length, not from the info dict.
+    Reads id/name/cat/holdingCount for every tracked ETF via
+    list_etf_summaries - two Supabase queries total, no yfinance calls,
+    regardless of how many ETFs are tracked. AUM is intentionally omitted:
+    it required a live yfinance call per ETF and no caller reads it from
+    this endpoint (the picker's preview gets it from GET /api/etf/{id}).
     """
-    results = []
-    for etf_id in list_etfs():
-        info = get_etf_info(etf_id)
-        holdings = get_etf_holdings(etf_id)
-        results.append({**info, "holdingCount": len(holdings)})
-    return results
+    return list_etf_summaries()
 
 
 @router.get("/etf/{etf_id}")
