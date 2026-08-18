@@ -46,11 +46,9 @@ Output schema: see fetcher/common.py - consumed by
 backend/scripts/complete_database.py --holdings-json.
 """
 
-import argparse
-import time
 from typing import List, Optional, Tuple
 
-from common import BrowserSession, EtfFund, EtfHolding, EtfResult, browser_session, write_output
+from common import BrowserSession, EtfFund, EtfHolding, run_fetcher
 
 BASE_URL = "https://investor.vanguard.com"
 FUND_LIST_URL = "https://investor.vanguard.com/investment-products/list/funddetail/all"
@@ -148,48 +146,12 @@ def fetch_etf_holdings(session: BrowserSession, ticker: str) -> Tuple[List[EtfHo
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Scrape the list of Vanguard ETFs and their holdings.")
-    parser.add_argument("--output", default="vanguard_holdings.json", help="Output JSON file")
-    parser.add_argument("--delay", type=float, default=1.5, help="Delay in seconds between holdings requests")
-    parser.add_argument("--limit", type=int, default=None, help="Limit the number of ETFs processed (useful for testing)")
-    parser.add_argument("--tickers", nargs="+", metavar="ID", help="Only fetch these fund tickers (e.g. VTI VXUS)")
-    args = parser.parse_args()
-
-    with browser_session() as session:
-        print("Fetching the Vanguard ETF list...")
-        funds = fetch_etf_list(session)
-        print(f"{len(funds)} ETFs found.")
-
-        if args.tickers:
-            wanted = {t.strip().upper() for t in args.tickers}
-            funds = [f for f in funds if f.ticker.upper() in wanted]
-            missing = wanted - {f.ticker.upper() for f in funds}
-            if missing:
-                print(f"Not in the Vanguard fund list: {', '.join(sorted(missing))}")
-        if args.limit:
-            funds = funds[: args.limit]
-
-        results: List[EtfResult] = []
-        for i, fund in enumerate(funds, start=1):
-            print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
-            try:
-                holdings, note = fetch_etf_holdings(session, fund.holdings_url)
-                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
-                if note:
-                    print(f"OK - {note}")
-                else:
-                    print(f"OK ({len(holdings)} positions)")
-            except Exception as exc:  # keep going even if one fund fails
-                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
-                print(f"FAILED ({exc})")
-            time.sleep(args.delay)
-
-    write_output(results, args.output)
-
-    ok = sum(1 for r in results if r.error is None)
-    with_tickers = sum(1 for r in results if r.holdings)
-    print(f"\nDone: {ok}/{len(results)} ETFs fetched without error, {with_tickers} with stock tickers extracted.")
-    print(f"Output written to {args.output}")
+    run_fetcher(
+        provider_name="Vanguard",
+        fetch_etf_list=fetch_etf_list,
+        fetch_etf_holdings=fetch_etf_holdings,
+        default_output="vanguard_holdings.json",
+    )
 
 
 if __name__ == "__main__":

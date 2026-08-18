@@ -33,11 +33,12 @@ per-provider bot-check handling without rewriting each fetcher's own
 parsing logic.
 """
 
+import argparse
 import json
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 from urllib.parse import urlencode
 
 from playwright.sync_api import sync_playwright
@@ -95,6 +96,66 @@ def write_output(results: List[EtfResult], path: str) -> None:
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
+
+
+def run_fetcher(
+    provider_name: str,
+    fetch_etf_list: Callable[[BrowserSession], List[EtfFund]],
+    fetch_etf_holdings: Callable[[BrowserSession, str], Tuple[List[EtfHolding], Optional[str]]],
+    default_output: str,
+) -> None:
+    """Shared CLI and orchestration for every provider fetcher's main().
+
+    Every fetcher in this folder differs only in its provider name, its
+    fetch_etf_list()/fetch_etf_holdings() pair, and its default --output
+    filename - everything else (the argument parser, --tickers/--limit
+    filtering, the numbered progress loop with per-fund error isolation,
+    the write_output() call and the summary print) is identical, so it
+    lives here once instead of six times.
+    """
+    parser = argparse.ArgumentParser(description=f"Scrape the list of {provider_name} ETFs and their holdings.")
+    parser.add_argument("--output", default=default_output, help="Output JSON file")
+    parser.add_argument("--delay", type=float, default=1.5, help="Delay in seconds between holdings requests")
+    parser.add_argument("--limit", type=int, default=None, help="Limit the number of ETFs processed (useful for testing)")
+    parser.add_argument("--tickers", nargs="+", metavar="ID", help="Only fetch these fund tickers")
+    args = parser.parse_args()
+
+    with browser_session() as session:
+        print(f"Fetching the {provider_name} ETF list...")
+        funds = fetch_etf_list(session)
+        print(f"{len(funds)} ETFs found.")
+
+        if args.tickers:
+            wanted = {t.strip().upper() for t in args.tickers}
+            funds = [f for f in funds if f.ticker.upper() in wanted]
+            missing = wanted - {f.ticker.upper() for f in funds}
+            if missing:
+                print(f"Not in the {provider_name} fund list: {', '.join(sorted(missing))}")
+        if args.limit:
+            funds = funds[: args.limit]
+
+        results: List[EtfResult] = []
+        for i, fund in enumerate(funds, start=1):
+            print(f"[{i}/{len(funds)}] {fund.ticker} ({fund.name})...", end=" ", flush=True)
+            try:
+                holdings, note = fetch_etf_holdings(session, fund.holdings_url)
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, holdings=holdings, note=note))
+                if note:
+                    print(f"OK - {note}")
+                else:
+                    print(f"OK ({len(holdings)} positions)")
+            except Exception as exc:  # keep going even if one fund fails
+                results.append(EtfResult(etf_ticker=fund.ticker, etf_name=fund.name, error=str(exc)))
+                print(f"FAILED ({exc})")
+            if i < len(funds):  # no need to wait after the last fund
+                time.sleep(args.delay)
+
+    write_output(results, args.output)
+
+    ok = sum(1 for r in results if r.error is None)
+    with_tickers = sum(1 for r in results if r.holdings)
+    print(f"\nDone: {ok}/{len(results)} ETFs fetched without error, {with_tickers} with stock tickers extracted.")
+    print(f"Output written to {args.output}")
 
 
 class Response:
