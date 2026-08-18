@@ -1,0 +1,5 @@
+# Test-only dependencies, on top of backend/requirements.txt and
+# fetcher/requirements.txt - install all three to run the full suite:
+#   pip install -r backend/requirements.txt -r fetcher/requirements.txt -r requirements-dev.txt
+#   pytest
+pytest>=8.0.0

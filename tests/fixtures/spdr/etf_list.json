@@ -1,0 +1,25 @@
+{
+  "data": {
+    "funds": {
+      "etfs": {
+        "datas": [
+          {
+            "fundTicker": "SPY",
+            "fundName": "SPDR S&P 500 ETF Trust",
+            "fundUri": "/us/en/intermediary/etfs/funds/spdr-sp-500-etf-trust-spy"
+          },
+          {
+            "fundTicker": "GLD(R)",
+            "fundName": "SPDR Gold Shares",
+            "fundUri": "/us/en/intermediary/etfs/funds/spdr-gold-shares-gld"
+          },
+          {
+            "fundTicker": "",
+            "fundName": "Missing ticker - must be skipped",
+            "fundUri": "/us/en/intermediary/etfs/funds/missing"
+          }
+        ]
+      }
+    }
+  }
+}
