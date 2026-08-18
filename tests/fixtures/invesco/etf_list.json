@@ -1,0 +1,25 @@
+{
+  "response": {
+    "numFound": 3,
+    "docs": [
+      {
+        "ticker": "QQQ",
+        "cusip": "46090E103",
+        "title": "Invesco QQQ Trust",
+        "url": "/us/en/etfs/qqq.html"
+      },
+      {
+        "ticker": "RSP",
+        "cusip": "74936Q106",
+        "title": "Invesco S&P 500 Equal Weight ETF",
+        "url": "/us/en/etfs/rsp.html"
+      },
+      {
+        "ticker": "",
+        "cusip": "00000A000",
+        "title": "Missing ticker - must be skipped",
+        "url": "/us/en/etfs/missing.html"
+      }
+    ]
+  }
+}

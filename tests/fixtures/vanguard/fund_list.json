@@ -1,0 +1,34 @@
+{
+  "fund": {
+    "entity": [
+      {
+        "profile": {
+          "isETF": true,
+          "ticker": "VTI",
+          "longName": "Vanguard Total Stock Market ETF"
+        }
+      },
+      {
+        "profile": {
+          "isETF": true,
+          "ticker": "VXUS",
+          "longName": "Vanguard Total International Stock ETF"
+        }
+      },
+      {
+        "profile": {
+          "isETF": false,
+          "ticker": "VTSAX",
+          "longName": "Vanguard Total Stock Market Index Fund Admiral Shares"
+        }
+      },
+      {
+        "profile": {
+          "isETF": true,
+          "ticker": "",
+          "longName": "Missing ticker - must be skipped"
+        }
+      }
+    ]
+  }
+}

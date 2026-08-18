@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head><title>VanEck ETF &amp; Mutual Fund Finder</title></head>
+<body>
+  <script class="fund-search-data" type="application/json">
+  [
+    {
+      "Values": ["SMH", "VanEck Semiconductor ETF"],
+      "Url": "/us/en/investments/semiconductor-etf-smh/overview/"
+    },
+    {
+      "Values": ["MOAT", "VanEck Morningstar Wide Moat ETF"],
+      "Url": "/us/en/investments/morningstar-wide-moat-etf-moat/overview/"
+    },
+    {
+      "Values": ["", "VanEck Model Portfolio - no ticker, must be skipped"],
+      "Url": "/us/en/investments/model-portfolio/overview/"
+    }
+  ]
+  </script>
+  <!-- The visible table is filled client-side via JS and is empty in the
+       raw server HTML - parsing it here would find nothing, which is
+       exactly the case the embedded JSON above exists to cover. -->
+  <table id="overview"></table>
+</body>
+</html>

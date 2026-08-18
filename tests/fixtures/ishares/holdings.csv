@@ -1,0 +1,9 @@
+Fund Holdings as of,"Jun 13, 2024"
+Inception Date,"Jul 10, 2001"
+Shares Outstanding,"20,150,000"
+Stock,,,,,,,,,,,
+Ticker,Name,Sector,Asset Class,Market Value,Weight (%),Notional Value,Shares,CUSIP,ISIN,SEDOL,Location,Exchange,Currency
+NVDA,NVIDIA Corp,Information Technology,Equity,450000000,9.85,450000000,500000,67066G104,US67066G1040,2379504,United States,NASDAQ,USD
+AVGO,Broadcom Inc,Information Technology,Equity,300000000,6.55,300000000,200000,11135F101,US11135F1012,BDZ78H8,United States,NASDAQ,USD
+ROP,Roche Holding AG,Health Care,Equity,120000000,2.60,120000000,100000,CH0012032048,CH0012032048,B02T274,Switzerland,SWX,CHF
+-,USD Cash,,Cash,5000000,0.10,5000000,-,-,-,-,United States,-,USD

@@ -1,0 +1,32 @@
+{
+  "holdings": [
+    {
+      "ticker": "AAPL",
+      "issuerName": "Apple Inc",
+      "securityTypeName": "Common Stock",
+      "localCurrencyName": "US Dollar",
+      "percentageOfTotalNetAssets": 8.75
+    },
+    {
+      "ticker": "MSFT",
+      "issuerName": "Microsoft Corp",
+      "securityTypeName": "Common Stock",
+      "localCurrencyName": "US Dollar",
+      "percentageOfTotalNetAssets": 8.5
+    },
+    {
+      "ticker": "ROP",
+      "issuerName": "Roche Holding AG",
+      "securityTypeName": "Common Stock",
+      "localCurrencyName": "Swiss Franc",
+      "percentageOfTotalNetAssets": 1.2
+    },
+    {
+      "ticker": "USD",
+      "issuerName": "US Dollar",
+      "securityTypeName": "Cash and/or Derivatives",
+      "localCurrencyName": "US Dollar",
+      "percentageOfTotalNetAssets": 0.4
+    }
+  ]
+}

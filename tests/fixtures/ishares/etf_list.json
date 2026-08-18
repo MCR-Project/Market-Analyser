@@ -1,0 +1,17 @@
+{
+  "239716": {
+    "localExchangeTicker": "SOXX",
+    "fundName": "iShares Semiconductor ETF",
+    "productPageUrl": "/us/products/239716/ishares-phlx-semiconductor-etf"
+  },
+  "239696": {
+    "localExchangeTicker": "URTH",
+    "fundName": "iShares MSCI World ETF",
+    "productPageUrl": "/us/products/239696/ishares-msci-world-etf"
+  },
+  "999999": {
+    "localExchangeTicker": "",
+    "fundName": "No ticker - must be skipped",
+    "productPageUrl": "/us/products/999999/no-ticker-fund"
+  }
+}

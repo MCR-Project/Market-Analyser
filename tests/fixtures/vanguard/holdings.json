@@ -1,0 +1,30 @@
+{
+  "fund": {
+    "entity": [
+      {
+        "ticker": "AAPL",
+        "longName": "Apple Inc",
+        "isin": "US0378331005",
+        "percentWeight": "6.15"
+      },
+      {
+        "ticker": "MSFT",
+        "longName": "Microsoft Corp",
+        "isin": "US5949181045",
+        "percentWeight": "5.90"
+      },
+      {
+        "ticker": "ROP",
+        "longName": "Roche Holding AG",
+        "isin": "CH0012032048",
+        "percentWeight": "0.35"
+      },
+      {
+        "ticker": "",
+        "longName": "Delisted entity - no live ticker",
+        "isin": "US0000000000",
+        "percentWeight": "0.01"
+      }
+    ]
+  }
+}
