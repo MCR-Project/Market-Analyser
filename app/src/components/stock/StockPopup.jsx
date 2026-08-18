@@ -28,6 +28,7 @@ import { AreaChart } from '../charts/AreaChart';
 import { ChartTooltip } from '../charts/ChartTooltip';
 import { Logo } from '../ui/Logo';
 import { Loading } from '../ui/Loading';
+import { Overlay } from '../ui/Overlay';
 import { api } from '../../utils/api';
 
 const TF_LIST = ['1W', '1M', '1Y', '5Y'];
@@ -106,20 +107,33 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
   const maxRho = peers.length ? peers[0].rho : 1;
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[150] flex items-center justify-center p-6" style={{ background: 'var(--bg-inset)' }}>
-      <div onClick={e => e.stopPropagation()} className="w-[900px] max-h-[86vh] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] animate-[spPop_220ms_var(--ease-out)] flex flex-col overflow-hidden">
+    <Overlay
+      onClose={onClose}
+      labelledBy="stockpopup-title"
+      className="fixed inset-0 z-[150] flex items-center justify-center p-6"
+      style={{ background: 'var(--bg-inset)' }}
+      contentClassName="w-[900px] max-h-[86vh] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] animate-[spPop_220ms_var(--ease-out)] flex flex-col overflow-hidden"
+    >
         {/* Header */}
         <div className="flex items-start justify-between p-[24px_28px_20px] border-b border-[var(--divider)] gap-5 flex-none">
           <div className="flex items-center gap-4 min-w-0">
             <Logo ticker={ticker} name={stockInfo?.name} size={52} />
             <div className="flex flex-col gap-2 min-w-0">
               <div className="flex items-baseline gap-3.5 flex-wrap">
-                <span className="font-[var(--font-mono)] text-[30px] font-extrabold text-[var(--accent)] tracking-tight leading-none">{ticker}</span>
-                {stockLoading ? (
-                  <Loading variant="skeleton" lines={1} className="w-40" />
-                ) : (
-                  <span className="text-[19px] font-semibold text-[var(--fg)] tracking-tight">{stockInfo?.name || ticker}</span>
-                )}
+                {/* display:contents keeps this purely a labelling anchor —
+                    it adds no box of its own, so the visible flex layout of
+                    ticker/name/etf-id below is unaffected. aria-labelledby
+                    reads whatever's actually on screen (ticker immediately,
+                    then the name once it loads) instead of a JS string that
+                    could drift from it. */}
+                <span id="stockpopup-title" className="contents">
+                  <span className="font-[var(--font-mono)] text-[30px] font-extrabold text-[var(--accent)] tracking-tight leading-none">{ticker}</span>
+                  {stockLoading ? (
+                    <Loading variant="skeleton" lines={1} className="w-40" />
+                  ) : (
+                    <span className="text-[19px] font-semibold text-[var(--fg)] tracking-tight">{stockInfo?.name || ticker}</span>
+                  )}
+                </span>
                 <span className="text-xs font-[var(--font-mono)] text-[var(--fg-2)]">{etf.id}</span>
               </div>
               <div className="flex items-center gap-[7px] flex-wrap">
@@ -260,8 +274,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Overlay>
   );
 });
 

@@ -20,11 +20,17 @@
  *  └─────────────────────────────────────────┘
  */
 import { memo } from 'react';
+import { Overlay } from './Overlay';
 
 export const MeasurementPicker = memo(function MeasurementPicker({ manifest, activeIds, onToggle, onClose }) {
   return (
-    <div onClick={onClose} className="fixed inset-0 z-80 flex items-start justify-center pt-[12vh] px-5 pb-5" style={{ background: 'color-mix(in oklab, var(--bg-inset) 70%, transparent)', backdropFilter: 'blur(3px)' }}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-[560px] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]">
+    <Overlay
+      onClose={onClose}
+      ariaLabel="Measurements"
+      className="fixed inset-0 z-80 flex items-start justify-center pt-[12vh] px-5 pb-5"
+      style={{ background: 'color-mix(in oklab, var(--bg-inset) 70%, transparent)', backdropFilter: 'blur(3px)' }}
+      contentClassName="w-full max-w-[560px] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]"
+    >
 
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--divider)]">
@@ -116,7 +122,6 @@ export const MeasurementPicker = memo(function MeasurementPicker({ manifest, act
             Done
           </button>
         </div>
-      </div>
-    </div>
+    </Overlay>
   );
 });
