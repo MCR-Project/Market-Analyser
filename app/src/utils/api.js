@@ -1,4 +1,7 @@
-const API_BASE = 'http://localhost:8000/api';
+// Overridable at build time via VITE_API_BASE (see .env.example) so a built
+// bundle can target a non-localhost backend with no code change; defaults
+// to the local dev backend so `npm run dev` works out of the box.
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000/api';
 
 // Requests are deduplicated by URL: concurrent callers for the same URL
 // share one in-flight fetch, and a short TTL cache serves repeats that
