@@ -8,10 +8,18 @@ Start with:  python -m uvicorn main:app --port 8000 --reload
 API docs at: http://localhost:8000/docs
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from measurements.registry import measurement_router
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 app = FastAPI(
     title="MCR-3 Correlation Dashboard API",
@@ -19,10 +27,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow all origins in development — the frontend may run on :3456 or :5173.
+# Origins allowed to make cross-origin requests, comma-separated via
+# CORS_ORIGINS (see .env.example). Defaults to the local frontend dev
+# ports so `npm run dev` keeps working with no environment variables set.
+_default_origins = "http://localhost:5173,http://localhost:3456"
+allow_origins = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_methods=["GET"],
     allow_headers=["*"],
 )
