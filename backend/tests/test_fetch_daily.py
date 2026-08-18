@@ -5,9 +5,8 @@ _has_new_events/_needs_full_backfill helpers that decide whether a top-up
 run needs to escalate into a full re-backfill because a split or dividend
 retroactively rescaled the ticker's whole adjusted history.
 
-Run with:   python -m unittest discover -s tests   (from backend/)
-No pytest dependency required - the repo has no test runner configured yet,
-so this sticks to the standard library.
+Run with:   pytest   (from the repo root; also runnable standalone via
+            python -m unittest discover -s tests, from backend/)
 """
 
 import sys
@@ -25,6 +24,7 @@ from scripts.fetch_daily import (
     _has_new_events,
     _needs_full_backfill,
     _select_tickers_needing_sync,
+    bucket_by_age,
     compact_ticker,
     fetch_ticker_rows,
 )
@@ -283,6 +283,106 @@ def _d(ticker, date_str, o, h, l, c, v):
         "ticker": ticker, "date": date_str, "granularity": "D",
         "open": o, "high": h, "low": l, "close": c, "volume": v,
     }
+
+
+# ── bucket_by_age ────────────────────────────────────────────────────────────
+
+class BucketByAgeTests(unittest.TestCase):
+    """Boundary coverage for the "only compact a fully elapsed bucket" rule
+    from bucket_by_age's docstring - the subtlest rule in the tiering logic.
+    TODAY is fixed so each case's age relative to WEEKLY_TIER_START_DAYS
+    (365 days) / MONTHLY_TIER_START_DAYS (5*365 days) is deterministic:
+    weekly_cutoff = 2023-06-02 (a Friday - its ISO week is 2023-05-29 ..
+    2023-06-04), monthly_cutoff = 2019-06-03 (a Monday, inside June 2019)."""
+
+    TODAY = date(2024, 6, 1)
+
+    def test_young_row_stays_daily(self):
+        rows = [_d("NVDA", "2024-05-22", 10, 11, 9, 10.5, 100)]
+
+        result = bucket_by_age(rows, self.TODAY)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["granularity"], "D")
+        self.assertEqual(result[0]["date"], "2024-05-22")
+
+    def test_row_in_a_fully_elapsed_week_is_compacted_to_weekly(self):
+        """2023-05-23's ISO week (2023-05-22..2023-05-28) has fully elapsed
+        past the weekly cutoff (2023-06-02) as of TODAY."""
+        rows = [_d("NVDA", "2023-05-23", 10, 11, 9, 10.5, 100)]
+
+        result = bucket_by_age(rows, self.TODAY)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["granularity"], "W")
+        self.assertEqual(result[0]["date"], "2023-05-22")
+
+    def test_row_older_than_the_cutoff_but_in_a_not_yet_elapsed_week_stays_daily(self):
+        """2023-05-30 is already older than WEEKLY_TIER_START_DAYS as of
+        TODAY, but its ISO week (2023-05-29..2023-06-04) hasn't FULLY
+        elapsed past the weekly cutoff (2023-06-02) yet - part of the week
+        is still on/after the cutoff. The whole day must be left daily so a
+        later run's compact_ticker sweep can compact it once the week is
+        genuinely done, instead of aggregating a partial week now."""
+        rows = [_d("NVDA", "2023-05-30", 10, 11, 9, 10.5, 100)]
+
+        result = bucket_by_age(rows, self.TODAY)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["granularity"], "D")
+        self.assertEqual(result[0]["date"], "2023-05-30")
+
+    def test_row_in_a_fully_elapsed_month_is_compacted_to_monthly(self):
+        """2019-05-15's calendar month (May 2019) has fully elapsed past
+        the monthly cutoff (2019-06-03) as of TODAY."""
+        rows = [_d("NVDA", "2019-05-15", 10, 11, 9, 10.5, 100)]
+
+        result = bucket_by_age(rows, self.TODAY)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["granularity"], "M")
+        self.assertEqual(result[0]["date"], "2019-05-01")
+
+    def test_row_past_the_monthly_day_count_but_in_a_not_yet_elapsed_month_stays_weekly(self):
+        """2019-06-10 is already older than MONTHLY_TIER_START_DAYS as of
+        TODAY, but its calendar month (June 2019) hasn't fully elapsed past
+        the monthly cutoff (2019-06-03) yet, so it must NOT jump straight to
+        monthly - it only qualifies for weekly (its own ISO week has fully
+        elapsed), the tier a later run will eventually promote it from once
+        the whole month is done."""
+        rows = [_d("NVDA", "2019-06-10", 10, 11, 9, 10.5, 100)]
+
+        result = bucket_by_age(rows, self.TODAY)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["granularity"], "W")
+        self.assertEqual(result[0]["date"], "2019-06-10")
+
+    def test_mixed_ages_are_split_across_all_three_tiers_in_one_call(self):
+        rows = [
+            _d("NVDA", "2024-05-22", 10, 12, 9, 11, 100),    # daily
+            _d("NVDA", "2023-05-23", 20, 22, 19, 21, 200),   # weekly bucket...
+            _d("NVDA", "2023-05-24", 21, 23, 20, 22, 300),   # ...same week
+            _d("NVDA", "2019-05-15", 30, 32, 29, 31, 400),   # monthly
+        ]
+
+        result = bucket_by_age(rows, self.TODAY)
+
+        by_granularity: dict[str, list[dict]] = {}
+        for row in result:
+            by_granularity.setdefault(row["granularity"], []).append(row)
+
+        self.assertEqual(len(by_granularity["D"]), 1)
+        self.assertEqual(len(by_granularity["W"]), 1)  # the two 2023 rows merged
+        self.assertEqual(len(by_granularity["M"]), 1)
+
+        week_row = by_granularity["W"][0]
+        self.assertEqual(week_row["date"], "2023-05-22")
+        self.assertEqual(week_row["open"], 20)   # bucket's first open
+        self.assertEqual(week_row["close"], 22)  # bucket's last close
+        self.assertEqual(week_row["high"], 23)
+        self.assertEqual(week_row["low"], 19)
+        self.assertEqual(week_row["volume"], 500)
 
 
 class CompactTickerWeeklyTests(unittest.TestCase):
