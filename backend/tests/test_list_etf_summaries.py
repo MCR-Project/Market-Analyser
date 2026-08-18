@@ -8,7 +8,8 @@ replaces that loop with exactly two Supabase queries total - one for
 etfs metadata, one for etf_holdings - regardless of how many ETFs are
 tracked, and never touches yfinance.
 
-Run with:   python -m unittest discover -s tests   (from backend/)
+Run with:   pytest   (from the repo root; also runnable standalone via
+            python -m unittest discover -s tests, from backend/)
 """
 
 import sys

@@ -8,7 +8,8 @@ a short page comes back; these tests lock in its core loop (multi-page
 accumulation, the short-page stop condition, and the fresh-builder-per-page
 requirement its own docstring calls out) plus assert_not_truncated's guard.
 
-Run with:   python -m unittest discover -s tests   (from backend/)
+Run with:   pytest   (from the repo root; also runnable standalone via
+            python -m unittest discover -s tests, from backend/)
 """
 
 import sys
