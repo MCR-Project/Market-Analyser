@@ -33,6 +33,8 @@ per-provider bot-check handling without rewriting each fetcher's own
 parsing logic.
 """
 
+from __future__ import annotations
+
 import argparse
 import inspect
 import json
