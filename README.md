@@ -13,6 +13,11 @@ python -m uvicorn main:app --port 8000 --reload
 
 API docs: http://localhost:8000/docs
 
+By default the API accepts cross-origin requests only from the local
+frontend dev ports (`http://localhost:5173`, `http://localhost:3456`). Set
+`CORS_ORIGINS` (comma-separated) in `backend/.env` to allow other origins,
+e.g. a deployed frontend — see `.env.example`.
+
 ### Data pipeline
 
 The tracked universe lives in Supabase (`etfs`, `ticker`, `etf_holdings`,
@@ -58,7 +63,8 @@ npm run dev
 ```
 
 Runs at http://localhost:5173 (or the port Vite reports) and talks to the
-backend at `http://localhost:8000`.
+backend at `http://localhost:8000` by default. Set `VITE_API_BASE` in
+`app/.env` to point a build at a different backend — see `.env.example`.
 
 ## Running both
 
