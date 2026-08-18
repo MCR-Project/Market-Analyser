@@ -24,6 +24,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { api } from '../../utils/api';
 import { Loading } from '../ui/Loading';
+import { Overlay } from '../ui/Overlay';
 
 export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect, onClose }) {
   const etfs = allEtfs || [];
@@ -59,18 +60,22 @@ export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect,
 
   const handleSelect = (id) => { onSelect(id); onClose(); };
   const handleKey = (e) => {
-    if (e.key === 'Escape') onClose();
     if (e.key === 'Enter' && filtered.length) handleSelect(filtered[0].id);
   };
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-80 flex items-start justify-center pt-[14vh] px-5 pb-5" style={{ background: 'color-mix(in oklab, var(--bg-inset) 70%, transparent)', backdropFilter: 'blur(3px)' }}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-[840px] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]">
+    <Overlay
+      onClose={onClose}
+      ariaLabel="Select an ETF"
+      className="fixed inset-0 z-80 flex items-start justify-center pt-[14vh] px-5 pb-5"
+      style={{ background: 'color-mix(in oklab, var(--bg-inset) 70%, transparent)', backdropFilter: 'blur(3px)' }}
+      contentClassName="w-full max-w-[840px] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]"
+    >
         <div className="p-4 border-b border-[var(--divider)]">
           <div className="eyebrow mb-3">● SELECT AN ETF</div>
           <div className="flex items-center gap-2.5 h-[42px] px-3.5 bg-[var(--bg-3)] border border-[var(--border)] rounded-[var(--radius-md)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--fg-2)] flex-none"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-            <input value={query} onInput={e => setQuery(e.target.value)} onKeyDown={handleKey} autoFocus placeholder="Search — SPY, QQQ, MSCI World, semis…" className="flex-1 border-none outline-none bg-transparent text-[var(--fg)] font-[var(--font-body)] text-[15px]" />
+            <input value={query} onInput={e => setQuery(e.target.value)} onKeyDown={handleKey} placeholder="Search — SPY, QQQ, MSCI World, semis…" className="flex-1 border-none outline-none bg-transparent text-[var(--fg)] font-[var(--font-body)] text-[15px]" />
           </div>
         </div>
 
@@ -147,7 +152,6 @@ export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect,
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </Overlay>
   );
 });

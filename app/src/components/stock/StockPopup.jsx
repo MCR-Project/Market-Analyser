@@ -28,6 +28,7 @@ import { AreaChart } from '../charts/AreaChart';
 import { ChartTooltip } from '../charts/ChartTooltip';
 import { Logo } from '../ui/Logo';
 import { Loading } from '../ui/Loading';
+import { Overlay } from '../ui/Overlay';
 import { api } from '../../utils/api';
 
 const TF_LIST = ['1W', '1M', '1Y', '5Y'];
@@ -105,9 +106,16 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
   const peerTotalW = (peers.reduce((s, p) => s + p.w, 0) + weight).toFixed(1) + '%';
   const maxRho = peers.length ? peers[0].rho : 1;
 
+  const popupLabel = ticker + (stockInfo?.name ? ` — ${stockInfo.name}` : '');
+
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[150] flex items-center justify-center p-6" style={{ background: 'var(--bg-inset)' }}>
-      <div onClick={e => e.stopPropagation()} className="w-[900px] max-h-[86vh] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] animate-[spPop_220ms_var(--ease-out)] flex flex-col overflow-hidden">
+    <Overlay
+      onClose={onClose}
+      ariaLabel={popupLabel}
+      className="fixed inset-0 z-[150] flex items-center justify-center p-6"
+      style={{ background: 'var(--bg-inset)' }}
+      contentClassName="w-[900px] max-h-[86vh] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] animate-[spPop_220ms_var(--ease-out)] flex flex-col overflow-hidden"
+    >
         {/* Header */}
         <div className="flex items-start justify-between p-[24px_28px_20px] border-b border-[var(--divider)] gap-5 flex-none">
           <div className="flex items-center gap-4 min-w-0">
@@ -260,8 +268,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Overlay>
   );
 });
 
