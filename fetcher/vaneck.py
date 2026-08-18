@@ -226,6 +226,7 @@ def main():
         fetch_etf_list=fetch_etf_list,
         fetch_etf_holdings=fetch_etf_holdings,
         default_output="vaneck_holdings.json",
+        tickers_example="SMH GDX",
     )
 
 

@@ -151,6 +151,7 @@ def main():
         fetch_etf_list=fetch_etf_list,
         fetch_etf_holdings=fetch_etf_holdings,
         default_output="vanguard_holdings.json",
+        tickers_example="VTI VXUS",
     )
 
 

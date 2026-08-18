@@ -34,6 +34,7 @@ parsing logic.
 """
 
 import argparse
+import inspect
 import json
 import time
 from contextlib import contextmanager
@@ -100,29 +101,45 @@ def write_output(results: List[EtfResult], path: str) -> None:
 
 def run_fetcher(
     provider_name: str,
-    fetch_etf_list: Callable[[BrowserSession], List[EtfFund]],
+    fetch_etf_list: Callable[..., List[EtfFund]],
     fetch_etf_holdings: Callable[[BrowserSession, str], Tuple[List[EtfHolding], Optional[str]]],
     default_output: str,
+    tickers_example: Optional[str] = None,
+    argv: Optional[List[str]] = None,
 ) -> None:
     """Shared CLI and orchestration for every provider fetcher's main().
 
     Every fetcher in this folder differs only in its provider name, its
-    fetch_etf_list()/fetch_etf_holdings() pair, and its default --output
-    filename - everything else (the argument parser, --tickers/--limit
+    fetch_etf_list()/fetch_etf_holdings() pair, its default --output
+    filename, and (for the --tickers help text) a couple of example
+    tickers - everything else (the argument parser, --tickers/--limit
     filtering, the numbered progress loop with per-fund error isolation,
     the write_output() call and the summary print) is identical, so it
     lives here once instead of six times.
+
+    argv defaults to sys.argv (via argparse) and is only overridable so
+    tests can drive this without touching real command-line args.
     """
     parser = argparse.ArgumentParser(description=f"Scrape the list of {provider_name} ETFs and their holdings.")
     parser.add_argument("--output", default=default_output, help="Output JSON file")
     parser.add_argument("--delay", type=float, default=1.5, help="Delay in seconds between holdings requests")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of ETFs processed (useful for testing)")
-    parser.add_argument("--tickers", nargs="+", metavar="ID", help="Only fetch these fund tickers")
-    args = parser.parse_args()
+    tickers_help = "Only fetch these fund tickers"
+    if tickers_example:
+        tickers_help += f" (e.g. {tickers_example})"
+    parser.add_argument("--tickers", nargs="+", metavar="ID", help=tickers_help)
+    args = parser.parse_args(argv)
 
     with browser_session() as session:
         print(f"Fetching the {provider_name} ETF list...")
-        funds = fetch_etf_list(session)
+        if "delay" in inspect.signature(fetch_etf_list).parameters:
+            # ark.py's fetch_etf_list makes one HTTP request per fund slug
+            # to build the list, and paces those with the same --delay as
+            # the holdings loop below; every other provider's
+            # fetch_etf_list(session) takes no such parameter.
+            funds = fetch_etf_list(session, delay=args.delay)
+        else:
+            funds = fetch_etf_list(session)
         print(f"{len(funds)} ETFs found.")
 
         if args.tickers:

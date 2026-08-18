@@ -156,8 +156,11 @@ def parse_holdings_response(payload: dict) -> Tuple[List[EtfHolding], Optional[s
 def fetch_etf_list(session: BrowserSession) -> List[EtfFund]:
     # www.invesco.com 406s every plain HTTP request (see module docstring) -
     # one real page load first resolves whatever bot-check is in place, so
-    # the fetch_json() call below can go straight to dng-api.
-    print("Loading an Invesco page to establish a session...")
+    # the fetch_json() call below can go straight to dng-api. Printed as an
+    # indented sub-step: run_fetcher's own "Fetching the Invesco ETF
+    # list..." message has already announced the overall action by the
+    # time this one runs.
+    print("  Establishing a session (Invesco blocks plain HTTP clients)...")
     session.open_page(WARM_UP_URL)
 
     data = session.fetch_json(PRODUCT_SEARCH_URL, params=PRODUCT_SEARCH_PARAMS)
@@ -175,6 +178,7 @@ def main():
         fetch_etf_list=fetch_etf_list,
         fetch_etf_holdings=fetch_etf_holdings,
         default_output="invesco_holdings.json",
+        tickers_example="QQQ RSP",
     )
 
 
