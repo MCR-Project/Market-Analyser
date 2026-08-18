@@ -26,7 +26,7 @@ const FOCUSABLE_SELECTOR = [
 
 function getFocusable(node) {
   return Array.from(node.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
-    (el) => el.offsetParent !== null
+    (el) => el.getClientRects().length > 0
   );
 }
 
@@ -57,6 +57,15 @@ export function Overlay({
     const initial = getFocusable(node)[0] || node;
     initial.focus();
 
+    // Registered on `document`, not `node`: a keydown listener scoped to the
+    // dialog only ever sees events whose target is a descendant of it. That
+    // breaks the moment focus ends up outside the dialog while it's still
+    // open — e.g. in StockPopup, clicking a peer card focuses that button
+    // and then navigates to it, which can remove the very button just
+    // clicked from the new peer list. The browser then drops focus to
+    // document.body, which is outside `node`'s subtree, so a node-scoped
+    // listener would stop seeing Escape/Tab entirely. A document-level
+    // listener keeps working regardless of where focus currently is.
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -67,23 +76,44 @@ export function Overlay({
         const els = getFocusable(node);
         if (els.length === 0) {
           e.preventDefault();
+          node.focus();
           return;
         }
         const first = els[0];
         const last = els[els.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        const current = document.activeElement;
+        if (!node.contains(current)) {
+          // Focus already drifted outside the dialog (see above) — snap
+          // it back in instead of letting Tab continue into the page.
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && current === first) {
           e.preventDefault();
           last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
+        } else if (!e.shiftKey && current === last) {
           e.preventDefault();
           first.focus();
         }
       }
     };
 
-    node.addEventListener('keydown', handleKeyDown);
+    // Belt-and-braces alongside the Tab handling above: if focus lands
+    // outside the dialog for any reason while it's open (not just via Tab —
+    // e.g. the browser's automatic fallback-to-body when the focused node
+    // is unmounted), pull it back inside as soon as that happens rather
+    // than waiting for the next keypress.
+    const handleFocusIn = (e) => {
+      if (!node.contains(e.target)) {
+        const els = getFocusable(node);
+        (els[0] || node).focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('focusin', handleFocusIn);
     return () => {
-      node.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('focusin', handleFocusIn);
       if (triggerEl && typeof triggerEl.focus === 'function') {
         triggerEl.focus();
       }
