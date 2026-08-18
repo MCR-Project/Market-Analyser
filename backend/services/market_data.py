@@ -112,6 +112,55 @@ def _get_etf_info_db(etf_id: str) -> dict | None:
     }
 
 
+def list_etf_summaries() -> list[dict]:
+    """Return id/name/cat/holdingCount for every tracked ETF via two
+    Supabase reads total - one for `etfs`, one for `etf_holdings` - instead
+    of one round-trip per ETF (a live yfinance call for AUM, plus a
+    Supabase query) the way get_etf_info/get_etf_holdings cost when looped.
+    Used by GET /api/etfs for the picker list. Each read still goes through
+    paginated_select, so a table that grows past PostgREST's page cap costs
+    more than one HTTP request - but that request count still doesn't scale
+    with the number of tracked ETFs the way the old per-ETF loop did.
+
+    AUM is deliberately not included here: it's a live-only yfinance value
+    (see _compute_aum) that no caller reads from the list endpoint - the
+    picker's detail preview gets it from GET /api/etf/{id} instead.
+
+    Returns [] if Supabase is unreachable or unconfigured.
+    """
+    db = get_client_optional()
+    if db is None:
+        return []
+
+    try:
+        etfs = paginated_select(lambda: db.table("etfs").select("id,name,cat").order("id"))
+        # Ordered like every other paginated_select call site - without a
+        # deterministic ORDER BY, .range() paging can skip or duplicate
+        # rows across page boundaries (see paginated_select's docstring),
+        # which would silently corrupt holdingCount once etf_holdings grows
+        # past one page.
+        holding_rows = paginated_select(
+            lambda: db.table("etf_holdings").select("etf_id").order("etf_id")
+        )
+    except Exception:
+        return []
+
+    counts: dict[str, int] = {}
+    for row in holding_rows:
+        etf_id = row["etf_id"]
+        counts[etf_id] = counts.get(etf_id, 0) + 1
+
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "cat": row.get("cat") or "",
+            "holdingCount": counts.get(row["id"], 0),
+        }
+        for row in etfs
+    ]
+
+
 def get_etf_info(etf_id: str, force_refresh: bool = False) -> dict:
     """Fetch ETF name, category, AUM, and description.
 
