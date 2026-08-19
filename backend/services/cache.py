@@ -34,12 +34,6 @@ class TTLCache:
         """Store a value with a TTL in seconds from now."""
         self._store[key] = (time.time() + ttl, value)
 
-    def invalidate(self, prefix: str = ""):
-        """Remove all entries whose key starts with the given prefix."""
-        keys = [k for k in self._store if k.startswith(prefix)]
-        for k in keys:
-            del self._store[k]
-
 
 # Module-level singleton shared across all service functions
 cache = TTLCache()
