@@ -27,7 +27,7 @@ import { Loading } from '../ui/Loading';
 import { Overlay } from '../ui/Overlay';
 
 export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect, onClose }) {
-  const etfs = allEtfs || [];
+  const etfs = useMemo(() => allEtfs || [], [allEtfs]);
   const [query, setQuery] = useState('');
   const [hovered, setHovered] = useState(currentId);
 
