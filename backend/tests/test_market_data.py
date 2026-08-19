@@ -9,11 +9,12 @@ yfinance default change, or an incautious edit, can't silently reintroduce
 raw closes on just one of the read paths.
 
 _correlation_summary coverage exercises its degenerate-input boundaries:
-with zero or one available ticker there are no pairs to compare, and the
-sentinel values used while scanning for strongest/weakest/hub (value=-1,
-value=2, avgCorr=0) must never leak into the result unexamined - the 1+
-ticker case previously did (hub.avgCorr=0, strongest.value=-1,
-weakest.value=2 on degenerate input).
+with zero or one available ticker there are no pairs to compare, so
+strongest/weakest must come back None rather than an out-of-range sentinel
+(value=-1 / value=2) leaking into the result unexamined - hub, which has no
+pairs requirement, must still reflect the real (possibly zero) average
+rather than a hardcoded avgCorr=0 baseline that an all-negative average set
+could never beat.
 
 Run with:   pytest   (from the repo root; also runnable standalone via
             python -m unittest discover -s tests, from backend/)
@@ -80,12 +81,12 @@ class ClosesLiveTests(unittest.TestCase):
 # ── _correlation_summary ─────────────────────────────────────────────────────
 
 class CorrelationSummaryTests(unittest.TestCase):
-    def test_zero_available_tickers_returns_degenerate_sentinels(self):
+    def test_zero_available_tickers_returns_none_pairs(self):
         """No requested ticker has a returns column at all (e.g. yfinance/DB
-        had data for none of them) - available ends up empty, and the
-        scan-for-extremes sentinels (strongest.value=-1, weakest.value=2,
-        hub.avgCorr=0) are never overwritten, so they leak straight into the
-        result unexamined. This pins that current, documented behavior."""
+        had data for none of them) - available ends up empty, so there's no
+        pair to compare and no ticker to be the hub. strongest/weakest come
+        back None (not a fake pair) and hub stays "" / 0 (there is no
+        ticker), rather than leaking a scan sentinel into the result."""
         returns = pd.DataFrame(index=pd.to_datetime(["2024-06-06", "2024-06-07"]))
 
         result = _correlation_summary(returns, ["AAPL", "MSFT"])
@@ -93,8 +94,8 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["tickers"], [])
         self.assertEqual(result["matrix"], {})
         self.assertEqual(result["averages"], {})
-        self.assertEqual(result["strongest"], {"a": "", "b": "", "value": -1})
-        self.assertEqual(result["weakest"], {"a": "", "b": "", "value": 2})
+        self.assertIsNone(result["strongest"])
+        self.assertIsNone(result["weakest"])
         self.assertEqual(result["hub"], {"ticker": "", "avgCorr": 0})
 
     def test_requested_ticker_missing_from_returns_is_dropped_from_available(self):
@@ -113,9 +114,10 @@ class CorrelationSummaryTests(unittest.TestCase):
 
     def test_single_ticker_has_no_pairs_and_a_zero_average(self):
         """With exactly one available ticker there's no peer to correlate
-        against - averages/hub read as 0 (not an error, not NaN), and
-        strongest/weakest - which only ever compare pairs - never get
-        assigned past their initial sentinels, matching the 0-ticker case."""
+        against - averages/hub read as 0 (not an error, not NaN, and a
+        real computed value here rather than a leftover baseline), while
+        strongest/weakest - which only ever compare pairs - come back None
+        rather than an out-of-range sentinel, matching the 0-ticker case."""
         returns = pd.DataFrame(
             {"AAPL": [0.01, -0.02, 0.03]},
             index=pd.to_datetime(["2024-06-06", "2024-06-07", "2024-06-10"]),
@@ -127,8 +129,28 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["matrix"]["AAPL"]["AAPL"], 1.0)
         self.assertEqual(result["averages"], {"AAPL": 0})
         self.assertEqual(result["hub"], {"ticker": "AAPL", "avgCorr": 0})
-        self.assertEqual(result["strongest"], {"a": "", "b": "", "value": -1})
-        self.assertEqual(result["weakest"], {"a": "", "b": "", "value": 2})
+        self.assertIsNone(result["strongest"])
+        self.assertIsNone(result["weakest"])
+
+    def test_all_negative_averages_hub_reflects_real_value(self):
+        """When every ticker's average correlation to its peers is negative,
+        a hardcoded avgCorr=0 baseline would never lose to any of them,
+        silently reporting a hub that doesn't exist in the data. The hub
+        must reflect the actual best (least negative) average instead."""
+        dates = pd.to_datetime(["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-06"])
+        returns = pd.DataFrame(
+            {
+                "A": [0.01, -0.02, 0.03, -0.01],
+                "B": [-0.01, 0.02, -0.03, 0.01],
+            },
+            index=dates,
+        )
+
+        result = _correlation_summary(returns, ["A", "B"])
+
+        self.assertEqual(result["averages"], {"A": -1.0, "B": -1.0})
+        self.assertEqual(result["hub"]["avgCorr"], -1.0)
+        self.assertIn(result["hub"]["ticker"], {"A", "B"})
 
     def test_three_tickers_picks_strongest_weakest_pair_and_hub(self):
         """Sanity check of the non-degenerate path: A and B move in
