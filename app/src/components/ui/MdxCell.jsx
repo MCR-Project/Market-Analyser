@@ -69,10 +69,18 @@ export function MdxCell({ mdx, loading }) {
   const [Content, setContent] = useState(null);
   const [failed, setFailed] = useState(false);
 
+  // Clear a stale error as soon as a new snippet arrives, during render
+  // rather than inside the effect below — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevMdx, setPrevMdx] = useState(mdx);
+  if (mdx !== prevMdx) {
+    setPrevMdx(mdx);
+    setFailed(false);
+  }
+
   useEffect(() => {
     if (loading || mdx == null) return;
     let cancelled = false;
-    setFailed(false);
     compileMdx(mdx)
       .then(Comp => { if (!cancelled) setContent(() => Comp); })
       .catch(() => { if (!cancelled) setFailed(true); });
