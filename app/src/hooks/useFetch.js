@@ -9,6 +9,17 @@
  * arg) - fetchers that support bypassing their own cache (e.g. a
  * `refresh` API param) can read it to do so.
  *
+ * A network-level failure (fetch() rejecting with a TypeError - connection
+ * refused, DNS not resolving, etc.) auto-retries once after a few seconds
+ * instead of sitting broken until a human clicks Retry. This is what a
+ * "cold start" load looks like: the frontend's static assets are served
+ * instantly while the backend is still coming up, so the very first
+ * request loses that race and every hook built on this one would otherwise
+ * fail permanently - the only workaround being a full page reload, which
+ * isn't something a production user knows to do. An HTTP error response
+ * (404/500/...) is a real answer from a server that IS up, so it does NOT
+ * auto-retry - only genuine network failures do.
+ *
  * Contract on `deps`: every element must be a primitive (string, number,
  * or boolean) - e.g. an id, or a `list.join(',')` for a multi-value key.
  * `deps` is used two different ways that must never disagree: it's
@@ -32,6 +43,7 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   const fetcherRef = useRef(fetcher);
   const forceRef = useRef(false);
   const abortRef = useRef(null);
+  const autoRetryTimeoutRef = useRef(null);
   const warnedNonPrimitiveDepsRef = useRef(false);
 
   // Dev-only guard for the contract documented above - a non-primitive dep
@@ -83,8 +95,13 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   }
 
   useEffect(() => {
-    // Abort any in-flight request
+    // Abort any in-flight request, and any pending auto-retry from a
+    // previous failed run - this run supersedes both.
     abortRef.current?.abort();
+    if (autoRetryTimeoutRef.current !== null) {
+      clearTimeout(autoRetryTimeoutRef.current);
+      autoRetryTimeoutRef.current = null;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -105,10 +122,23 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
           console.warn('[useFetch] request failed:', err.message);
           setError(err);
           setLoading(false);
+          // See the file-level doc comment: only a network-level failure
+          // (TypeError) gets an automatic retry - it's the signature of a
+          // cold-start race against the backend, and self-heals. A real
+          // HTTP error response would just fail the same way again.
+          if (err instanceof TypeError) {
+            autoRetryTimeoutRef.current = setTimeout(() => retry(), 3000);
+          }
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (autoRetryTimeoutRef.current !== null) {
+        clearTimeout(autoRetryTimeoutRef.current);
+        autoRetryTimeoutRef.current = null;
+      }
+    };
     // deps is a caller-supplied, arbitrary-length array by design (the
     // whole point of this hook); exhaustive-deps can't verify it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
