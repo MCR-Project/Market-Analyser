@@ -242,7 +242,7 @@ def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
     return [[row["ticker"], round(float(row["weight"]), 2)] for row in rows]
 
 
-def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> list[list]:
+def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[list], bool]:
     """Fetch top holdings for an ETF as [[ticker, weight%], ...].
 
     Holdings are sorted by weight descending. Read from Supabase when
@@ -254,37 +254,35 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> list[list]:
     in place for an hour. force_refresh skips the cache read entirely
     (used by the frontend's manual refresh action).
 
-    Whether this call's result came from the DB or the live fallback is
-    recorded under a sibling cache key - see is_etf_holdings_stale().
+    Returns (holdings, stale), where stale is True when these holdings came
+    from the live yfinance fallback (DB miss/error) rather than Supabase -
+    i.e. likely an incomplete top-~10 rather than the full constituent
+    list. The two are returned together (and cached together) rather than
+    stale being a separate lookup keyed by etf_id, so a caller can't ever
+    observe one without the other - a sibling cache key relied on the
+    caller reading it right after this call, which concurrent requests for
+    the same ETF could interleave and get wrong.
     """
     key = f"etf_holdings:{etf_id}"
-    source_key = f"etf_holdings_source:{etf_id}"
     if not force_refresh:
         cached = cache.get(key)
-        if cached:
+        if cached is not None:
             return cached
 
     holdings = _get_etf_holdings_db(etf_id)
     ttl = CACHE_TTL_HOLDINGS
-    source = "db"
+    stale = False
     if holdings is None:
         holdings = _get_etf_holdings_live(etf_id)
         ttl = CACHE_TTL_HOLDINGS_FALLBACK
-        source = "live"
+        stale = True
 
-    # Cache even an empty result to avoid re-fetching live on every request
-    cache.set(key, holdings, ttl)
-    cache.set(source_key, source, ttl)
-    return holdings
-
-
-def is_etf_holdings_stale(etf_id: str) -> bool:
-    """True if the most recently served holdings for this ETF came from the
-    live yfinance fallback (DB miss or error) rather than Supabase - i.e.
-    likely an incomplete top-~10 rather than the full constituent list.
-    Only meaningful right after get_etf_holdings() has populated the cache
-    for this ETF; defaults to False (not stale) otherwise."""
-    return cache.get(f"etf_holdings_source:{etf_id}") == "live"
+    # Cache even an empty result (holdings == []) to avoid re-fetching live
+    # on every request - cache.get() distinguishes "not cached" (None) from
+    # a cached empty list, so this isn't skipped for a falsy result.
+    result = (holdings, stale)
+    cache.set(key, result, ttl)
+    return result
 
 
 # ── Stock metadata ────────────────────────────────────────────────────────────
@@ -484,25 +482,35 @@ def _correlation_summary(returns: pd.DataFrame, tickers: list[str]) -> dict:
             matrix[t][t2] = round(float(val), 4) if not np.isnan(val) else 0.0
 
     averages = {}
-    strongest = {"a": "", "b": "", "value": -1}
-    weakest = {"a": "", "b": "", "value": 2}
-    hub = {"ticker": available[0] if available else "", "avgCorr": 0}
+    # strongest/weakest/hub start unset (None / no ticker) rather than at
+    # out-of-range sentinels (-1 / 2 / 0) - with fewer than two available
+    # tickers there's no pair to compare, and a hardcoded sentinel used to
+    # leak straight into the response unexamined; with an all-negative
+    # correlation set, a hardcoded avgCorr=0 could out-rank every real
+    # (negative) average and leak too. Tracking "still unset" explicitly
+    # means the first real value seen always wins instead of being
+    # compared against a fake baseline.
+    strongest = None
+    weakest = None
+    hub = {"ticker": "", "avgCorr": 0}
+    best_avg = None
 
     for i, a in enumerate(available):
         # Average correlation of ticker `a` to all other tickers
         others = [matrix[a].get(b, 0) for b in available if b != a]
         avg = sum(others) / len(others) if others else 0
         averages[a] = round(avg, 4)
-        if avg > hub["avgCorr"]:
+        if best_avg is None or avg > best_avg:
+            best_avg = avg
             hub = {"ticker": a, "avgCorr": round(avg, 4)}
 
         # Check upper triangle for strongest/weakest pair
         for j in range(i + 1, len(available)):
             b = available[j]
             v = matrix[a].get(b, 0)
-            if v > strongest["value"]:
+            if strongest is None or v > strongest["value"]:
                 strongest = {"a": a, "b": b, "value": v}
-            if v < weakest["value"]:
+            if weakest is None or v < weakest["value"]:
                 weakest = {"a": a, "b": b, "value": v}
 
     return {

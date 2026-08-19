@@ -41,8 +41,8 @@ export const EtfDashboard = memo(function EtfDashboard() {
 
   // "Danger mode" — the backend served a live yfinance fallback (top-~10)
   // instead of the full DB-backed holdings list, e.g. right after a DB
-  // miss before the short fallback TTL expires. See is_etf_holdings_stale
-  // in services/market_data.py.
+  // miss before the short fallback TTL expires. See get_etf_holdings's
+  // `stale` return value in services/market_data.py.
   const stale = !!etf?.stale;
 
   // This card only needs the per-ticker averages, not the edge count

@@ -20,7 +20,6 @@ from fastapi import APIRouter, Query, HTTPException
 from services.market_data import (
     get_etf_info,
     get_etf_holdings,
-    is_etf_holdings_stale,
     get_stock_info,
     get_price_series,
     compute_correlation_matrix,
@@ -60,12 +59,13 @@ def get_etf(
     """
     etf_id = etf_id.upper()
     info = get_etf_info(etf_id, force_refresh=refresh)
-    holdings = get_etf_holdings(etf_id, force_refresh=refresh)
+    holdings, stale = get_etf_holdings(etf_id, force_refresh=refresh)
     if not info["name"] or info["name"] == etf_id:
         raise HTTPException(404, f"ETF '{etf_id}' not found or no data available")
-    # True when holdings came from the live yfinance fallback (DB miss/error)
-    # rather than Supabase - flags a likely-incomplete top-~10 to the frontend.
-    return {**info, "holdings": holdings, "stale": is_etf_holdings_stale(etf_id)}
+    # stale is True when holdings came from the live yfinance fallback (DB
+    # miss/error) rather than Supabase - flags a likely-incomplete top-~10
+    # to the frontend.
+    return {**info, "holdings": holdings, "stale": stale}
 
 
 # ── Stock endpoints ───────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ def get_correlation(
     "17 links" in the toolbar.
     """
     etf_id = etf_id.upper()
-    holdings = get_etf_holdings(etf_id)
+    holdings, _ = get_etf_holdings(etf_id)
     if not holdings:
         raise HTTPException(404, f"No holdings for ETF '{etf_id}'")
 
@@ -162,7 +162,7 @@ def get_sectors(etf_id: str):
     normalized to a short tag via SECTOR_TAG.
     """
     etf_id = etf_id.upper()
-    holdings = get_etf_holdings(etf_id)
+    holdings, _ = get_etf_holdings(etf_id)
     if not holdings:
         raise HTTPException(404, f"No holdings for ETF '{etf_id}'")
 
