@@ -50,7 +50,6 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
   // Chart data for the selected timeframe
   const { arr, dates, loading: chartLoading } = useLiveSeries(ticker, chartTf);
   const pct = arr && arr.length > 1 ? ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100 : 0;
-  const positive = pct >= 0;
   const { hoverIdx, onMouseMove, onMouseLeave, tooltip } = useChartHover(arr, chartTf, dates);
 
   const corrFn = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
@@ -66,10 +65,17 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
     [peerInfos]
   );
 
-  // Fetch return % for each timeframe independently
+  // Fetch return % for each timeframe independently. The reset on ticker
+  // change is done during render (not in the effect below) so the previous
+  // ticker's returns never flash on screen for a frame — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   const [perfReturns, setPerfReturns] = useState({});
-  useEffect(() => {
+  const [prevPerfTicker, setPrevPerfTicker] = useState(ticker);
+  if (ticker !== prevPerfTicker) {
+    setPrevPerfTicker(ticker);
     setPerfReturns({});
+  }
+  useEffect(() => {
     const controllers = [];
     for (const tf of TF_LIST) {
       const ctrl = new AbortController();
