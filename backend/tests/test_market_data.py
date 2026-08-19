@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from services.market_data import _closes_live, _correlation_summary, _get_price_series_live
+from services.cache import TTLCache
+from services.market_data import _closes_live, _correlation_summary, _get_price_series_live, get_etf_holdings
 
 
 class GetPriceSeriesLiveTests(unittest.TestCase):
@@ -76,6 +77,43 @@ class ClosesLiveTests(unittest.TestCase):
             auto_adjust=True,
         )
         self.assertEqual(list(closes.columns), ["NVDA", "SMH"])
+
+
+# ── get_etf_holdings ─────────────────────────────────────────────────────────
+
+class GetEtfHoldingsCachingTests(unittest.TestCase):
+    def test_empty_holdings_result_is_cached_not_refetched_live(self):
+        """An ETF with genuinely no holdings (DB miss, live fetch also
+        empty) must be cached like any other result - `if cached:` used to
+        be falsy for a cached empty list, so this fell through to a live
+        yfinance call on every single request despite the docstring's
+        claim otherwise. Second call must hit the cache: _get_etf_holdings_db
+        and _get_etf_holdings_live are each called exactly once, not once
+        per request."""
+        with patch("services.market_data.cache", TTLCache()), \
+             patch("services.market_data._get_etf_holdings_db", return_value=None) as mock_db, \
+             patch("services.market_data._get_etf_holdings_live", return_value=[]) as mock_live:
+            first = get_etf_holdings("EMPTYETF")
+            second = get_etf_holdings("EMPTYETF")
+
+        mock_db.assert_called_once_with("EMPTYETF")
+        mock_live.assert_called_once_with("EMPTYETF")
+        self.assertEqual(first, ([], True))
+        self.assertEqual(second, ([], True))
+
+    def test_stale_flag_travels_with_holdings_not_a_sibling_key(self):
+        """stale must come back bundled with the holdings it describes
+        (a single cached tuple), not as a second cache lookup a caller has
+        to make in the right order - so a DB hit reports stale=False and a
+        live fallback reports stale=True, both readable straight off this
+        one call's return value."""
+        with patch("services.market_data.cache", TTLCache()), \
+             patch("services.market_data._get_etf_holdings_db", return_value=[["AAPL", 10.0]]), \
+             patch("services.market_data._get_etf_holdings_live") as mock_live:
+            db_hit = get_etf_holdings("DBHITETF")
+
+        mock_live.assert_not_called()
+        self.assertEqual(db_hit, ([["AAPL", 10.0]], False))
 
 
 # ── _correlation_summary ─────────────────────────────────────────────────────
