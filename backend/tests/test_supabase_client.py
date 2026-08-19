@@ -19,7 +19,10 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from services.supabase_client import assert_not_truncated, paginated_select
+from unittest.mock import patch
+
+import services.supabase_client as supabase_client
+from services.supabase_client import assert_not_truncated, get_client_optional, paginated_select
 
 
 class _FakeRangeQuery:
@@ -142,6 +145,42 @@ class AssertNotTruncatedTests(unittest.TestCase):
     def test_passes_through_empty_result(self):
         self.assertEqual(assert_not_truncated([], page_size=1000), [])
 
+
+
+class GetClientOptionalTests(unittest.TestCase):
+    """get_client_optional memoizes the client, but only a successful one.
+
+    create_client() does real work, so the first attempt on a cold process
+    can fail for reasons that say nothing about the local config - DNS not
+    up yet, a TLS handshake against a cold host. Latching that failure for
+    the process lifetime silently demoted every later request to the
+    yfinance fallback (a top-~10 snapshot instead of the full DB holdings)
+    until someone restarted the server.
+    """
+
+    def setUp(self):
+        self._saved = supabase_client._client_singleton
+        supabase_client._client_singleton = None
+
+    def tearDown(self):
+        supabase_client._client_singleton = self._saved
+
+    def test_construction_failure_is_retried_on_the_next_call(self):
+        client = object()
+        with patch.object(supabase_client, "get_client",
+                          side_effect=[RuntimeError("DNS not up yet"), client]) as mock_build:
+            self.assertIsNone(get_client_optional())
+            self.assertIs(get_client_optional(), client)
+
+        self.assertEqual(mock_build.call_count, 2)
+
+    def test_success_is_memoized(self):
+        client = object()
+        with patch.object(supabase_client, "get_client", return_value=client) as mock_build:
+            self.assertIs(get_client_optional(), client)
+            self.assertIs(get_client_optional(), client)
+
+        mock_build.assert_called_once_with()
 
 if __name__ == "__main__":
     unittest.main()

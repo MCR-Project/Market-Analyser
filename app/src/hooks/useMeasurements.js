@@ -14,13 +14,14 @@
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useFetch } from './useFetch';
-import { api } from '../utils/api';
+import { api, isTransientError } from '../utils/api';
 
 export function useMeasurements(etfId) {
   const [activeIds, setActiveIds] = useState(null); // null = not yet initialized
   const [results, setResults] = useState({});
   const [loading, setLoading] = useState({});
   const abortRefs = useRef({});
+  const retryTimersRef = useRef({});
   const initializedRef = useRef(false);
   // Tracks what was fetched last time the results effect ran, so it can
   // diff against the new activeIds/etfId and only fetch what's actually
@@ -74,32 +75,57 @@ export function useMeasurements(etfId) {
     // below instead of a delete-then-set race).
     const idsToClear = idsToAbort.filter(id => !idsToFetch.includes(id));
 
+    const clearRetry = (id) => {
+      if (retryTimersRef.current[id] !== undefined) {
+        clearTimeout(retryTimersRef.current[id]);
+        delete retryTimersRef.current[id];
+      }
+    };
+
+    // Results are fetched here rather than through useFetch (one request
+    // per active measurement, keyed off a diff), so they don't inherit its
+    // auto-retry and used to stay permanently blank after a cold start
+    // even once the backend recovered. Same rule as useFetch: re-ask on a
+    // transient failure, give up on a stable one. The controller is reused
+    // across retries so a toggle-off or ETF change still cancels the whole
+    // chain, and `loading` deliberately stays true while retrying - it is
+    // still loading.
+    const run = (id, m, ctrl) => {
+      setLoading(prev => ({ ...prev, [id]: true }));
+      api.runMeasurement(m.route, { etf_id: etfId }, { signal: ctrl.signal })
+        .then(data => {
+          if (ctrl.signal.aborted) return;
+          setResults(prev => ({ ...prev, [id]: data }));
+          setLoading(prev => ({ ...prev, [id]: false }));
+        })
+        .catch(err => {
+          if (ctrl.signal.aborted) return;
+          if (isTransientError(err)) {
+            retryTimersRef.current[id] = setTimeout(() => {
+              delete retryTimersRef.current[id];
+              if (!ctrl.signal.aborted) run(id, m, ctrl);
+            }, 3000);
+            return;
+          }
+          setResults(prev => ({ ...prev, [id]: null }));
+          setLoading(prev => ({ ...prev, [id]: false }));
+        });
+    };
+
     for (const id of idsToAbort) {
       abortRefs.current[id]?.abort();
       delete abortRefs.current[id];
+      clearRetry(id);
     }
 
     for (const id of idsToFetch) {
       const m = manifest.find(x => x.id === id);
       if (!m) continue;
 
+      clearRetry(id);
       const ctrl = new AbortController();
       abortRefs.current[id] = ctrl;
-      setLoading(prev => ({ ...prev, [id]: true }));
-
-      api.runMeasurement(m.route, { etf_id: etfId }, { signal: ctrl.signal })
-        .then(data => {
-          if (!ctrl.signal.aborted) {
-            setResults(prev => ({ ...prev, [id]: data }));
-            setLoading(prev => ({ ...prev, [id]: false }));
-          }
-        })
-        .catch(() => {
-          if (!ctrl.signal.aborted) {
-            setResults(prev => ({ ...prev, [id]: null }));
-            setLoading(prev => ({ ...prev, [id]: false }));
-          }
-        });
+      run(id, m, ctrl);
     }
 
     // Remove results/loading for deactivated measurements — otherwise a
@@ -122,11 +148,14 @@ export function useMeasurements(etfId) {
     prevEtfIdRef.current = etfId;
   }, [activeIds, etfId, manifest]);
 
-  // Abort any still in-flight measurement requests on unmount.
+  // Abort any still in-flight measurement requests on unmount, and drop
+  // any retry that hasn't fired yet.
   useEffect(() => {
     const refs = abortRefs.current;
+    const timers = retryTimersRef.current;
     return () => {
       for (const ctrl of Object.values(refs)) ctrl.abort();
+      for (const timer of Object.values(timers)) clearTimeout(timer);
     };
   }, []);
 

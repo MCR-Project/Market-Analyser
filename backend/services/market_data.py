@@ -27,6 +27,7 @@ from datetime import date, timedelta
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from yfinance.exceptions import YFException, YFRateLimitError
 from services.cache import cache
 from services.supabase_client import get_client_optional, paginated_select
 from config import (
@@ -38,6 +39,37 @@ from config import (
     PERIOD_TO_DAYS,
     SECTOR_TAG,
 )
+
+
+# ── Upstream failure signalling ───────────────────────────────────────────────
+
+class DataUnavailable(RuntimeError):
+    """A live upstream fetch failed, as opposed to answering "nothing here".
+
+    The two must not be collapsed, because the edge has to handle them
+    oppositely: an empty answer is a fact about the ticker (404, and safe
+    to cache), while an upstream failure is a fact about right now (503,
+    and must not be cached). Collapsing them is what made a cold start
+    look permanent - the frontend deliberately never auto-retries a 4xx,
+    so one Yahoo hiccup while the server was warming up wedged the whole
+    dashboard until the page was reloaded by hand. main.py turns this
+    into a 503, which useFetch does retry.
+    """
+
+
+def _live(what: str, fn, *args, **kwargs):
+    """Run a live-yfinance fallback, converting an upstream failure into
+    DataUnavailable.
+
+    Only the *fallback* path is wrapped: a DB hit never reaches here, and
+    the private _..._live helpers stay exception-transparent for the
+    scripts that call them directly (scripts/fetch_daily.py wants the real
+    error, not a re-wrapped one).
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        raise DataUnavailable(f"{what} is temporarily unavailable upstream") from exc
 
 
 # ── Tracked ETF universe ──────────────────────────────────────────────────────
@@ -102,7 +134,14 @@ def _get_etf_info_db(etf_id: str) -> dict | None:
         return None
 
     row = resp.data[0]
-    info = yf.Ticker(etf_id).info or {}
+    # AUM is the only live value on this path (see _compute_aum), and
+    # nothing the dashboard renders depends on it. Degrade it to 0 rather
+    # than letting a Yahoo hiccup fail an endpoint whose real payload -
+    # name, category, description - is already in hand from the DB.
+    try:
+        info = yf.Ticker(etf_id).info or {}
+    except Exception:
+        info = {}
     return {
         "id": row["id"],
         "name": row["name"],
@@ -171,6 +210,10 @@ def get_etf_info(etf_id: str, force_refresh: bool = False) -> dict:
     stale/partial live snapshot for a full hour. AUM is converted from raw
     totalAssets (int) to billions (float). force_refresh skips the cache
     read entirely (used by the frontend's manual refresh action).
+
+    Raises DataUnavailable if there's no DB row and the live fallback
+    can't reach Yahoo - nothing is cached in that case, so the next
+    request retries immediately.
     """
     key = f"etf_info:{etf_id}"
     if not force_refresh:
@@ -181,7 +224,7 @@ def get_etf_info(etf_id: str, force_refresh: bool = False) -> dict:
     result = _get_etf_info_db(etf_id)
     ttl = CACHE_TTL_HOLDINGS
     if result is None:
-        result = _get_etf_info_live(etf_id)
+        result = _live(f"ETF info for '{etf_id}'", _get_etf_info_live, etf_id)
         ttl = CACHE_TTL_HOLDINGS_FALLBACK
 
     cache.set(key, result, ttl)
@@ -196,29 +239,43 @@ DUPLICATE_TICKERS = {"GOOG": "GOOGL", "BRK-B": "BRK.B", "BF-B": "BF.B"}
 
 
 def _get_etf_holdings_live(etf_id: str) -> list[list]:
+    """Returns [] only when Yahoo genuinely has no holdings for this
+    symbol (it isn't a fund, or the fund exposes none); raises when Yahoo
+    couldn't be reached or refused.
+
+    The distinction matters upstream: [] is a real answer and gets cached,
+    while a failure must not be - a blanket `except Exception: return []`
+    here is what let one cold-start network blip be cached as "SPY has no
+    holdings" for CACHE_TTL_HOLDINGS_FALLBACK, 404-ing every endpoint
+    that builds on holdings.
+    """
     ticker = yf.Ticker(etf_id)
     try:
-        funds = ticker.funds_data
-        top = funds.top_holdings
-        if top is not None and not top.empty:
-            # Merge duplicate share classes into a single entry
-            merged: dict[str, float] = {}
-            for sym, row in top.iterrows():
-                # Weight can be a string "7.89%" or a float 0.0789
-                pct = row.get("% Assets") or row.get("Holding Percent") or 0
-                if isinstance(pct, str):
-                    pct = float(pct.replace("%", ""))
-                else:
-                    pct = float(pct) * 100  # convert 0.0789 → 7.89
-                canonical = DUPLICATE_TICKERS.get(sym, sym)
-                merged[canonical] = merged.get(canonical, 0) + pct
+        top = ticker.funds_data.top_holdings
+    except YFRateLimitError:
+        # Rate limiting is a YFException but a temporary one - it means
+        # "ask again later", not "this isn't a fund".
+        raise
+    except YFException:
+        return []
+    if top is None or top.empty:
+        return []
 
-            holdings = [[sym, round(w, 2)] for sym, w in merged.items()]
-            holdings.sort(key=lambda h: -h[1])
-            return holdings
-    except Exception:
-        pass
-    return []
+    # Merge duplicate share classes into a single entry
+    merged: dict[str, float] = {}
+    for sym, row in top.iterrows():
+        # Weight can be a string "7.89%" or a float 0.0789
+        pct = row.get("% Assets") or row.get("Holding Percent") or 0
+        if isinstance(pct, str):
+            pct = float(pct.replace("%", ""))
+        else:
+            pct = float(pct) * 100  # convert 0.0789 → 7.89
+        canonical = DUPLICATE_TICKERS.get(sym, sym)
+        merged[canonical] = merged.get(canonical, 0) + pct
+
+    holdings = [[sym, round(w, 2)] for sym, w in merged.items()]
+    holdings.sort(key=lambda h: -h[1])
+    return holdings
 
 
 def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
@@ -262,6 +319,10 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
     observe one without the other - a sibling cache key relied on the
     caller reading it right after this call, which concurrent requests for
     the same ETF could interleave and get wrong.
+
+    Raises DataUnavailable if there are no DB rows and the live fallback
+    can't reach Yahoo. Only a real empty answer is cached below; a failure
+    deliberately isn't, so the next request retries at once.
     """
     key = f"etf_holdings:{etf_id}"
     if not force_refresh:
@@ -273,7 +334,7 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
     ttl = CACHE_TTL_HOLDINGS
     stale = False
     if holdings is None:
-        holdings = _get_etf_holdings_live(etf_id)
+        holdings = _live(f"holdings for '{etf_id}'", _get_etf_holdings_live, etf_id)
         ttl = CACHE_TTL_HOLDINGS_FALLBACK
         stale = True
 
@@ -356,7 +417,9 @@ def get_stock_info(ticker_symbol: str) -> dict:
 
     result = _get_stock_info_db(ticker_symbol)
     if result is None:
-        result = _get_stock_info_live(ticker_symbol)
+        result = _live(
+            f"stock info for '{ticker_symbol}'", _get_stock_info_live, ticker_symbol
+        )
 
     cache.set(key, result, CACHE_TTL_HOLDINGS)
     return result
@@ -449,7 +512,10 @@ def get_price_series(
     if interval == "1d":
         result = _get_price_series_db(ticker_symbol, period)
     if result is None:
-        result = _get_price_series_live(ticker_symbol, period, interval)
+        result = _live(
+            f"price series for '{ticker_symbol}'",
+            _get_price_series_live, ticker_symbol, period, interval,
+        )
 
     # Don't cache an empty result - could be a transient miss, let the next
     # request retry rather than being stuck returning [] for the full TTL.
@@ -621,7 +687,10 @@ def compute_correlation_matrix(
 
     closes = _closes_db(tickers, period) if interval == "1d" else None
     if closes is None:
-        closes = _closes_live(tickers, period, interval)
+        closes = _live(
+            "price history for these holdings",
+            _closes_live, tickers, period, interval,
+        )
 
     if closes is None:
         return {"matrix": {}, "tickers": tickers}

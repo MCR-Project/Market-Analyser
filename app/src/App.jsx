@@ -29,13 +29,14 @@ import { ViewTabs } from './components/ui/ViewTabs';
 import { Loading } from './components/ui/Loading';
 import { ErrorState } from './components/ui/ErrorState';
 import { MeasurementPicker } from './components/ui/MeasurementPicker';
+import { describeFetchError } from './utils/errorCopy';
 import { TableView } from './views/TableView';
 import { MatrixView } from './views/MatrixView';
 import { NetworkView } from './views/NetworkView';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme('light');
-  const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry, isLive: etfLive } = useLiveEtf();
+  const { etf, etfId, tickers, weightOf, loading: etfLoading, error: etfError, retry: etfRetry, isLive: etfLive } = useLiveEtf();
 
   // Shared across Matrix/Network — kept here (rather than inside those
   // now-self-contained views) so the highlighted stock survives switching
@@ -99,7 +100,11 @@ export default function App() {
               <Loading variant="skeleton" lines={8} />
             </div>
           ) : (
-            <ErrorState onRetry={() => { etfRetry(); measurements.retryManifest(); }} className="mt-2" />
+            <ErrorState
+              {...describeFetchError(etfError)}
+              onRetry={() => { etfRetry(); measurements.retryManifest(); }}
+              className="mt-2"
+            />
           )
         ) : (
           <>

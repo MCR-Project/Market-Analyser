@@ -9,16 +9,22 @@
  * arg) - fetchers that support bypassing their own cache (e.g. a
  * `refresh` API param) can read it to do so.
  *
- * A network-level failure (fetch() rejecting with a TypeError - connection
- * refused, DNS not resolving, etc.) auto-retries once after a few seconds
- * instead of sitting broken until a human clicks Retry. This is what a
- * "cold start" load looks like: the frontend's static assets are served
- * instantly while the backend is still coming up, so the very first
- * request loses that race and every hook built on this one would otherwise
- * fail permanently - the only workaround being a full page reload, which
- * isn't something a production user knows to do. An HTTP error response
- * (404/500/...) is a real answer from a server that IS up, so it does NOT
- * auto-retry - only genuine network failures do.
+ * A transient failure auto-retries every few seconds instead of sitting
+ * broken until a human clicks Retry. This is what a "cold start" load
+ * looks like: the frontend's static assets are served instantly while the
+ * backend is still coming up, so the first requests lose that race and
+ * every hook built on this one would otherwise fail permanently - the only
+ * workaround being a full page reload, which isn't something a production
+ * user knows to do.
+ *
+ * "Transient" is decided by isTransientError (see utils/api.js): a
+ * network-level TypeError, or a 5xx/429 from a server that is up but
+ * whose own data source isn't. A cold start produces both, which is why
+ * retrying only the network case wasn't enough - the backend binds its
+ * port well before Yahoo/Supabase will answer it, so the requests that
+ * lose the race come back as 503s, not as connection failures. A 404 or a
+ * 400 still does NOT retry: that's a stable answer that would come back
+ * identical however many times we asked.
  *
  * Contract on `deps`: every element must be a primitive (string, number,
  * or boolean) - e.g. an id, or a `list.join(',')` for a multi-value key.
@@ -34,6 +40,7 @@
  * is a plain array of caller-chosen values.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { isTransientError } from '../utils/api';
 
 export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   const [data, setData] = useState(fallback);
@@ -41,7 +48,8 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
   const fetcherRef = useRef(fetcher);
-  const forceRef = useRef(false);
+  const attemptRef = useRef(0);
+  const forcedAttemptRef = useRef(-1);
   const abortRef = useRef(null);
   const autoRetryTimeoutRef = useRef(null);
   const warnedNonPrimitiveDepsRef = useRef(false);
@@ -73,9 +81,16 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
     fetcherRef.current = fetcher;
   });
 
+  // `force` is recorded against the attempt number it belongs to rather
+  // than as a flag the effect consumes: StrictMode invokes the effect
+  // twice for one attempt, and a consumed flag left the second invoke -
+  // the one whose request the UI actually shows - unforced, so the manual
+  // refresh silently failed to bypass the cache it exists to bypass.
   const retry = useCallback((force = false) => {
-    forceRef.current = force;
-    setAttempt(a => a + 1);
+    const next = attemptRef.current + 1;
+    attemptRef.current = next;
+    if (force) forcedAttemptRef.current = next;
+    setAttempt(next);
   }, []);
 
   // Clear stale data as soon as the fetch key changes, during render rather
@@ -105,9 +120,8 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Consume the force flag so only this one run is forced
-    const force = forceRef.current;
-    forceRef.current = false;
+    // Only the attempt that asked for it is forced - see retry() above.
+    const force = forcedAttemptRef.current === attempt;
 
     // Call the latest fetcher from the ref (never stale)
     fetcherRef.current(controller.signal, force)
@@ -122,11 +136,11 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
           console.warn('[useFetch] request failed:', err.message);
           setError(err);
           setLoading(false);
-          // See the file-level doc comment: only a network-level failure
-          // (TypeError) gets an automatic retry - it's the signature of a
-          // cold-start race against the backend, and self-heals. A real
-          // HTTP error response would just fail the same way again.
-          if (err instanceof TypeError) {
+          // See the file-level doc comment: a transient failure is one
+          // that self-heals as the backend and its data sources warm up,
+          // so it's worth re-asking. Anything else would just fail the
+          // same way again.
+          if (isTransientError(err)) {
             autoRetryTimeoutRef.current = setTimeout(() => retry(), 3000);
           }
         }

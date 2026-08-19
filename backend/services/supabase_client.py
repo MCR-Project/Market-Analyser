@@ -83,7 +83,6 @@ def assert_not_truncated(rows: list[dict], page_size: int = SUPABASE_PAGE_SIZE) 
 
 
 _client_singleton: Client | None = None
-_client_init_attempted = False
 
 
 def get_client_optional() -> Client | None:
@@ -93,17 +92,25 @@ def get_client_optional() -> Client | None:
     unset or client construction otherwise fails, so the backend can boot
     and serve (via live yfinance fallback) with zero Supabase config.
 
-    Only construction failure is memoized (a permanent local-config issue).
+    Only *success* is memoized. A failed construction is retried on the
+    next call, because create_client() does real work and the first
+    attempt on a cold process can fail for reasons that say nothing about
+    the local config - DNS not resolving yet, a TLS handshake against a
+    cold host. Latching that first failure for the whole process lifetime
+    silently demoted every later request to the yfinance fallback (a
+    top-~10 snapshot instead of the full DB holdings) until someone
+    restarted the server. Genuinely missing env vars still fail on every
+    call; they just fail cheaply.
+
     Query failures happen later, inside each caller's own .execute() calls,
     so a transient Supabase outage self-heals on the next request without
     needing a server restart.
     """
-    global _client_singleton, _client_init_attempted
-    if _client_init_attempted:
+    global _client_singleton
+    if _client_singleton is not None:
         return _client_singleton
-    _client_init_attempted = True
     try:
         _client_singleton = get_client()
     except Exception:
-        _client_singleton = None
+        return None
     return _client_singleton

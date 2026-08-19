@@ -2,7 +2,9 @@
 FastAPI application entry point.
 
 Mounts the /api router, enables CORS for frontend dev servers,
-and exposes a /health endpoint for liveness checks.
+exposes a /health endpoint for liveness checks, and maps DataUnavailable
+onto 503 so a transient upstream failure reads as retryable rather than
+as a bug (500) or as a missing resource (404).
 
 Start with:  python -m uvicorn main:app --port 8000 --reload
 API docs at: http://localhost:8000/docs
@@ -10,10 +12,12 @@ API docs at: http://localhost:8000/docs
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from api.routes import router
 from measurements.registry import measurement_router
+from services.market_data import DataUnavailable
 
 try:
     from dotenv import load_dotenv
@@ -46,6 +50,23 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(measurement_router)
+
+
+@app.exception_handler(DataUnavailable)
+def data_unavailable(request: Request, exc: DataUnavailable):
+    """Answer 503 when a live data source failed, not 500.
+
+    The status code is the whole point: the frontend's useFetch auto-
+    retries 5xx/429 and does not retry a 404, so a Yahoo/Supabase blip
+    during startup now heals itself instead of parking the dashboard on
+    an error panel until someone reloads the page. Retry-After documents
+    the same interval useFetch already backs off by.
+    """
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "3"},
+    )
 
 
 @app.get("/health")
