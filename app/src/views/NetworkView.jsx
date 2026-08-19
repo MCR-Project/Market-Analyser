@@ -147,14 +147,16 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
                   const isNb = selected && selected !== t && peerRho != null && peerRho >= threshold;
                   const dim = selected && !isSel && !isNb;
                   const pid = 'lp_' + t.replace('.', '_');
-                  const logoFill = `url(#${pid})`;
-                  const fill = logoFill || (isSel ? 'var(--accent)' : (isNb ? 'var(--accent-soft)' : 'var(--bg-1)'));
+                  // Always a truthy pattern-url string — the SVG <pattern>
+                  // defined above always exists for this ticker, so there's
+                  // no fallback fill to fall back to.
+                  const fill = `url(#${pid})`;
                   const stroke = isSel || isNb ? 'var(--accent)' : 'var(--border-strong)';
                   return (
                     <g key={t} style={{ cursor: 'pointer', opacity: dim ? 0.32 : 1, transition: 'opacity 200ms' }} onClick={e => { e.stopPropagation(); onSelect(t); }}>
                       {isSel && <circle cx={p.x} cy={p.y} r={r + 5} fill="none" stroke="var(--accent-ring)" strokeWidth={2} />}
                       <circle cx={p.x} cy={p.y} r={r} fill={fill} stroke={stroke} strokeWidth={isSel ? 2.2 : (isNb ? 1.8 : 1.6)} />
-                      {logoFill && isSel && <circle cx={p.x} cy={p.y} r={r} fill="var(--accent)" fillOpacity={0.28} />}
+                      {isSel && <circle cx={p.x} cy={p.y} r={r} fill="var(--accent)" fillOpacity={0.28} />}
                       <text x={p.x} y={p.y + r + 13} textAnchor="middle" fill={isSel ? 'var(--accent)' : 'var(--fg-1)'} fontSize={11} fontWeight={600} fontFamily="var(--font-mono)">{t}</text>
                     </g>
                   );
