@@ -20,24 +20,39 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
   const forceRef = useRef(false);
   const abortRef = useRef(null);
 
-  // Always keep the latest fetcher in the ref
-  fetcherRef.current = fetcher;
+  // Always keep the latest fetcher in the ref — updated in its own effect
+  // (runs after every render) rather than during render, since refs aren't
+  // meant to be written while rendering.
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  });
 
   const retry = useCallback((force = false) => {
     forceRef.current = force;
     setAttempt(a => a + 1);
   }, []);
 
+  // Clear stale data as soon as the fetch key changes, during render rather
+  // than at the top of the effect below — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  // `deps` is caller-supplied and arbitrary-length, so it's collapsed into
+  // one comparable key rather than tracked field-by-field. Every call site
+  // passes primitives (ids, joined ticker lists), so JSON.stringify is a
+  // stable, order-sensitive key here.
+  const key = JSON.stringify([...deps, attempt]);
+  const [prevKey, setPrevKey] = useState(key);
+  if (key !== prevKey) {
+    setPrevKey(key);
+    setData(fallback);
+    setLoading(true);
+    setError(null);
+  }
+
   useEffect(() => {
     // Abort any in-flight request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-
-    // Clear stale data immediately
-    setData(fallback);
-    setLoading(true);
-    setError(null);
 
     // Consume the force flag so only this one run is forced
     const force = forceRef.current;
@@ -60,6 +75,9 @@ export function useFetch(fetcher, deps = [], { fallback = null } = {}) {
       });
 
     return () => controller.abort();
+    // deps is a caller-supplied, arbitrary-length array by design (the
+    // whole point of this hook); exhaustive-deps can't verify it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, attempt]);
 
   return { data, loading, error, retry };
