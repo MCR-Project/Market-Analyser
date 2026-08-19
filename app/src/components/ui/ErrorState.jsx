@@ -5,6 +5,9 @@
  * stale or fabricated data. Offers a Retry button wired to the failed
  * fetch's `retry()` (from useFetch).
  * Props: title, message, onRetry (optional — hides the button when absent).
+ *
+ * Callers should spread describeFetchError(error) (utils/errorCopy.js) in
+ * rather than relying on the defaults — see the note on that function.
  */
 import { memo } from 'react';
 

@@ -40,7 +40,9 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
       .sort((a, b) => b.val - a.val);
   }, [selData, selected, tickers, corrFn]);
 
-  const maxSecCount = useMemo(() => Math.max(...Object.values(sectorData.sectorCounts)), [sectorData]);
+  // Math.max(...[]) is -Infinity — guard with a floor of 1 so an ETF with
+  // no sector data (empty sectorCounts) can't poison the width% below.
+  const maxSecCount = useMemo(() => Math.max(1, ...Object.values(sectorData.sectorCounts)), [sectorData]);
 
   return (
     <aside className="w-[320px] flex-none min-h-0 max-h-full flex flex-col overflow-hidden bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-[18px]">

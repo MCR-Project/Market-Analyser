@@ -17,7 +17,7 @@
  *  Overlays: StockPopup, MeasurementPicker
  *  (EtfDashboard owns its own ETF-picker overlay internally)
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTheme } from './hooks/useTheme';
 import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
@@ -29,13 +29,14 @@ import { ViewTabs } from './components/ui/ViewTabs';
 import { Loading } from './components/ui/Loading';
 import { ErrorState } from './components/ui/ErrorState';
 import { MeasurementPicker } from './components/ui/MeasurementPicker';
+import { describeFetchError } from './utils/errorCopy';
 import { TableView } from './views/TableView';
 import { MatrixView } from './views/MatrixView';
 import { NetworkView } from './views/NetworkView';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme('light');
-  const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry, isLive: etfLive } = useLiveEtf();
+  const { etf, etfId, tickers, weightOf, loading: etfLoading, error: etfError, retry: etfRetry, isLive: etfLive } = useLiveEtf();
 
   // Shared across Matrix/Network — kept here (rather than inside those
   // now-self-contained views) so the highlighted stock survives switching
@@ -52,9 +53,14 @@ export default function App() {
 
   // Reset the matrix/network selection whenever the active ETF changes
   // (from EtfDashboard's own picker, or anywhere else that calls switchEtf).
-  useEffect(() => {
+  // Adjusted during render rather than in an effect — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  // — so the stale selection never paints for a frame before being cleared.
+  const [prevEtfId, setPrevEtfId] = useState(etfId);
+  if (etfId !== prevEtfId) {
+    setPrevEtfId(etfId);
     setSelected(null);
-  }, [etfId]);
+  }
 
   // If the manifest fetch failed earlier (e.g. the page loaded before the
   // backend was up), opening the picker re-attempts it — the measurement
@@ -67,7 +73,6 @@ export default function App() {
   const tabs = {
     Table: (
       <TableView
-        etf={etf}
         tickers={tickers}
         onSelectStock={setStockPopup}
         measurements={measurements}
@@ -95,7 +100,11 @@ export default function App() {
               <Loading variant="skeleton" lines={8} />
             </div>
           ) : (
-            <ErrorState onRetry={() => { etfRetry(); measurements.retryManifest(); }} className="mt-2" />
+            <ErrorState
+              {...describeFetchError(etfError)}
+              onRetry={() => { etfRetry(); measurements.retryManifest(); }}
+              className="mt-2"
+            />
           )
         ) : (
           <>

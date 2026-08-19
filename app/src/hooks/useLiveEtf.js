@@ -34,11 +34,6 @@ export function useLiveEtf() {
     return h ? h[1] : 0;
   }, [etf]);
 
-  const combinedWeight = useMemo(
-    () => etf?.holdings?.reduce((s, h) => s + h[1], 0) ?? 0,
-    [etf]
-  );
-
   const { data: allEtfs } = useFetch(
     (signal) => api.listEtfs({ signal }),
     [],
@@ -46,7 +41,7 @@ export function useLiveEtf() {
   );
 
   return {
-    etf, etfId, tickers, weightOf, combinedWeight, switchEtf,
+    etf, etfId, tickers, weightOf, switchEtf,
     allEtfs: allEtfs || [], loading, error, retry, forceRefresh,
     isLive: !!etf?.holdings?.length,
   };

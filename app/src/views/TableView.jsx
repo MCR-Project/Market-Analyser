@@ -24,7 +24,7 @@
  *  3. Filter row: sector dropdown + per-measurement filters
  *  4. Scrollable rows: one row per holding, sorted per the active sort key
  */
-import { memo, useState, useMemo, useCallback, useEffect } from 'react';
+import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveStocks } from '../hooks/useLiveStocks';
 import { Logo } from '../components/ui/Logo';
 import { Loading } from '../components/ui/Loading';
@@ -34,7 +34,7 @@ const NAME_COL_WIDTH = 230;
 const NAME_SORT_KEY = '__name__';
 
 export const TableView = memo(function TableView({
-  etf, tickers, onSelectStock,
+  tickers, onSelectStock,
   measurements, onOpenMeasurePicker,
 }) {
   const [query, setQuery] = useState('');
@@ -57,11 +57,17 @@ export const TableView = memo(function TableView({
 
   // If the measurement currently used for sorting gets deactivated, fall
   // back to unsorted rather than silently sorting by a stale/missing column.
-  useEffect(() => {
+  // Corrected during render (keyed off the active measurement id list)
+  // rather than in an effect — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const activeMeasureIds = activeMeasures.map(m => m.id).join(',');
+  const [prevActiveMeasureIds, setPrevActiveMeasureIds] = useState(activeMeasureIds);
+  if (activeMeasureIds !== prevActiveMeasureIds) {
+    setPrevActiveMeasureIds(activeMeasureIds);
     if (sort.key && sort.key !== NAME_SORT_KEY && !activeMeasures.some(m => m.id === sort.key)) {
       setSort({ key: null, dir: 'asc' });
     }
-  }, [activeMeasures, sort.key]);
+  }
 
   const handleSortClick = useCallback((key, defaultDir) => {
     setSort(prev => prev.key === key
@@ -78,6 +84,11 @@ export const TableView = memo(function TableView({
       const mMdx = measurements.getTickerMdx(t);
       return { ticker: t, name: stock.name, sector: stock.sector, mVals, mMdx };
     });
+    // Deliberately narrowed to the two functions actually called here,
+    // not the whole `measurements` object — that object's other fields
+    // (e.g. loading) change far more often and would invalidate this memo
+    // for no reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickers, stockMap, measurements.getTickerValues, measurements.getTickerMdx]);
 
   // Apply filters
