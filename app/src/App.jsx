@@ -17,7 +17,7 @@
  *  Overlays: StockPopup, MeasurementPicker
  *  (EtfDashboard owns its own ETF-picker overlay internally)
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTheme } from './hooks/useTheme';
 import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
@@ -52,9 +52,14 @@ export default function App() {
 
   // Reset the matrix/network selection whenever the active ETF changes
   // (from EtfDashboard's own picker, or anywhere else that calls switchEtf).
-  useEffect(() => {
+  // Adjusted during render rather than in an effect — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  // — so the stale selection never paints for a frame before being cleared.
+  const [prevEtfId, setPrevEtfId] = useState(etfId);
+  if (etfId !== prevEtfId) {
+    setPrevEtfId(etfId);
     setSelected(null);
-  }, [etfId]);
+  }
 
   // If the manifest fetch failed earlier (e.g. the page loaded before the
   // backend was up), opening the picker re-attempts it — the measurement
@@ -67,7 +72,6 @@ export default function App() {
   const tabs = {
     Table: (
       <TableView
-        etf={etf}
         tickers={tickers}
         onSelectStock={setStockPopup}
         measurements={measurements}
