@@ -3,19 +3,34 @@
  *
  * Receives a `tabs` prop shaped as { [tabName]: content }, where each key
  * is the tab's display name and each value is the React node to render
- * while that tab is active. Manages its own active-tab state (defaults
- * to the first key) and renders both the tab bar and the active tab's
- * content — the caller doesn't drive which panel is shown, it just
- * supplies all the panels up front.
+ * while that tab is active. Renders both the tab bar and the active tab's
+ * content — the caller supplies all the panels up front, and only the
+ * active one is mounted.
+ *
+ * Uncontrolled by default: it manages its own active-tab state, starting
+ * on the first key. Pass `active` (with `onSelect`) to drive the
+ * selection from outside instead — App keeps it in the URL, so a view is
+ * linkable and survives a reload.
  *
  * Usage:
  *   <ViewTabs tabs={{ Table: <TableView />, Matrix: <MatrixView /> }} />
+ *   <ViewTabs tabs={tabs} active="Matrix" onSelect={goToView} />
  */
 import { memo, useState } from 'react';
 
-export const ViewTabs = memo(function ViewTabs({ tabs = {} }) {
+export const ViewTabs = memo(function ViewTabs({ tabs = {}, active: activeProp, onSelect }) {
   const names = Object.keys(tabs);
-  const [active, setActive] = useState(names[0]);
+  const [ownActive, setOwnActive] = useState(names[0]);
+
+  // Controlled as soon as an `active` is supplied; otherwise the internal
+  // state drives it, so existing callers keep working unchanged.
+  const controlled = activeProp != null;
+  const active = controlled ? activeProp : ownActive;
+
+  const setActive = (name) => {
+    if (!controlled) setOwnActive(name);
+    onSelect?.(name);
+  };
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
