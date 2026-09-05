@@ -162,14 +162,21 @@ export const TableView = memo(function TableView({
 
       {/* ── Table ── */}
       <div className="flex-1 mb-4 min-h-0 overflow-hidden flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] px-1">
-        {/* Column headers */}
-        <div className="flex items-start py-2 px-[18px]">
-          <MetricSlot width={NAME_COL_WIDTH}>
+        {/* Column headers.
+
+            Every inset here mirrors the data rows below rather than being
+            chosen for the header on its own, so a header sits directly
+            above the values it labels. A data row is a bordered button
+            (1px) whose cells carry their own padding, so this row borrows
+            the same 1px horizontally — transparent, since the header is
+            not a card — and each slot repeats its cell's padding. */}
+        <div className="flex items-start py-2 border-x border-transparent">
+          <MetricSlot width={NAME_COL_WIDTH} className="pl-2">
             <SortHeader label="STOCK" active={sort.key === NAME_SORT_KEY} dir={sort.dir} onClick={() => handleSortClick(NAME_SORT_KEY, 'asc')} />
           </MetricSlot>
           <div className="flex-1 min-w-0 flex flex-wrap items-start">
             {activeMeasures.map(m => (
-              <MetricSlot key={m.id} width={m.column_width} className="pl-4">
+              <MetricSlot key={m.id} width={m.column_width} className="pl-2 border-l border-transparent">
                 {/* The "?" is a sibling of the sort button, not inside it:
                     reading about a column must not also re-sort it. */}
                 <div className="flex items-center gap-1.5">
