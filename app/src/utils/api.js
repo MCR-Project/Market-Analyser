@@ -140,6 +140,15 @@ export const api = {
 
   // Measurement plugin system
   listMeasurements: (opts = {}) => fetchJson('/measurements', opts),
+
+  // Measurement documentation. Note the /measurement-docs prefix rather
+  // than /measurements/{id}/doc: plugin routes live under the same /api
+  // prefix, and /measurements/correlation/{etf_id} would match
+  // etf_id="doc" and shadow it.
+  getMeasurementDoc: (id, opts = {}) =>
+    fetchJson(`/measurement-docs/${encodeURIComponent(id)}`, opts),
+  getMeasurementExample: (id, opts = {}) =>
+    fetchJson(`/measurement-docs/${encodeURIComponent(id)}/example`, opts),
   runMeasurement: (route, params = {}, { signal } = {}) => {
     let url = route;
     // Replace {etf_id} and other path params

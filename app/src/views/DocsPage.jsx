@@ -1,13 +1,20 @@
 /**
- * DocsPage — placeholder for the measurement documentation page.
+ * DocsPage — measurement documentation.
  *
- * The routes (/docs and /docs/:measurementId) are registered now so the
- * rest of the app can link to them; the real page — sidebar listing
- * official and plugged-in measurements, search, and the rendered doc
- * itself — is built separately.
+ * Currently the minimum needed to reach a rendered doc: it resolves
+ * /docs/:measurementId, fetches that measurement's manifest entry and
+ * its .mdx, and hands both to MeasurementDoc. The sidebar listing
+ * official and plugged-in measurements, the search box, and the
+ * not-found/empty states are built separately.
  */
 import { Link, useParams } from 'react-router';
+import { useFetch } from '../hooks/useFetch';
 import { useTheme } from '../hooks/useTheme';
+import { api } from '../utils/api';
+import { MeasurementDoc } from '../components/docs/MeasurementDoc';
+import { Loading } from '../components/ui/Loading';
+import { ErrorState } from '../components/ui/ErrorState';
+import { describeFetchError } from '../utils/errorCopy';
 import { DEFAULT_ETF_ID } from '../store/useEtfStore';
 
 export function DocsPage() {
@@ -18,17 +25,39 @@ export function DocsPage() {
   // opening /docs directly renders light for someone who chose dark.
   useTheme();
 
+  const { data: manifest } = useFetch(
+    (signal) => api.listMeasurements({ signal }),
+    [],
+    { fallback: null }
+  );
+
+  const { data: doc, loading, error, retry } = useFetch(
+    (signal) => (measurementId ? api.getMeasurementDoc(measurementId, { signal }) : Promise.resolve(null)),
+    [measurementId || ''],
+    { fallback: null }
+  );
+
+  const entry = (manifest || []).find(m => m.id === measurementId) || null;
+
   return (
-    <div className="h-screen overflow-auto flex flex-col items-center justify-center gap-3 px-6 bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
-      <div className="eyebrow">MEASUREMENT DOCUMENTATION</div>
-      <p className="text-sm text-[var(--fg-2)] m-0 text-center">
-        {measurementId
-          ? <>Documentation for <span className="font-[var(--font-mono)] text-[var(--fg)]">{measurementId}</span> is not written yet.</>
-          : 'Documentation for the measurement plugins is not written yet.'}
-      </p>
-      <Link to={`/etf/${DEFAULT_ETF_ID}`} className="font-[var(--font-mono)] text-xs font-semibold text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent-ring)] rounded-full px-4 py-1.5 no-underline">
-        Back to the dashboard
-      </Link>
+    <div className="h-screen overflow-auto bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
+      <div className="max-w-[1280px] mx-auto px-6 py-8">
+        <Link to={`/etf/${DEFAULT_ETF_ID}`} className="inline-block font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] no-underline mb-6 hover:text-[var(--fg)]">
+          ← Back to the dashboard
+        </Link>
+
+        {!measurementId ? (
+          <p className="text-sm text-[var(--fg-2)]">
+            Pick a measurement to read about it.
+          </p>
+        ) : loading ? (
+          <Loading variant="skeleton" lines={10} />
+        ) : error || !doc ? (
+          <ErrorState {...describeFetchError(error)} onRetry={retry} />
+        ) : (
+          <MeasurementDoc manifest={entry} doc={doc} />
+        )}
+      </div>
     </div>
   );
 }
