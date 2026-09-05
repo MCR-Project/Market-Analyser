@@ -6,6 +6,8 @@ For each measurement in ALL_MEASUREMENTS:
     {etf_id}, or none at all for a fund-independent measurement)
   - Dynamically builds a handler function with the correct signature
   - Exposes GET /api/measurements as a manifest listing all available measurements
+  - Exposes GET /api/measurement-docs/{id} serving the .mdx doc shipped
+    next to each measurement (see measurements/docs.py)
 
 Measurements take no query parameters — they fetch their own inputs (via
 measurements/inputs/*) using internal defaults, so the frontend never
@@ -15,6 +17,7 @@ needs to know what a measurement needs beyond which ETF to compute for.
 import re
 from fastapi import APIRouter, HTTPException
 from measurements import ALL_MEASUREMENTS
+from measurements.docs import DocError, load_doc
 
 measurement_router = APIRouter(prefix="/api")
 
@@ -74,3 +77,45 @@ for m in ALL_MEASUREMENTS:
 def list_measurements():
     """Returns the manifest of all registered measurement plugins."""
     return [m.manifest() for m in ALL_MEASUREMENTS]
+
+
+# ── Documentation endpoint ───────────────────────────────────────────────────
+#
+# Deliberately NOT mounted at /api/measurements/{id}/doc. Every plugin
+# registers its own route under the same /api prefix above, and
+# "/measurements/correlation/{etf_id}" would happily match etf_id="doc" —
+# shadowing this endpoint for the correlation measurement only, which is
+# the kind of bug that shows up once and confuses everyone. A distinct
+# first path segment cannot collide with any plugin route.
+
+@measurement_router.get(
+    "/measurement-docs/{measurement_id}",
+    summary="Read one measurement's documentation",
+    description=(
+        "Returns the parsed frontmatter and raw MDX body of the .mdx doc "
+        "shipped next to a measurement. A measurement with no doc file "
+        "answers 200 with has_doc=false and frontmatter synthesised from "
+        "its manifest metadata."
+    ),
+    tags=["measurements"],
+)
+def get_measurement_doc(measurement_id: str):
+    """Serve one measurement's documentation.
+
+    Three outcomes, deliberately distinct:
+      - no such measurement          → 404, a stable answer the frontend
+                                       should not retry
+      - measurement, but no .mdx     → 200 with has_doc=false; shipping no
+                                       doc is supported, not a failure
+      - .mdx exists but is malformed → 500 naming the file and the problem;
+                                       it was hand-written to be read, so
+                                       failing loudly beats dropping it
+    """
+    measurement = next((m for m in ALL_MEASUREMENTS if m.id == measurement_id), None)
+    if measurement is None:
+        raise HTTPException(404, f"No measurement with id '{measurement_id}'")
+
+    try:
+        return load_doc(measurement)
+    except DocError as exc:
+        raise HTTPException(500, str(exc)) from exc

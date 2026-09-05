@@ -9,6 +9,8 @@ Every measurement is a self-describing unit that declares:
     has to know to supply
   - How it appears in the table (column_key, column_label)
   - Whether it's filterable and what filter UI to show (filterable, filter_type, filter_options)
+  - Where its long-form documentation lives (doc_path) — a .mdx file next
+    to its own module, loaded by measurements/docs.py
   - How to sort it (sort_type, sort_order)
   - How to render a single value for display (render_cell) — a small MDX/
     JSX snippet using the frontend's shared component vocabulary (Bar,
@@ -21,7 +23,9 @@ their routes on the FastAPI router, and exposes a manifest so the
 frontend can discover what measurements are available at runtime.
 """
 
+import inspect
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 
 class MeasurementBase(ABC):
@@ -32,6 +36,25 @@ class MeasurementBase(ABC):
     name: str = ""
     description: str = ""
     route: str = ""
+
+    # Which set this plugin was registered in — "official" or "addon".
+    # Set by measurements/__init__.py when it builds ALL_MEASUREMENTS,
+    # since that barrel is the only place that knows; the documentation
+    # page groups its sidebar on it.
+    origin: str = ""
+
+    # ── Documentation ────────────────────────────────────────────────────
+    # Long-form docs live in a .mdx file next to this measurement's module
+    # (correlation.py → correlation.mdx); see measurements/docs.py for the
+    # file format. Shipping no doc file is supported — the page falls back
+    # to the metadata above.
+    #
+    # Optional overrides for the ETF/stock a doc's worked example is
+    # computed against, for measurements a specific fund illustrates
+    # better than the repo-wide DOCS_EXAMPLE_* defaults in config.py. A
+    # doc's own frontmatter overrides these in turn.
+    example_etf: str = ""
+    example_stock: str = ""
 
     # ── Table column config ──────────────────────────────────────────────
     # How this measurement's per-ticker value appears as a column
@@ -126,6 +149,23 @@ class MeasurementBase(ABC):
         }
         return result
 
+    # ── Documentation ────────────────────────────────────────────────────
+
+    @property
+    def doc_path(self) -> Path:
+        """Where this measurement's .mdx doc lives: its own module, .mdx.
+
+        Resolved from the concrete subclass's module file rather than from
+        a declared path, so an addon author gets the convention for free —
+        drop volatility.mdx next to volatility.py and it is picked up.
+        """
+        return Path(inspect.getfile(type(self))).with_suffix(".mdx")
+
+    @property
+    def has_doc(self) -> bool:
+        """Whether a doc file actually exists. Shipping none is supported."""
+        return self.doc_path.is_file()
+
     def manifest(self) -> dict:
         """Return the self-describing metadata for the registry endpoint."""
         return {
@@ -133,6 +173,8 @@ class MeasurementBase(ABC):
             "name": self.name,
             "description": self.description,
             "route": self.route,
+            "origin": self.origin,
+            "has_doc": self.has_doc,
             "column_key": self.column_key,
             "column_label": self.column_label,
             "column_width": self.column_width,
