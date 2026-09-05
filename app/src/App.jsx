@@ -16,8 +16,13 @@
  *  └────────────────────────────────────────────┘
  *  Overlays: StockPopup, MeasurementPicker
  *  (EtfDashboard owns its own ETF-picker overlay internally)
+ *
+ * Mounted by main.jsx at /etf/:etfId and /etf/:etfId/:view — the URL is
+ * the source of truth for both the fund and the open view, so a reload
+ * or a shared link lands on exactly what the sender was looking at.
  */
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { Navigate, useNavigate, useParams } from 'react-router';
 import { useTheme } from './hooks/useTheme';
 import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
@@ -34,7 +39,12 @@ import { TableView } from './views/TableView';
 import { MatrixView } from './views/MatrixView';
 import { NetworkView } from './views/NetworkView';
 
+/** URL slug → tab name in `tabs` below. Also the set of valid slugs. */
+const VIEW_BY_SLUG = { table: 'Table', matrix: 'Matrix', network: 'Network' };
+
 export default function App() {
+  const { etfId: routeEtfId, view: routeView } = useParams();
+  const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme('light');
   const { etf, etfId, tickers, weightOf, loading: etfLoading, error: etfError, retry: etfRetry, isLive: etfLive } = useLiveEtf();
 
@@ -69,6 +79,28 @@ export default function App() {
     if (measurements.manifest.length === 0) measurements.retryManifest();
     setMeasurePickerOpen(true);
   };
+
+  // Switching tab is a navigation, so each view is linkable and back
+  // returns to the previous one.
+  const selectView = useCallback(
+    (name) => navigate(`/etf/${etfId}/${name.toLowerCase()}`),
+    [navigate, etfId]
+  );
+
+  // Which tab the URL asks for. No slug at all is legitimate and means
+  // Table; an unrecognised slug is not a view, and redirects below.
+  const viewFromUrl = routeView ? VIEW_BY_SLUG[routeView.toLowerCase()] : 'Table';
+  const activeView = viewFromUrl ?? 'Table';
+
+  // Keep the URL describing what's actually on screen: `/etf/smh` becomes
+  // `/etf/SMH`, `/etf/SPY/Matrix` becomes `/etf/SPY/matrix`, and
+  // `/etf/SPY/bogus` drops back to the fund's own path rather than
+  // leaving the address bar claiming a view that isn't rendered.
+  // Replaces rather than pushes, so Back doesn't bounce off the
+  // non-canonical URL the user just left.
+  const canonicalPath = `/etf/${etfId}${routeView && viewFromUrl ? `/${viewFromUrl.toLowerCase()}` : ''}`;
+  const currentPath = `/etf/${routeEtfId}${routeView ? `/${routeView}` : ''}`;
+  if (currentPath !== canonicalPath) return <Navigate to={canonicalPath} replace />;
 
   const tabs = {
     Table: (
@@ -111,7 +143,7 @@ export default function App() {
             <EtfDashboard />
 
             {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
-            <ViewTabs tabs={tabs} />
+            <ViewTabs tabs={tabs} active={activeView} onSelect={selectView} />
           </>
         )}
       </main>
