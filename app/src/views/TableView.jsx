@@ -29,6 +29,7 @@ import { useLiveStocks } from '../hooks/useLiveStocks';
 import { Logo } from '../components/ui/Logo';
 import { Loading } from '../components/ui/Loading';
 import { MdxCell } from '../components/ui/MdxCell';
+import { DocLink } from '../components/ui/DocLink';
 
 const NAME_COL_WIDTH = 230;
 const NAME_SORT_KEY = '__name__';
@@ -169,7 +170,12 @@ export const TableView = memo(function TableView({
           <div className="flex-1 min-w-0 flex flex-wrap items-start">
             {activeMeasures.map(m => (
               <MetricSlot key={m.id} width={m.column_width} className="pl-4">
-                <SortHeader label={m.column_label} active={sort.key === m.id} dir={sort.dir} onClick={() => handleSortClick(m.id, defaultDirFor(m))} />
+                {/* The "?" is a sibling of the sort button, not inside it:
+                    reading about a column must not also re-sort it. */}
+                <div className="flex items-center gap-1.5">
+                  <SortHeader label={m.column_label} active={sort.key === m.id} dir={sort.dir} onClick={() => handleSortClick(m.id, defaultDirFor(m))} />
+                  <DocLink measurementId={m.id} measurementName={m.name} />
+                </div>
               </MetricSlot>
             ))}
             {activeMeasures.length === 0 && (

@@ -5,6 +5,7 @@
  * connected, yellow = backend offline), and a light/dark theme toggle.
  */
 import { memo } from 'react';
+import { Link } from 'react-router';
 
 export const Header = memo(function Header({ theme, onToggleTheme, isLive = false }) {
   return (
@@ -25,6 +26,13 @@ export const Header = memo(function Header({ theme, onToggleTheme, isLive = fals
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: isLive ? 'var(--color-success)' : 'var(--color-warning)' }} />
         {isLive ? 'LIVE' : 'OFFLINE'} · daily returns
       </span>
+
+      <Link
+        to="/docs"
+        className="flex-none font-[var(--font-body)] text-sm font-semibold text-[var(--fg-2)] no-underline px-2.5 py-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 hover:text-[var(--fg)] hover:bg-[var(--bg-3)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+      >
+        Docs
+      </Link>
 
       <button
         onClick={onToggleTheme}
