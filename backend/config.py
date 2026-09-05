@@ -23,6 +23,14 @@ CACHE_TTL_HOLDINGS_FALLBACK = 10
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations
 
+# Which fund/ticker a measurement's documentation computes its worked
+# example against, when neither the measurement class nor its doc's
+# frontmatter names one of its own. A fixed default (rather than whatever
+# the reader happens to have open) keeps a doc page reproducible: the same
+# URL shows the same numbers to everyone.
+DOCS_EXAMPLE_ETF = "SPY"
+DOCS_EXAMPLE_STOCK = "AAPL"
+
 # Maps a yfinance-style `period` string to a lookback window in days, used to
 # filter the `prices` table by date when reading price history from Supabase.
 # "max" has no entry - it means no lower bound (select all rows).
