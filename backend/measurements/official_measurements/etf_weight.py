@@ -11,6 +11,7 @@ class EtfWeightMeasurement(MeasurementBase):
     name = "% of ETF"
     description = "Weight of each holding as a percentage of the fund's portfolio"
     route = "/measurements/etf-weight/{etf_id}"
+    uses_inputs = ["holdings"]
 
     # Table column
     column_key = "weight"

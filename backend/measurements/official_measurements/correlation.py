@@ -12,6 +12,7 @@ class CorrelationMeasurement(MeasurementBase):
     name = "Correlation to Fund"
     description = "Average Pearson correlation of each holding's daily returns to all other holdings"
     route = "/measurements/correlation/{etf_id}"
+    uses_inputs = ["holdings", "correlation_matrix"]
 
     # Table column — shows per-ticker average ρ
     column_key = "avg_corr"

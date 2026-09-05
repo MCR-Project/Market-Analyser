@@ -12,6 +12,7 @@ class ValueHeldMeasurement(MeasurementBase):
     name = "Value Held"
     description = "Estimated market value of each holding based on fund AUM and weight"
     route = "/measurements/value-held/{etf_id}"
+    uses_inputs = ["holdings", "etf_info"]
 
     # Table column
     column_key = "value_b"
