@@ -8,6 +8,8 @@ For each measurement in ALL_MEASUREMENTS:
   - Exposes GET /api/measurements as a manifest listing all available measurements
   - Exposes GET /api/measurement-docs/{id} serving the .mdx doc shipped
     next to each measurement (see measurements/docs.py)
+  - Exposes GET /api/measurement-docs/{id}/example with the real inputs
+    and computed values behind that doc (see measurements/examples.py)
 
 Measurements take no query parameters — they fetch their own inputs (via
 measurements/inputs/*) using internal defaults, so the frontend never
@@ -18,6 +20,7 @@ import re
 from fastapi import APIRouter, HTTPException
 from measurements import ALL_MEASUREMENTS
 from measurements.docs import DocError, load_doc
+from measurements.examples import build_example
 
 measurement_router = APIRouter(prefix="/api")
 
@@ -111,11 +114,49 @@ def get_measurement_doc(measurement_id: str):
                                        it was hand-written to be read, so
                                        failing loudly beats dropping it
     """
-    measurement = next((m for m in ALL_MEASUREMENTS if m.id == measurement_id), None)
-    if measurement is None:
-        raise HTTPException(404, f"No measurement with id '{measurement_id}'")
+    measurement = _find(measurement_id)
 
     try:
         return load_doc(measurement)
     except DocError as exc:
         raise HTTPException(500, str(exc)) from exc
+
+
+@measurement_router.get(
+    "/measurement-docs/{measurement_id}/example",
+    summary="Worked example for one measurement",
+    description=(
+        "Runs a measurement against its documented example ETF and returns "
+        "the real input values, the computed per-ticker values and the "
+        "rendered cells for a handful of holdings."
+    ),
+    tags=["measurements"],
+)
+def get_measurement_example(measurement_id: str):
+    """Serve the worked example behind a measurement's documentation.
+
+    A DataUnavailable from any upstream fetch is deliberately NOT caught:
+    main.py maps it onto a 503 with Retry-After, so a doc page opened
+    during a Yahoo/Supabase blip retries and heals, rather than showing
+    made-up numbers or a permanent-looking error.
+    """
+    measurement = _find(measurement_id)
+
+    try:
+        frontmatter = load_doc(measurement).get("frontmatter", {})
+        return build_example(measurement, frontmatter)
+    except DocError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+def _find(measurement_id: str):
+    """Look up a registered measurement, or 404.
+
+    A 404 is a stable answer the frontend will not retry — the right
+    behaviour for an id that will never exist, as opposed to an upstream
+    failure, which is a 503.
+    """
+    measurement = next((m for m in ALL_MEASUREMENTS if m.id == measurement_id), None)
+    if measurement is None:
+        raise HTTPException(404, f"No measurement with id '{measurement_id}'")
+    return measurement

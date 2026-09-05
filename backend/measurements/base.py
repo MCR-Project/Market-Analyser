@@ -56,6 +56,13 @@ class MeasurementBase(ABC):
     example_etf: str = ""
     example_stock: str = ""
 
+    # Which measurements/inputs/* getters fetch_inputs() draws on, by
+    # registry name (see inputs/__init__.py). Imports alone can't be
+    # introspected, so this is what lets a doc page say where the numbers
+    # came from and what those getters quietly default to. Naming a getter
+    # that doesn't exist fails the test suite.
+    uses_inputs: list = []
+
     # ── Table column config ──────────────────────────────────────────────
     # How this measurement's per-ticker value appears as a column
     column_key: str = ""          # field name in the per-ticker output dict
@@ -175,6 +182,7 @@ class MeasurementBase(ABC):
             "route": self.route,
             "origin": self.origin,
             "has_doc": self.has_doc,
+            "uses_inputs": self.uses_inputs,
             "column_key": self.column_key,
             "column_label": self.column_label,
             "column_width": self.column_width,
