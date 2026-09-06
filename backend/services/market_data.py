@@ -57,18 +57,62 @@ class DataUnavailable(RuntimeError):
     """
 
 
+class SymbolNotFound(LookupError):
+    """Upstream answered, and the answer is that this symbol doesn't exist.
+
+    The counterpart to DataUnavailable above: both arrive here as a failed
+    live call, but they are opposite facts. "Yahoo could not be reached"
+    is about right now and heals on its own (503, retry); "Yahoo has never
+    heard of ZZZZ" is about the symbol and never will (404, stop asking).
+
+    Collapsing this one into DataUnavailable left the frontend retrying a
+    typo'd ticker every three seconds forever, behind a panel promising a
+    recovery that could not come.
+    """
+
+
+def _upstream_status(exc: BaseException) -> int | None:
+    """The HTTP status behind a failed live call, if there is one.
+
+    yfinance raises its transport's own exception, so this reads the
+    attached response rather than the type. curl_cffi sets `code` to 0
+    even on a real 404, so `response.status_code` is the only trustworthy
+    source; urllib-style `code` is accepted as a fallback. The cause chain
+    is walked because yfinance sometimes re-raises through its own error.
+    """
+    seen = 0
+    while exc is not None and seen < 5:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if isinstance(status, int) and status:
+            return status
+        code = getattr(exc, "code", None)
+        if isinstance(code, int) and code:
+            return code
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return None
+
+
 def _live(what: str, fn, *args, **kwargs):
-    """Run a live-yfinance fallback, converting an upstream failure into
-    DataUnavailable.
+    """Run a live-yfinance fallback, converting the failure into whichever
+    of SymbolNotFound / DataUnavailable it actually is.
 
     Only the *fallback* path is wrapped: a DB hit never reaches here, and
     the private _..._live helpers stay exception-transparent for the
     scripts that call them directly (scripts/fetch_daily.py wants the real
     error, not a re-wrapped one).
+
+    Neither outcome is cached. A 404 is stable enough to cache in
+    principle, but nothing re-asks for it — the frontend does not retry a
+    4xx — so caching would only add a way to pin a spurious 404 in place.
     """
     try:
         return fn(*args, **kwargs)
     except Exception as exc:
+        if _upstream_status(exc) == 404:
+            # `what` already reads "holdings for 'ZZZZ'" — quoting it again
+            # would double the quotes in the message the frontend shows.
+            raise SymbolNotFound(f"{what}: no such symbol upstream") from exc
         raise DataUnavailable(f"{what} is temporarily unavailable upstream") from exc
 
 

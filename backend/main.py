@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from api.routes import router
 from measurements.registry import measurement_router
-from services.market_data import DataUnavailable
+from services.market_data import DataUnavailable, SymbolNotFound
 
 try:
     from dotenv import load_dotenv
@@ -67,6 +67,18 @@ def data_unavailable(request: Request, exc: DataUnavailable):
         content={"detail": str(exc)},
         headers={"Retry-After": "3"},
     )
+
+
+@app.exception_handler(SymbolNotFound)
+def symbol_not_found(request: Request, exc: SymbolNotFound):
+    """Answer 404 when the upstream says the symbol doesn't exist.
+
+    The mirror of the handler above, and the reason the two exceptions are
+    kept apart: useFetch retries a 5xx and never retries a 4xx, so this is
+    what stops a typo'd ticker being re-requested every three seconds
+    forever under a panel that claims it is about to work.
+    """
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
 @app.get("/health")
