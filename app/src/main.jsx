@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import './index.css';
 import App from './App';
+import { AppLayout } from './components/layout/AppLayout';
 import { DEFAULT_ETF_ID } from './store/useEtfStore';
 
 // Split out so the dashboard doesn't carry the docs page's weight —
@@ -26,21 +27,25 @@ const DocsPage = lazy(() =>
   import('./views/DocsPage').then(m => ({ default: m.DocsPage }))
 );
 
-/** Neutral placeholder while the docs chunk loads. */
-const docsFallback = <div className="h-screen bg-[var(--bg)]" />;
+/** Neutral placeholder while the docs chunk loads, under the header. */
+const docsFallback = <div className="flex-1 bg-[var(--bg)]" />;
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to={`/etf/${DEFAULT_ETF_ID}`} replace />} />
-        <Route path="/etf/:etfId" element={<App />} />
-        <Route path="/etf/:etfId/:view" element={<App />} />
-        <Route path="/docs" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
-        <Route path="/docs/:measurementId" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
-        {/* Anything unrecognised lands on the default ETF rather than a
-            blank screen. */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* One layout wraps every page, so the header is a single element
+            shared across them rather than one rebuilt per page. */}
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<Navigate to={`/etf/${DEFAULT_ETF_ID}`} replace />} />
+          <Route path="/etf/:etfId" element={<App />} />
+          <Route path="/etf/:etfId/:view" element={<App />} />
+          <Route path="/docs" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
+          <Route path="/docs/:measurementId" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
+          {/* Anything unrecognised lands on the default ETF rather than a
+              blank screen. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   </StrictMode>

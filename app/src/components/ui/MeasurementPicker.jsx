@@ -2,25 +2,27 @@
  * MeasurementPicker — dialog to toggle which measurements are displayed.
  *
  * Shows every measurement plugin discovered from the backend manifest.
- * Each row has a toggle switch, the measurement name, description, and
- * its input/output schema as a preview. Active measurements are fetched
+ * Each row has a toggle switch, the measurement name, description, its
+ * input/output schema as a preview, and a "?" linking to the
+ * measurement's full documentation. Active measurements are fetched
  * automatically and their results flow into the dashboard.
  *
  *  ┌─────────────────────────────────────────┐
  *  │ MEASUREMENTS                            │
  *  │ Select which metrics to compute         │
  *  ├─────────────────────────────────────────┤
- *  │ [X] Pairwise Correlation                │
+ *  │ [X] Pairwise Correlation             ?  │
  *  │     Pearson ρ of daily returns...       │
  *  │     Inputs: etf_id, period, threshold   │
  *  │     Outputs: matrix, averages, hub...   │
  *  ├─────────────────────────────────────────┤
- *  │ [ ] % of ETF                            │
+ *  │ [ ] % of ETF                         ?  │
  *  │     Weight of each holding...           │
  *  └─────────────────────────────────────────┘
  */
 import { memo } from 'react';
 import { Overlay } from './Overlay';
+import { DocLink } from './DocLink';
 
 export const MeasurementPicker = memo(function MeasurementPicker({ manifest, activeIds, onToggle, onClose }) {
   return (
@@ -51,55 +53,68 @@ export const MeasurementPicker = memo(function MeasurementPicker({ manifest, act
             const outputKeys = Object.keys(m.output_schema || {});
 
             return (
-              <button
+              // The row is a wrapper, not a button: the "?" that opens this
+              // measurement's documentation has to be a sibling of the
+              // toggle, since an anchor cannot live inside a button — and
+              // reading about a measurement must not also switch it on.
+              <div
                 key={m.id}
-                onClick={() => onToggle(m.id)}
-                className="flex items-start gap-4 w-full p-5 text-left cursor-pointer border-b border-[var(--divider)] transition-colors duration-150"
+                className="flex items-start border-b border-[var(--divider)] transition-colors duration-150"
                 style={{ background: active ? 'var(--accent-soft)' : 'transparent' }}
               >
-                {/* Toggle indicator */}
-                <div className="flex-none mt-0.5 w-5 h-5 rounded-[var(--radius-xs)] border-2 grid place-items-center transition-colors duration-150"
-                  style={{
-                    borderColor: active ? 'var(--accent)' : 'var(--border-strong)',
-                    background: active ? 'var(--accent)' : 'transparent',
-                  }}
+                <button
+                  onClick={() => onToggle(m.id)}
+                  aria-pressed={active}
+                  className="flex items-start gap-4 flex-1 min-w-0 p-5 pr-2 text-left cursor-pointer bg-transparent border-none"
                 >
-                  {active && (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 6 9 17l-5-5" />
-                    </svg>
-                  )}
-                </div>
-
-                {/* Measurement info */}
-                <div className="flex-1 min-w-0">
-                  <div className="text-[15px] font-semibold text-[var(--fg)] mb-1">{m.name}</div>
-                  <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{m.description}</p>
-
-                  {/* Schema preview */}
-                  <div className="flex gap-4 flex-wrap">
-                    {inputKeys.length > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-[var(--font-mono)] text-[9px] text-[var(--fg-3)] uppercase tracking-wide">In</span>
-                        {inputKeys.map(k => (
-                          <span key={k} className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] bg-[var(--bg-3)] rounded px-1.5 py-0.5">{k}</span>
-                        ))}
-                      </div>
-                    )}
-                    {outputKeys.length > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-[var(--font-mono)] text-[9px] text-[var(--fg-3)] uppercase tracking-wide">Out</span>
-                        {outputKeys.slice(0, 4).map(k => (
-                          <span key={k} className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] bg-[var(--bg-3)] rounded px-1.5 py-0.5">{k}</span>
-                        ))}
-                        {outputKeys.length > 4 && (
-                          <span className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)]">+{outputKeys.length - 4}</span>
-                        )}
-                      </div>
+                  {/* Toggle indicator */}
+                  <div className="flex-none mt-0.5 w-5 h-5 rounded-[var(--radius-xs)] border-2 grid place-items-center transition-colors duration-150"
+                    style={{
+                      borderColor: active ? 'var(--accent)' : 'var(--border-strong)',
+                      background: active ? 'var(--accent)' : 'transparent',
+                    }}
+                  >
+                    {active && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
                     )}
                   </div>
+
+                  {/* Measurement info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[15px] font-semibold text-[var(--fg)] mb-1">{m.name}</div>
+                    <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{m.description}</p>
+
+                    {/* Schema preview */}
+                    <div className="flex gap-4 flex-wrap">
+                      {inputKeys.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-[var(--font-mono)] text-[9px] text-[var(--fg-3)] uppercase tracking-wide">In</span>
+                          {inputKeys.map(k => (
+                            <span key={k} className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] bg-[var(--bg-3)] rounded px-1.5 py-0.5">{k}</span>
+                          ))}
+                        </div>
+                      )}
+                      {outputKeys.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-[var(--font-mono)] text-[9px] text-[var(--fg-3)] uppercase tracking-wide">Out</span>
+                          {outputKeys.slice(0, 4).map(k => (
+                            <span key={k} className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] bg-[var(--bg-3)] rounded px-1.5 py-0.5">{k}</span>
+                          ))}
+                          {outputKeys.length > 4 && (
+                            <span className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)]">+{outputKeys.length - 4}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                <div className="flex-none pt-5 pr-5">
+                  <DocLink measurementId={m.id} measurementName={m.name} />
                 </div>
-              </button>
+              </div>
             );
           })}
 

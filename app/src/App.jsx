@@ -1,10 +1,11 @@
 /**
  * App — root shell of the MCR-3 Correlation Dashboard.
  *
+ * Rendered inside AppLayout, which owns the shared Header; this is
+ * everything below it.
+ *
  * Layout:
  *  ┌────────────────────────────────────────────┐
- *  │ Header  (nav, connectivity badge, theme)   │
- *  ├────────────────────────────────────────────┤
  *  │ EtfDashboard  (identity · sector · chart)  │
  *  ├────────────────────────────────────────────┤
  *  │ ViewTabs + per-view toolbar                │
@@ -23,11 +24,10 @@
  */
 import { useState, useCallback } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
-import { useTheme } from './hooks/useTheme';
 import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
 import { useMeasurements } from './hooks/useMeasurements';
-import { Header } from './components/layout/Header';
+import { usePublishLiveStatus } from './hooks/useLiveStatus';
 import { EtfDashboard } from './components/etf/EtfDashboard';
 import { StockPopup } from './components/stock/StockPopup';
 import { ViewTabs } from './components/ui/ViewTabs';
@@ -45,7 +45,6 @@ const VIEW_BY_SLUG = { table: 'Table', matrix: 'Matrix', network: 'Network' };
 export default function App() {
   const { etfId: routeEtfId, view: routeView } = useParams();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme('light');
   const { etf, etfId, tickers, weightOf, loading: etfLoading, error: etfError, retry: etfRetry, isLive: etfLive } = useLiveEtf();
 
   // Shared across Matrix/Network — kept here (rather than inside those
@@ -60,6 +59,10 @@ export default function App() {
   // correlations, neither of which cares about edge filtering.
   const corrData = useLiveCorrelation(etfId);
   const measurements = useMeasurements(etfId);
+
+  // The shared Header shows the connectivity badge, but this is the page
+  // that knows whether anything actually loaded.
+  usePublishLiveStatus(etfLive || corrData.isLive);
 
   // Reset the matrix/network selection whenever the active ETF changes
   // (from EtfDashboard's own picker, or anywhere else that calls switchEtf).
@@ -116,9 +119,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
-      <Header theme={theme} onToggleTheme={toggleTheme} isLive={etfLive || corrData.isLive} />
-
+    <>
       <main className="max-w-[1280px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
         {/* Every child below assumes a loaded ETF (non-null etf, populated
             tickers), so the whole main area is gated on that one fetch:
@@ -155,6 +156,6 @@ export default function App() {
       {measurePickerOpen && (
         <MeasurementPicker manifest={measurements.manifest} activeIds={measurements.activeIds} onToggle={measurements.toggle} onClose={() => setMeasurePickerOpen(false)} />
       )}
-    </div>
+    </>
   );
 }

@@ -1,9 +1,10 @@
 /**
  * DocsPage — the measurement documentation page.
  *
- *  ┌──────────────────────────────────────────────┐
- *  │ ← Back to the dashboard                      │
- *  ├────────────────┬─────────────────────────────┤
+ * Rendered inside AppLayout, which owns the shared Header; this is
+ * everything below it.
+ *
+ *  ┌────────────────┬─────────────────────────────┐
  *  │ search         │                             │
  *  │ Official       │  MeasurementDoc:            │
  *  │  · Correlation │   prose, worked example,    │
@@ -22,25 +23,18 @@
  * content area explains that nothing matches.
  */
 import { useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useFetch } from '../hooks/useFetch';
-import { useTheme } from '../hooks/useTheme';
 import { api } from '../utils/api';
 import { DocsSidebar } from '../components/docs/DocsSidebar';
 import { MeasurementDoc } from '../components/docs/MeasurementDoc';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 import { describeFetchError } from '../utils/errorCopy';
-import { DEFAULT_ETF_ID } from '../store/useEtfStore';
 
 export function DocsPage() {
   const { measurementId } = useParams();
   const [query, setQuery] = useState('');
-
-  // App applies the stored light/dark choice as a side effect of this
-  // hook, so a route that doesn't mount App has to do it too — otherwise
-  // opening /docs directly renders light for someone who chose dark.
-  useTheme();
 
   const {
     data: manifestData,
@@ -61,47 +55,37 @@ export function DocsPage() {
     { fallback: null }
   );
 
-  return (
-    <div className="h-screen overflow-hidden flex flex-col bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
-      <header className="flex-none flex items-center gap-4 h-[56px] px-6 border-b border-[var(--border)]">
-        <Link
-          to={`/etf/${DEFAULT_ETF_ID}`}
-          className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] no-underline hover:text-[var(--fg)] rounded-[var(--radius-xs)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-        >
-          ← Back to the dashboard
-        </Link>
-        <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)]">Measurement documentation</span>
-      </header>
-
-      {manifestError && !manifestData ? (
-        <main className="flex-1 min-h-0 overflow-auto px-6 py-8">
-          <div className="max-w-[720px] mx-auto">
-            <ErrorState {...describeFetchError(manifestError)} onRetry={retryManifest} />
-          </div>
-        </main>
-      ) : (
-        <div className="flex-1 min-h-0 flex">
-          <aside className="corr-scroll flex-none w-[264px] overflow-y-auto border-r border-[var(--border)] p-4">
-            {manifestLoading && !manifestData ? (
-              <Loading variant="skeleton" lines={6} />
-            ) : (
-              <DocsSidebar manifest={manifest} query={query} onQueryChange={setQuery} />
-            )}
-          </aside>
-
-          <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
-            <Content
-              measurementId={measurementId}
-              entry={entry}
-              unknownId={unknownId}
-              doc={doc}
-              loading={docLoading || (!!measurementId && manifestLoading && !manifestData)}
-              error={docError}
-              onRetry={retryDoc}
-            />
-          </main>
+  if (manifestError && !manifestData) {
+    return (
+      <main className="flex-1 min-h-0 overflow-auto px-6 py-8">
+        <div className="max-w-[720px] mx-auto">
+          <ErrorState {...describeFetchError(manifestError)} onRetry={retryManifest} />
         </div>
-      )}
+      </main>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-h-0 flex">
+      <aside className="corr-scroll flex-none w-[264px] overflow-y-auto border-r border-[var(--border)] p-4">
+        {manifestLoading && !manifestData ? (
+          <Loading variant="skeleton" lines={6} />
+        ) : (
+          <DocsSidebar manifest={manifest} query={query} onQueryChange={setQuery} />
+        )}
+      </aside>
+
+      <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
+        <Content
+          measurementId={measurementId}
+          entry={entry}
+          unknownId={unknownId}
+          doc={doc}
+          loading={docLoading || (!!measurementId && manifestLoading && !manifestData)}
+          error={docError}
+          onRetry={retryDoc}
+        />
+      </main>
     </div>
   );
 }
