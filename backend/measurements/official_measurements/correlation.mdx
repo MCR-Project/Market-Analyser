@@ -1,0 +1,86 @@
+---
+title: Correlation to Fund
+summary: How closely a holding has moved with the rest of the fund it sits in.
+example_etf: SMH
+example_stock: NVDA
+---
+
+## What it measures
+
+Each holding gets a single number: the average correlation between its daily
+returns and those of every other holding in the same fund, over the past
+year.
+
+A high value means the stock has been moving with the pack — when the fund
+goes up, it goes up. A low value means it has been drifting on its own, and
+a negative one means it has tended to move against its peers. It is a
+description of how much *independent* movement a holding has contributed to
+the fund.
+
+## Where the numbers come from
+
+Two inputs, both fetched by the measurement itself:
+
+- `holdings` gives the fund's constituents. Only the tickers tracked in the
+  database appear, so a fund's full constituent list is not what gets
+  correlated — see the caveats.
+- `correlation_matrix` turns those tickers into a matrix of pairwise
+  correlations. Its defaults are the important part, because nothing in the
+  UI mentions them: **one year** of history at **daily** granularity.
+
+Daily closing prices are converted to daily percentage returns, and the
+correlation is computed on the returns — not on the prices themselves.
+Correlating price levels would mostly measure that two stocks both drifted
+upward all year.
+
+## How it is computed
+
+Pairwise Pearson correlation across every pair of holdings, then, for each
+holding, the mean of its correlations to all the others:
+
+<Formula tex={String.raw`\bar\rho_i = \frac{1}{n-1}\sum_{j \neq i} \rho_{ij}`} />
+
+A holding's correlation with itself is always 1, and it is excluded — the
+sum skips <Formula inline tex={String.raw`j = i`} /> and the average divides
+by <Formula inline tex={String.raw`n - 1`} />, not <Formula inline tex={String.raw`n`} />.
+Including it would inflate every value by the same amount and flatter small
+funds most.
+
+<WorkedExample />
+
+## How it reads
+
+| Average ρ | What it usually indicates |
+| --- | --- |
+| Above 0.5 | Moves closely with the fund; adds little diversification |
+| 0.2 – 0.5 | Typical for a sector fund, where one theme drives everything |
+| 0.0 – 0.2 | Largely independent of its peers |
+| Below 0 | Has tended to move against the rest of the fund |
+
+What counts as "high" depends entirely on the fund. In a semiconductor ETF
+almost everything is driven by the same demand cycle, so 0.4 is ordinary; in
+a broad market index the same 0.4 would stand out.
+
+<Note>
+The value is an average, so it hides its own spread. A holding correlated
+0.9 to two peers and −0.1 to eight others reports the same 0.1 as one
+sitting flat against all of them. The matrix view shows the pairs behind the
+average.
+</Note>
+
+## Caveats
+
+<Warning>
+This describes the past year. It is not a prediction, and correlations
+notoriously rise in a sell-off — precisely when the diversification a low
+number seems to promise would matter most.
+</Warning>
+
+- **A pair with no overlapping price history counts as zero**, not as
+  missing. A recently listed holding therefore pulls its own average toward
+  zero and can look more independent than it is.
+- **Holdings with no price history at all are dropped** before the matrix is
+  built, so they get no value rather than a wrong one.
+- The fund is only its *tracked* holdings, not its full constituent list, so
+  in a broad index this is the average correlation to the largest holdings
+  rather than to all several hundred.

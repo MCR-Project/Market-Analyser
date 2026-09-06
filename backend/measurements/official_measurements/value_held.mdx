@@ -1,0 +1,65 @@
+---
+title: Value Held
+summary: Roughly how many dollars the fund has invested in one holding.
+---
+
+## What it measures
+
+The same fact as **% of ETF**, in money rather than percent: about how much
+of the fund's assets sit in this one company.
+
+Percentages compare holdings within a fund; dollars compare across funds. A
+2% position in a $800B fund is a far larger stake than a 20% position in a
+$2B one, and only this column makes that obvious.
+
+## Where the numbers come from
+
+Two inputs:
+
+- `etf_info` supplies the fund's assets under management, in billions of
+  dollars, as the provider reports it.
+- `holdings` supplies each constituent's weight.
+
+Both come from the database, refreshed by the daily sync, with a live
+lookup as a fallback.
+
+## How it is computed
+
+The fund's total assets, multiplied by the holding's share of them:
+
+<Formula tex={String.raw`V_i = \mathrm{AUM} \times \frac{w_i}{100}`} />
+
+with AUM in billions, so the result is in billions too. The cell then
+formats it as `$16.3B`, `$980M` or `$1.24T` depending on size.
+
+<WorkedExample />
+
+The worked example is worth checking by hand — the arithmetic is simple
+enough that the numbers above should visibly multiply out.
+
+## How it reads
+
+As the size of the fund's bet. It answers "if this company halved, how much
+of the fund's money is exposed?" more directly than a percentage does.
+
+It is also the honest way to compare a holding's treatment by two different
+funds: the same stock might be 8% of a small sector ETF and 1% of a giant
+index fund, while the index fund holds several times more of it in dollars.
+
+## Caveats
+
+<Warning>
+This is an estimate, not a position report. It is derived from two published
+figures — total assets and percentage weight — and is only ever as accurate
+as the more stale of the two. Funds report AUM on their own schedule, and a
+figure that lags a large inflow or a sharp drawdown scales *every* row in
+this column by the same error.
+</Warning>
+
+- It assumes the reported weight still holds at the reported AUM. Between
+  rebalances both drift with the market, and they are not necessarily
+  measured on the same day.
+- If AUM is missing for a fund, every value in the column is affected at
+  once — the failure is not per-row, which makes it easy to miss.
+- As with **% of ETF**, only tracked holdings appear, so the column does not
+  account for the whole fund.
