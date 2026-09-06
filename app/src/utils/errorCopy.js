@@ -18,7 +18,7 @@ export function describeFetchError(error) {
   if (status === 404) {
     return {
       title: 'No data for this ETF',
-      message: 'The backend has no metadata or holdings for the selected ETF.',
+      message: 'No fund matches this ticker, so there is nothing to load — check the symbol in the address bar. This will not resolve on its own.',
     };
   }
   if (status === 429 || status >= 500) {

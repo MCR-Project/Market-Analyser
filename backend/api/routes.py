@@ -59,9 +59,16 @@ def get_etf(
     """
     etf_id = etf_id.upper()
     info = get_etf_info(etf_id, force_refresh=refresh)
-    holdings, stale = get_etf_holdings(etf_id, force_refresh=refresh)
+
+    # Decided before holdings are fetched, not after. Yahoo answers a made-up
+    # ticker's info request with a shell dict (so `name` falls back to the
+    # ticker itself) but 404s the holdings request, so asking for holdings
+    # first meant this branch was unreachable for exactly the case it was
+    # written for - the ticker that doesn't exist.
     if not info["name"] or info["name"] == etf_id:
         raise HTTPException(404, f"ETF '{etf_id}' not found or no data available")
+
+    holdings, stale = get_etf_holdings(etf_id, force_refresh=refresh)
     # stale is True when holdings came from the live yfinance fallback (DB
     # miss/error) rather than Supabase - flags a likely-incomplete top-~10
     # to the frontend.

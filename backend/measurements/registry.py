@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from measurements import ALL_MEASUREMENTS
 from measurements.docs import DocError, load_doc
 from measurements.examples import build_example
+from services.market_data import DataUnavailable, SymbolNotFound
 
 measurement_router = APIRouter(prefix="/api")
 
@@ -33,22 +34,37 @@ def _make_handler(measurement):
     FastAPI needs concrete parameter names in the function signature to bind
     path params. Every measurement route is scoped by etf_id alone (or takes
     no params at all), so there are only two shapes to generate.
+
+    A measurement failing because the data behind it is missing or briefly
+    unreachable is not a bug in the measurement, so DataUnavailable and
+    SymbolNotFound are re-raised untouched for main.py to map onto 503 and
+    404. Swallowing them into a blanket 500 made every column retry
+    forever against a ticker that does not exist: useMeasurements retries a
+    5xx, so three columns kept asking about ZZZZ every three seconds long
+    after the ETF request itself had correctly given up.
     """
     param_names = PATH_PARAM_RE.findall(measurement.route)
     m = measurement  # captured in the closure
+
+    def fail(exc):
+        raise HTTPException(500, f"Measurement '{m.id}' failed: {exc}")
 
     if param_names == ["etf_id"]:
         def handler(etf_id: str):
             try:
                 return m.run(etf_id=etf_id)
+            except (DataUnavailable, SymbolNotFound):
+                raise
             except Exception as e:
-                raise HTTPException(500, f"Measurement '{m.id}' failed: {e}")
+                fail(e)
     else:
         def handler():
             try:
                 return m.run()
+            except (DataUnavailable, SymbolNotFound):
+                raise
             except Exception as e:
-                raise HTTPException(500, f"Measurement '{m.id}' failed: {e}")
+                fail(e)
 
     handler.__name__ = f"measure_{m.id}"
     handler.__doc__ = m.description
