@@ -5,10 +5,14 @@ Adding a new official measurement:
   1. Create a new file in official_measurement/ (e.g. volatility.py)
   2. Subclass MeasurementBase, fill in metadata + implement
      fetch_inputs/compute/render_cell
-  3. Import it and add the instance to OFFICIAL_MEASUREMENTS in
+  3. Name the measurements/inputs/* getters it draws on in `uses_inputs`,
+     so its documentation can say where the numbers came from
+  4. Import it and add the instance to OFFICIAL_MEASUREMENTS in
      official_measurement/__init__.py
-  4. Optionally write volatility.mdx next to it to document what it
-     measures — see measurements/docs.py for the file format
+  5. Copy measurements/DOC_TEMPLATE.mdx to volatility.mdx next to it and
+     fill it in — that is what the /docs page renders. Skipping this is
+     supported (the page falls back to the metadata above), but it leaves
+     the column unexplained
 
 Adding a custom/addon measurement: same steps, but in addon_measurements/
 (add the instance to ADDON_MEASUREMENTS there instead).

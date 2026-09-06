@@ -127,8 +127,14 @@ def truncate(value, sample_tickers, all_tickers) -> tuple[object, bool]:
     length. `all_tickers` is how a ticker-keyed structure is recognised:
     a dict whose keys are all holdings of this fund is an index, not a
     record with fields.
+
+    Filtered structures come back in `sample_tickers` order rather than
+    their own, so every table in a worked example lists the same holdings
+    in the same order and a reader can follow one ticker across the input,
+    the computed value and the rendered cell by reading straight down.
     """
     sample = set(sample_tickers)
+    order = {ticker: i for i, ticker in enumerate(sample_tickers)}
     universe = set(all_tickers)
 
     def walk(node):
@@ -139,7 +145,9 @@ def truncate(value, sample_tickers, all_tickers) -> tuple[object, bool]:
 
         if isinstance(node, dict):
             if node and all(isinstance(k, str) and k in universe for k in node):
-                kept = {k: node[k] for k in node if k in sample}
+                kept = {k: node[k] for k in sorted(
+                    (k for k in node if k in sample), key=lambda k: order[k]
+                )}
                 dropped = len(kept) < len(node)
                 out = {}
                 for k, v in kept.items():
@@ -157,10 +165,11 @@ def truncate(value, sample_tickers, all_tickers) -> tuple[object, bool]:
             if items and all(
                 isinstance(i, (list, tuple)) and i and i[0] in universe for i in items
             ):
-                kept = [i for i in items if i[0] in sample]
+                kept = sorted((i for i in items if i[0] in sample),
+                              key=lambda i: order[i[0]])
                 dropped = len(kept) < len(items)
             elif items and all(isinstance(i, str) and i in universe for i in items):
-                kept = [i for i in items if i in sample]
+                kept = sorted((i for i in items if i in sample), key=lambda i: order[i])
                 dropped = len(kept) < len(items)
             elif len(items) > MAX_LIST_ITEMS:
                 kept, dropped = items[:MAX_LIST_ITEMS], True

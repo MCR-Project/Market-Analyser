@@ -148,6 +148,23 @@ class TruncateTests(unittest.TestCase):
         self.assertLessEqual(len(out["description"]), MAX_STRING_CHARS + 1)
         self.assertTrue(dropped)
 
+    def test_filtered_structures_come_back_in_sample_order(self):
+        """Every table in a worked example must list the same holdings in
+        the same order, so a reader can follow one ticker straight down
+        from the input to the computed value. The inputs arrive in weight
+        order while the sample leads with the declared example stock, so
+        without this they disagree — and value_held.mdx tells the reader
+        the numbers should visibly multiply out."""
+        sample = ["T3", "T0", "T1"]
+
+        pairs, _ = truncate(FAKE_HOLDINGS, sample, FAKE_TICKERS)
+        keyed, _ = truncate({t: 1.0 for t in FAKE_TICKERS}, sample, FAKE_TICKERS)
+        names, _ = truncate(list(FAKE_TICKERS), sample, FAKE_TICKERS)
+
+        self.assertEqual([row[0] for row in pairs], sample)
+        self.assertEqual(list(keyed), sample)
+        self.assertEqual(names, sample)
+
     def test_small_values_are_left_alone(self):
         value = {"strongest": {"pair": ["T0", "T1"], "rho": 0.9}}
 

@@ -1,0 +1,54 @@
+---
+title: Name as it should head the page
+summary: One sentence a reader can understand before knowing anything else.
+# example_etf: SMH      # optional — the fund the worked example computes against
+# example_stock: NVDA   # optional — the holding to feature in it
+---
+
+{/*
+  Copy this file next to your measurement's module, named after it:
+  official_measurements/volatility.py -> official_measurements/volatility.mdx
+
+  `title` and `summary` are required; unknown keys are rejected. The five
+  sections below are a convention, not a schema — nothing validates them —
+  but keeping to them means every measurement reads the same way.
+
+  Available components: <Note>, <Warning>, <Formula>, <WorkedExample />.
+  Standard markdown works too, including GitHub-style tables.
+*/}
+
+## What it measures
+
+One paragraph, in plain language, on what a reader is looking at when they
+look at this column. Say what a high value and a low value each mean before
+saying how the number is produced.
+
+## Where the numbers come from
+
+Which `measurements/inputs/*` getters this uses, and — more usefully — what
+those getters quietly assume: a lookback window, a fallback, a rounding.
+Those defaults are invisible everywhere else in the app.
+
+## How it is computed
+
+The actual arithmetic. Keep it honest: this should match `compute()` line
+for line, including what is excluded from a sum or an average.
+
+<Formula tex={String.raw`x_i = \frac{1}{n}\sum_{j} y_{ij}`} />
+
+<WorkedExample />
+
+## How it reads
+
+How to act on the value — what counts as high or low here, and what the
+number does *not* tell you. A short table of ranges works well.
+
+## Caveats
+
+Where the number misleads: stale inputs, missing data counted as zero,
+survivorship, anything the reader would otherwise have to discover by being
+surprised.
+
+<Warning>
+The caveat that matters most, if there is one.
+</Warning>

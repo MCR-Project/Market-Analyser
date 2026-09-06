@@ -1,0 +1,64 @@
+---
+title: "% of ETF"
+summary: How much of the fund's portfolio a single holding accounts for.
+---
+
+## What it measures
+
+The share of the fund that one holding represents, as the fund itself
+reports it. A 7% weight means roughly seven cents of every dollar in the
+fund is invested in that company.
+
+This is the simplest column on the table — it is the fund's own published
+weight, passed through — but it is the one that gives every other column its
+context. A holding with a striking correlation matters much more at 7% than
+at 0.4%.
+
+## Where the numbers come from
+
+One input: `holdings`, which returns the fund's constituents as
+`[ticker, weight%]` pairs already sorted heaviest first.
+
+Those weights originate from the fund provider's own published holdings
+files, scraped by the fetchers in `fetcher/` and loaded into the database by
+`scripts/complete_database.py`. The daily job refreshes them, so they track
+the fund as it rebalances.
+
+## How it is computed
+
+It isn't, really — the reported weight is passed through, rounded to two
+decimal places:
+
+<Formula tex={String.raw`w_i = \mathrm{round}(\text{reported weight}_i,\; 2)`} />
+
+<WorkedExample />
+
+## How it reads
+
+Read it as concentration. In a fund whose top holding is 7% and whose
+twentieth is 1%, no single position dominates. In one whose top holding is
+25%, the fund's behaviour is substantially that one company's behaviour,
+whatever the other columns say.
+
+Weights are the natural companion to **Value Held**, which turns the same
+number into dollars using the fund's total assets.
+
+## Caveats
+
+<Warning>
+**The column does not sum to 100%, and cannot.** Only stocks weighing at
+least 1% in one of their tracked ETFs are kept in the database — lighter
+ones are pruned. A broad index fund therefore shows a few dozen of its
+several hundred constituents, and the weights shown add up to well under
+100% of the fund.
+</Warning>
+
+- The 1% test is applied across *all* tracked funds, not per fund. A stock
+  held at 0.3% here but 5% in another tracked ETF is kept, and appears here
+  at its real 0.3%. That is why some rows sit below the threshold.
+- Weights move with prices between rebalances, so they are as fresh as the
+  last sync rather than exact at this instant.
+- If the database has no holdings for a fund, the backend falls back to a
+  live lookup that only exposes the top ten. The dashboard flags that
+  state — the weights are real, but the list is truncated far harder than
+  usual.
