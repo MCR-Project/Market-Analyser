@@ -30,7 +30,7 @@ import { StorageNotice } from '../components/portfolio/StorageNotice';
 export function PortfolioPage() {
   const { portfolioId } = useParams();
   const navigate = useNavigate();
-  const { portfolios, status, create, rename, duplicate, remove } = usePortfolios();
+  const { portfolios, status, create, update, rename, duplicate, remove } = usePortfolios();
   const [pendingDelete, setPendingDelete] = useState(null);
   const [creating, setCreating] = useState(false);
 
@@ -72,6 +72,7 @@ export function PortfolioPage() {
           <PortfolioPanel
             portfolio={open}
             onRename={name => rename(open.id, name)}
+            onUpdate={changes => update(open.id, changes)}
             onDuplicate={handleDuplicate}
             onDelete={() => setPendingDelete(open)}
           />

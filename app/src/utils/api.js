@@ -101,28 +101,47 @@ function attachSignal(entry, path, signal) {
   }, { once: true });
 }
 
-async function fetchJson(path, { signal } = {}) {
-  const cached = getCached(path);
+/**
+ * A request's identity, which for a POST is its body as much as its path.
+ * Two simulations of different portfolios go to the same URL and are
+ * different answers, so the body has to be part of the key that
+ * deduplicates and caches them.
+ */
+function requestKey(path, body) {
+  return body === undefined ? path : `POST ${path} ${JSON.stringify(body)}`;
+}
+
+async function fetchJson(path, { signal, body } = {}) {
+  const key = requestKey(path, body);
+  const cached = getCached(key);
   if (cached !== undefined) return cached;
 
-  let entry = inFlight.get(path);
+  let entry = inFlight.get(key);
   if (!entry) {
     const controller = new AbortController();
     entry = { controller, refCount: 0, abortTimer: null };
-    entry.promise = fetch(`${API_BASE}${path}`, { signal: controller.signal })
+    const init = body === undefined
+      ? { signal: controller.signal }
+      : {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        };
+    entry.promise = fetch(`${API_BASE}${path}`, init)
       .then(async (res) => {
         if (!res.ok) throw new ApiError(res.status, path);
         const data = await res.json();
-        cache.set(path, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+        cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
         return data;
       })
       .finally(() => {
-        if (inFlight.get(path) === entry) inFlight.delete(path);
+        if (inFlight.get(key) === entry) inFlight.delete(key);
       });
-    inFlight.set(path, entry);
+    inFlight.set(key, entry);
   }
 
-  attachSignal(entry, path, signal);
+  attachSignal(entry, key, signal);
   return entry.promise;
 }
 
@@ -137,6 +156,20 @@ export const api = {
   getCorrelation: (etfId, period = '1y', opts = {}) =>
     fetchJson(`/correlation/${etfId}?period=${period}`, opts),
   getSectors: (etfId, opts = {}) => fetchJson(`/sectors/${etfId}`, opts),
+
+  // Ticker lookup. Search is the as-you-type path and never leaves the
+  // tracked universe; resolve is asked once, for a symbol somebody chose,
+  // and answers 404 for one that cannot be priced at all.
+  searchTickers: (q, { limit, signal } = {}) =>
+    fetchJson(`/tickers/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ''}`, { signal }),
+  resolveTicker: (symbol, opts = {}) =>
+    fetchJson(`/tickers/${encodeURIComponent(symbol)}`, opts),
+
+  // Portfolio simulation. A POST because the whole portfolio travels in
+  // the body - it is stored in this browser, not on the server, so there
+  // is nothing to name in a URL.
+  simulatePortfolio: (portfolio, { signal } = {}) =>
+    fetchJson('/portfolio/simulate', { signal, body: portfolio }),
 
   // Measurement plugin system
   listMeasurements: (opts = {}) => fetchJson('/measurements', opts),
