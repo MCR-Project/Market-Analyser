@@ -469,52 +469,178 @@ def get_stock_info(ticker_symbol: str) -> dict:
     return result
 
 
+# ── Date windows ──────────────────────────────────────────────────────────────
+
+# What a read falls back to when it names neither a period nor a window.
+DEFAULT_PERIOD = "1y"
+
+# Which `prices` granularity a live row corresponds to, by interval. Anything
+# finer than a day is still one row per interval rather than a resampled
+# bucket, so it reports 'D' - the field says "this row is at most one trading
+# day", not "this row is exactly one trading day".
+_INTERVAL_GRANULARITY = {"1wk": "W", "1mo": "M"}
+
+
+def resolve_window(
+    period: str | None, start: str | None, end: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Normalise the two ways of asking for a stretch of history into one.
+
+    A read either names a `period` - a lookback from today, in yfinance's
+    own vocabulary ("1y", "max") - or an explicit `start`/`end` window.
+    The two are mutually exclusive: a period is anchored to today and a
+    window is not, so honouring both at once would silently ignore one of
+    them. Either bound of a window may be omitted, meaning "from the
+    beginning of what's available" / "up to today".
+
+    Returns the period to use (None once a window was given) alongside the
+    two bounds normalised to ISO-8601, and raises ValueError - naming the
+    offending parameter - for anything unusable.
+
+    Validation lives here rather than at the HTTP edge so that an internal
+    caller (the portfolio simulator, a script) gets the same guarantees a
+    request does; api/routes.py turns the ValueError into a 400.
+    """
+    if not start and not end:
+        return period or DEFAULT_PERIOD, None, None
+
+    if period:
+        raise ValueError(
+            "`period` and `start`/`end` are mutually exclusive - a period is a "
+            "lookback from today and a window is not; pass one or the other"
+        )
+
+    bounds: dict[str, date] = {}
+    for name, value in (("start", start), ("end", end)):
+        if not value:
+            continue
+        try:
+            bounds[name] = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"`{name}` is not an ISO-8601 date (YYYY-MM-DD): {value!r}"
+            ) from exc
+
+    if "end" in bounds and bounds["end"] > date.today():
+        raise ValueError(f"`end` is in the future: {end!r}")
+    if len(bounds) == 2 and bounds["start"] >= bounds["end"]:
+        raise ValueError(f"`start` must be before `end`: {start!r} is not before {end!r}")
+
+    return (
+        None,
+        bounds["start"].isoformat() if "start" in bounds else None,
+        bounds["end"].isoformat() if "end" in bounds else None,
+    )
+
+
+def _exclusive_end(end: str | None) -> str | None:
+    """Shift a window's inclusive `end` onto yfinance's exclusive one.
+
+    The DB path filters `date <= end`; yfinance's own `end` stops the day
+    before. Left unreconciled, the same request answers differently
+    depending on which path served it - a one-day window comes back
+    populated from Supabase and empty from yfinance. The two paths have to
+    agree by construction, for the same reason auto_adjust=True is passed
+    explicitly on both (issue #13).
+    """
+    if not end:
+        return None
+    return (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+
+
+def _window_bounds(
+    period: str | None, start: str | None, end: str | None
+) -> tuple[str | None, str | None]:
+    """The [lower, upper] date bounds a `prices` read filters on, from
+    whichever of the two ways of naming a stretch of history the caller
+    used: a period is a lookback from today and never has an upper bound
+    ("max" has neither), a window is already the answer.
+    """
+    if period is None:
+        return start, end
+    days = PERIOD_TO_DAYS.get(period)
+    lower = (date.today() - timedelta(days=days)).isoformat() if days is not None else None
+    return lower, None
+
+
+def _window_filtered(query, start: str | None, end: str | None):
+    """Apply an inclusive [start, end] date filter to a `prices` query.
+
+    Both bounds are compared against the row's `date`, which for a
+    coarse row is its bucket *anchor* (Monday of the ISO week, 1st of the
+    month - see sql/001_optimize_prices_storage.sql), not the day the
+    bucket ends. A window therefore returns the buckets anchored inside
+    it: one starting mid-month begins at the next anchor rather than
+    reaching back into the bucket it landed in.
+    """
+    if start is not None:
+        query = query.gte("date", start)
+    if end is not None:
+        query = query.lte("date", end)
+    return query
+
+
 # ── Price series ──────────────────────────────────────────────────────────────
 
-def _get_price_series_live(ticker_symbol: str, period: str, interval: str) -> list[dict]:
+def _get_price_series_live(
+    ticker_symbol: str,
+    period: str | None,
+    interval: str,
+    start: str | None = None,
+    end: str | None = None,
+) -> list[dict]:
     # auto_adjust=True explicitly, rather than relying on yfinance's default
     # (which happens to also be True today) - `prices` is populated by
     # scripts/fetch_daily.py with the same setting (see issue #13), so this
     # must not silently drift from it if the yfinance default ever changes.
     # Both paths need to agree by construction: split-adjusted OHLC, always.
     ticker = yf.Ticker(ticker_symbol)
-    hist = ticker.history(period=period, interval=interval, auto_adjust=True)
+    if start or end:
+        hist = ticker.history(
+            start=start, end=_exclusive_end(end), interval=interval, auto_adjust=True
+        )
+    else:
+        hist = ticker.history(period=period, interval=interval, auto_adjust=True)
     if hist.empty:
         return []
 
     # Drop rows where close is NaN (prevents JSON serialization crash)
     hist = hist.dropna(subset=["Close"])
 
+    granularity = _INTERVAL_GRANULARITY.get(interval, "D")
     return [
         {
             "date": idx.strftime("%Y-%m-%d"),
             "close": round(float(row["Close"]), 2),
             "volume": int(row.get("Volume", 0) if not np.isnan(row.get("Volume", 0)) else 0),
+            "granularity": granularity,
         }
         for idx, row in hist.iterrows()
     ]
 
 
-def _get_price_series_db(ticker_symbol: str, period: str) -> list[dict] | None:
-    if period not in PERIOD_TO_DAYS and period != "max":
+def _get_price_series_db(
+    ticker_symbol: str,
+    period: str | None,
+    start: str | None = None,
+    end: str | None = None,
+) -> list[dict] | None:
+    if period is not None and period not in PERIOD_TO_DAYS and period != "max":
         return None
     db = get_client_optional()
     if db is None:
         return None
-    days = PERIOD_TO_DAYS.get(period)
-    cutoff = (date.today() - timedelta(days=days)).isoformat() if days is not None else None
+    lower, upper = _window_bounds(period, start, end)
 
     def build_query():
         q = (
             db.table("prices")
-            .select("date,close,volume")
+            .select("date,close,volume,granularity")
             .eq("ticker", ticker_symbol)
             .order("date")
             .order("granularity")
         )
-        if cutoff is not None:
-            q = q.gte("date", cutoff)
-        return q
+        return _window_filtered(q, lower, upper)
 
     try:
         rows = paginated_select(build_query)
@@ -528,37 +654,68 @@ def _get_price_series_db(ticker_symbol: str, period: str) -> list[dict] | None:
             "date": row["date"],
             "close": round(float(row["close"]), 2),
             "volume": int(row["volume"] or 0),
+            "granularity": row.get("granularity") or "D",
         }
         for row in rows
     ]
 
 
 def get_price_series(
-    ticker_symbol: str, period: str = "1y", interval: str = "1d"
+    ticker_symbol: str,
+    period: str | None = None,
+    interval: str = "1d",
+    start: str | None = None,
+    end: str | None = None,
 ) -> list[dict]:
-    """Fetch historical close prices as a list of {date, close, volume} dicts.
+    """Fetch historical close prices as a list of
+    {date, close, volume, granularity} dicts, oldest first.
+
+    The stretch of history is named either as a `period` (a lookback from
+    today) or as an explicit `start`/`end` window - see resolve_window,
+    which validates the pair and which this raises ValueError from.
+    Naming neither reads DEFAULT_PERIOD.
 
     Only interval="1d" (the only granularity scripts/fetch_daily.py stores)
     attempts the Supabase path; any other interval goes straight to a live
     yfinance call - not treated as an error. Also falls back live if the
-    ticker/period combo has no synced rows yet, or Supabase is unreachable.
+    ticker has no synced rows in the requested stretch, or Supabase is
+    unreachable.
+
+    `granularity` is the row's own bucket - 'D' daily, 'W' weekly, 'M'
+    monthly - because `prices` tiers history by age (issue #10): a window
+    reaching years back legitimately answers in weekly and monthly buckets,
+    and a caller treating every row as one trading day would be wrong about
+    the older half of it.
+
+    A window is answered from whatever the DB actually holds: a ticker
+    backfilled from 2020 answers a window opening in 2015 with its 2020
+    rows rather than falling back live, exactly as a period read does.
+    Callers that need to know a holding's history starts later than they
+    asked should read the first row's date rather than assume the window
+    was covered.
 
     Period and interval map directly to yfinance's history() parameters:
       period:   "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"
       interval: "1d", "1wk", "1mo"
     """
-    key = f"series:{ticker_symbol}:{period}:{interval}"
+    period, start, end = resolve_window(period, start, end)
+
+    # The window is part of the key: two different stretches of the same
+    # ticker's history are different answers, and must not serve each
+    # other's rows for the TTL.
+    key = f"series:{ticker_symbol}:{period or ''}:{start or ''}:{end or ''}:{interval}"
     cached = cache.get(key)
     if cached:
         return cached
 
     result = None
     if interval == "1d":
-        result = _get_price_series_db(ticker_symbol, period)
+        result = _get_price_series_db(ticker_symbol, period, start=start, end=end)
     if result is None:
         result = _live(
             f"price series for '{ticker_symbol}'",
             _get_price_series_live, ticker_symbol, period, interval,
+            start=start, end=end,
         )
 
     # Don't cache an empty result - could be a transient miss, let the next
@@ -633,17 +790,29 @@ def _correlation_summary(returns: pd.DataFrame, tickers: list[str]) -> dict:
     }
 
 
-def _closes_live(tickers: list[str], period: str, interval: str) -> pd.DataFrame | None:
+def _closes_live(
+    tickers: list[str],
+    period: str | None,
+    interval: str,
+    start: str | None = None,
+    end: str | None = None,
+) -> pd.DataFrame | None:
     """yf.download() returns a MultiIndex DataFrame when fetching multiple
     tickers: columns = [("Close", "AAPL"), ("Close", "MSFT"), ...]. We slice
     out the "Close" level to get a flat ticker-indexed DataFrame. auto_adjust
     explicit for the same reason as _get_price_series_live - a raw close
     would make pct_change() read a stock split as a huge one-day return
     (see compute_correlation_matrix, issue #13)."""
-    data = yf.download(
-        tickers, period=period, interval=interval, progress=False, threads=True,
-        auto_adjust=True,
-    )
+    if start or end:
+        data = yf.download(
+            tickers, start=start, end=_exclusive_end(end), interval=interval,
+            progress=False, threads=True, auto_adjust=True,
+        )
+    else:
+        data = yf.download(
+            tickers, period=period, interval=interval, progress=False, threads=True,
+            auto_adjust=True,
+        )
     if data.empty:
         return None
 
@@ -661,21 +830,32 @@ def _closes_live(tickers: list[str], period: str, interval: str) -> pd.DataFrame
     return closes
 
 
-def _closes_db(tickers: list[str], period: str) -> pd.DataFrame | None:
+def _closes_db(
+    tickers: list[str],
+    period: str | None,
+    start: str | None = None,
+    end: str | None = None,
+    min_tickers: int = 2,
+) -> pd.DataFrame | None:
     """Bulk-reads close prices for every requested ticker in one query and
     pivots into the same wide date x ticker shape _closes_live produces.
     A partial hit (some but not all tickers synced) is fine - same
     tolerance the live path already has for tickers yfinance lacks data
     for. Returns None (triggering live fallback) if there's too little data
     to be useful, not just if it's totally empty.
+
+    `min_tickers` is how wide the frame has to be before the DB counts as
+    having answered. Correlation needs a pair before there is anything to
+    compute, so one synced ticker out of two is a miss worth retrying
+    live; a portfolio holding a single ticker is not - it would go live on
+    every request for data Supabase has.
     """
-    if period not in PERIOD_TO_DAYS and period != "max":
+    if period is not None and period not in PERIOD_TO_DAYS and period != "max":
         return None
     db = get_client_optional()
     if db is None:
         return None
-    days = PERIOD_TO_DAYS.get(period)
-    cutoff = (date.today() - timedelta(days=days)).isoformat() if days is not None else None
+    lower, upper = _window_bounds(period, start, end)
 
     def build_query():
         q = (
@@ -686,9 +866,7 @@ def _closes_db(tickers: list[str], period: str) -> pd.DataFrame | None:
             .order("ticker")
             .order("granularity")
         )
-        if cutoff is not None:
-            q = q.gte("date", cutoff)
-        return q
+        return _window_filtered(q, lower, upper)
 
     try:
         rows = paginated_select(build_query)
@@ -701,8 +879,45 @@ def _closes_db(tickers: list[str], period: str) -> pd.DataFrame | None:
     df["close"] = df["close"].astype(float)
     closes = df.pivot(index="date", columns="ticker", values="close")
 
-    if closes.shape[1] < 2 or closes.shape[0] < 2:
+    if closes.shape[1] < min_tickers or closes.shape[0] < 2:
         return None
+    return closes
+
+
+def get_closes(
+    tickers: list[str],
+    period: str | None = None,
+    interval: str = "1d",
+    start: str | None = None,
+    end: str | None = None,
+    min_tickers: int = 2,
+) -> pd.DataFrame | None:
+    """Close prices for several tickers as one wide date x ticker frame,
+    from Supabase when it can answer and from a single live download when
+    it can't - the same two paths, and the same fallback, get_price_series
+    uses for one ticker.
+
+    Reading a basket this way is one query for the whole basket rather than
+    one per holding, which is what makes it worth sharing between the
+    correlation matrix and anything else that needs a set of tickers priced
+    over the same stretch of time.
+
+    Returns None when neither path has usable data. Raises ValueError for
+    an unusable period/window pair (see resolve_window), and DataUnavailable
+    / SymbolNotFound from the live path.
+    """
+    period, start, end = resolve_window(period, start, end)
+
+    closes = None
+    if interval == "1d":
+        closes = _closes_db(
+            tickers, period, start=start, end=end, min_tickers=min_tickers
+        )
+    if closes is None:
+        closes = _live(
+            "price history for these holdings",
+            _closes_live, tickers, period, interval, start=start, end=end,
+        )
     return closes
 
 
@@ -714,9 +929,11 @@ def compute_correlation_matrix(
     """Compute pairwise Pearson correlation of daily returns for a set of tickers.
 
     Steps:
-      1. Get close prices for all tickers - from Supabase (bulk query,
-         pivoted into a wide DataFrame) when interval="1d" and there's
-         enough synced data, else a single yf.download() call
+      1. Get close prices for all tickers via get_closes - from Supabase
+         (bulk query, pivoted into a wide DataFrame) when interval="1d"
+         and there's enough synced data, else a single yf.download() call.
+         Its default min_tickers=2 is what this step needs: a lone synced
+         ticker has no peer to correlate against, so it is a miss
       2. Compute daily percentage returns (pct_change)
       3. Build the NxN Pearson correlation matrix via DataFrame.corr()
       4. Extract summary statistics: per-ticker averages, strongest/weakest
@@ -729,12 +946,7 @@ def compute_correlation_matrix(
     if cached:
         return cached
 
-    closes = _closes_db(tickers, period) if interval == "1d" else None
-    if closes is None:
-        closes = _live(
-            "price history for these holdings",
-            _closes_live, tickers, period, interval,
-        )
+    closes = get_closes(tickers, period=period, interval=interval)
 
     if closes is None:
         return {"matrix": {}, "tickers": tickers}

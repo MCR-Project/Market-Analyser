@@ -11,7 +11,8 @@ Endpoints:
   GET /api/etf/{etf_id}          — full ETF detail with holdings
   GET /api/stock/{ticker}        — single stock metadata
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
-  GET /api/series/{ticker}       — historical price series
+  GET /api/series/{ticker}       — historical price series, by period or
+                                   by explicit start/end window
   GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings
   GET /api/sectors/{etf_id}      — sector weight breakdown
 """
@@ -100,16 +101,29 @@ def get_stocks(tickers: str = Query(..., description="Comma-separated ticker lis
 @router.get("/series/{ticker}")
 def get_series(
     ticker: str,
-    period: str = Query("1y", description="1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max"),
+    period: str | None = Query(None, description="1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max"),
     interval: str = Query("1d", description="1m, 5m, 15m, 1h, 1d, 1wk, 1mo"),
+    start: str | None = Query(None, description="Window start, ISO-8601 (YYYY-MM-DD), inclusive"),
+    end: str | None = Query(None, description="Window end, ISO-8601 (YYYY-MM-DD), inclusive"),
 ):
-    """Historical price series for charting.
+    """Historical price series for charting and backtesting.
 
-    Returns an array of {date, close, volume} objects. The frontend
-    maps the `close` values into the AreaChart sparkline.
+    Returns an array of {date, close, volume, granularity} objects, oldest
+    first. The frontend maps the `close` values into the AreaChart
+    sparkline; `granularity` says whether a row is a day, a week or a month
+    of history, since `prices` tiers older rows into coarser buckets.
+
+    The stretch of history is either a `period` (a lookback from today) or
+    an explicit `start`/`end` window - the two are mutually exclusive, and
+    naming neither reads the default period. An unusable pair is a 400
+    naming the parameter at fault rather than a silently empty array: it is
+    a fact about the request, and the frontend must not retry it.
     """
     ticker = ticker.upper()
-    data = get_price_series(ticker, period=period, interval=interval)
+    try:
+        data = get_price_series(ticker, period=period, interval=interval, start=start, end=end)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if not data:
         raise HTTPException(404, f"No price data for '{ticker}'")
     return data
