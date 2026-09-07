@@ -20,6 +20,7 @@
  */
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { useComparison } from '../hooks/useComparison';
 import { usePortfolios } from '../hooks/usePortfolios';
 import { PortfolioSidebar } from '../components/portfolio/PortfolioSidebar';
 import { PortfolioPanel } from '../components/portfolio/PortfolioPanel';
@@ -36,6 +37,14 @@ export function PortfolioPage() {
 
   const open = portfolios.find(p => p.id === portfolioId) || null;
   const unknownId = !!portfolioId && !open;
+  const comparison = useComparison(portfolioId);
+
+  // Ids in the URL are only meaningful in the browser that wrote them, so
+  // a link comparing somebody else's portfolios shows what it can find
+  // rather than an error about what it cannot.
+  const compared = comparison.compareIds
+    .map(id => portfolios.find(p => p.id === id))
+    .filter(Boolean);
 
   // Creating opens what was created: the point of the button is to start
   // working on the new portfolio, not to admire it in the list.
@@ -60,7 +69,14 @@ export function PortfolioPage() {
   return (
     <div className="flex-1 min-h-0 flex">
       <aside className="flex-none w-[264px] border-r border-[var(--border)] p-4 min-h-0">
-        <PortfolioSidebar portfolios={portfolios} onCreate={() => setCreating(true)} />
+        <PortfolioSidebar
+          portfolios={portfolios}
+          onCreate={() => setCreating(true)}
+          openId={portfolioId}
+          comparedIds={comparison.compareIds}
+          onToggleCompare={open ? comparison.toggleCompare : undefined}
+          comparisonFull={comparison.full}
+        />
       </aside>
 
       <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
@@ -73,6 +89,8 @@ export function PortfolioPage() {
             portfolio={open}
             onRename={name => rename(open.id, name)}
             onUpdate={changes => update(open.id, changes)}
+            compared={compared}
+            comparison={comparison}
             onDuplicate={handleDuplicate}
             onDelete={() => setPendingDelete(open)}
           />

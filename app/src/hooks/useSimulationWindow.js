@@ -27,6 +27,7 @@
  */
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
+import { withParams } from '../utils/searchParams';
 
 /** Mirrors PERIOD_TO_DAYS in backend/config.py, so a preset asks for the
  *  same stretch the backend would have counted back itself. */
@@ -98,14 +99,18 @@ export function useSimulationWindow() {
     return { preset, ...presetWindow(preset) };
   }, [raw.preset, raw.start, raw.end]);
 
+  // Both write through withParams rather than replacing the query: the
+  // URL also carries what is being compared (#64), and changing the
+  // period must not be a way to forget that.
+  //
   // A preset is a navigation worth going back from; retyping a date is
   // not, so the dates replace rather than pile up in history.
   const selectPreset = useCallback((key) => {
-    setParams({ window: key });
+    setParams(current => withParams(current, { window: key, start: null, end: null }));
   }, [setParams]);
 
   const setWindow = useCallback(({ start, end }) => {
-    setParams({ start, end }, { replace: true });
+    setParams(current => withParams(current, { start, end, window: null }), { replace: true });
   }, [setParams]);
 
   // Memoised because it is a fetch key downstream: rebuilt every render,
