@@ -289,12 +289,13 @@ export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onD
         simulation={simulation}
         stale={stale || loading}
         onChange={next => onUpdate({ holdings: next })}
-      />
-
-      <AddHolding
-        existing={holdings}
-        windowStart={simulation?.start || null}
-        onAdd={addHolding}
+        addControl={
+          <AddHolding
+            existing={holdings}
+            windowStart={simulation?.start || null}
+            onAdd={addHolding}
+          />
+        }
       />
     </div>
   );

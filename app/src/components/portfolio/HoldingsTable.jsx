@@ -77,6 +77,11 @@ export const HoldingsTable = memo(function HoldingsTable({
   simulation,
   stale,
   onChange,
+  // Rendered at the head of the section rather than after the rows: on a
+  // portfolio of any size the bottom of the table is a scroll away, and
+  // adding a holding is the one action here that has nothing to do with
+  // the row you happen to be looking at.
+  addControl,
 }) {
   // The weights as they are being typed: ticker → raw text, because "1",
   // "" and "12." are all legitimate mid-edit states that are not numbers
@@ -194,6 +199,8 @@ export const HoldingsTable = memo(function HoldingsTable({
           </button>
         </div>
       </div>
+
+      {addControl}
 
       {over && (
         <div

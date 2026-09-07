@@ -95,7 +95,7 @@ export function AddHolding({ existing, windowStart, onAdd }) {
   };
 
   return (
-    <div className="mt-3">
+    <div className="mb-3">
       <div className="relative">
         <input
           ref={inputRef}
