@@ -417,6 +417,32 @@ class SimulateRouteTests(unittest.TestCase):
                 self.assertEqual(resp.status_code, 400)
                 self.assertIn(expected, resp.json()["detail"])
 
+    def test_a_period_reaches_further_back_than_dates_can_ask_for(self):
+        """"max" is the window a caller cannot write down: how far back a
+        basket reaches is a fact about its holdings. It travels as a
+        period, and the response says which window it turned out to be."""
+        db = _WriteHostileClient(self._rows())
+        with patch("services.market_data.get_client_optional", return_value=db):
+            resp = client.post(
+                "/api/portfolio/simulate",
+                json=self._body(start=None, end=None, period="max"),
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["start"], "2020-01-02")
+        self.assertEqual(resp.json()["end"], "2020-06-01")
+
+    def test_a_period_and_a_window_together_are_a_400(self):
+        """Two ways of naming the same thing, one of which would have to be
+        ignored - resolve_window refuses rather than picking."""
+        resp = client.post(
+            "/api/portfolio/simulate",
+            json=self._body(period="max"),
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("mutually exclusive", resp.json()["detail"])
+
     def test_an_unknown_holding_is_a_404_naming_the_ticker(self):
         db = _WriteHostileClient(self._rows())
         with patch("services.market_data.get_client_optional", return_value=db), \
