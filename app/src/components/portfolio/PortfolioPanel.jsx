@@ -3,9 +3,15 @@
  * been worth.
  *
  * The amount, the rebalancing method and the composition are all edited
- * here, and every change writes straight through to the library. The
- * numbers beside each holding come from the backend simulation, debounced
- * so that typing a weight asks once rather than once per keystroke.
+ * here, and the numbers beside each holding come from the backend
+ * simulation.
+ *
+ * The amount and the method apply as soon as they are chosen — each is a
+ * single decision, made once. Weights are not: they are worked out by
+ * comparison across the whole table, so they are edited freely and
+ * applied together (see HoldingsTable), which is what keeps a table of
+ * twenty holdings from re-simulating twenty times on the way to one
+ * answer.
  *
  * A copied portfolio says where it came from, and — for a fund — what
  * share of it the copy actually accounted for. That note is history, not
@@ -278,6 +284,7 @@ export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onD
       />
 
       <HoldingsTable
+        portfolioId={portfolio.id}
         holdings={holdings}
         simulation={simulation}
         stale={stale || loading}

@@ -9,6 +9,20 @@
  * money between holdings, a final value says nothing about which holding
  * earned it (see backend/services/portfolio.py).
  *
+ * **Weights are edited, then applied.** Typing into a weight changes
+ * nothing but the box it is typed into: it does not save the portfolio,
+ * and it does not re-run the simulation. Weights are worked out by
+ * comparison — this one up, that one down, does the total still make
+ * sense — and a table that re-simulates as each digit lands spends its
+ * time answering half-written questions. **Recompute** applies the whole
+ * set at once, so one deliberate decision costs one run.
+ *
+ * Everything on screen still reacts immediately: the running total, the
+ * over-100 card and Normalize all read the numbers being typed, because
+ * those are arithmetic and cost nothing. Only the simulated columns wait,
+ * and they stay honest about it by describing the weights that were
+ * actually applied.
+ *
  * Weights are ratios, not a budget. Any non-negative numbers describe the
  * basket by their proportions, and the simulation normalises them, so a
  * total under 100 is simply scaled up rather than treated as cash. A
@@ -16,7 +30,7 @@
  * expected the numbers to be a percentage of the money and is about to be
  * surprised — so the card explains it rather than the input refusing it.
  * **Normalize** rewrites the weights to what the simulation is doing with
- * them anyway.
+ * them anyway, as another pending edit rather than behind anyone's back.
  *
  * Negative weights are the one thing refused outright: shorting is not
  * modelled, and coercing -5 to 5 or to 0 would both be inventing an
@@ -24,6 +38,7 @@
  */
 import { memo, useState } from 'react';
 import { normaliseWeights, totalWeight } from '../../utils/weights';
+import { ApplyWeightsDialog } from './ApplyWeightsDialog';
 
 const CURRENCY = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -57,18 +72,48 @@ function Cell({ children, className = '' }) {
 }
 
 export const HoldingsTable = memo(function HoldingsTable({
+  portfolioId,
   holdings,
   simulation,
   stale,
   onChange,
 }) {
-  // The text being typed, which is not yet a number: "1", "" and "12." are
-  // all legitimate mid-edit states that must not be parsed and written
-  // back, or the field fights whoever is typing into it.
+  // The weights as they are being typed: ticker → raw text, because "1",
+  // "" and "12." are all legitimate mid-edit states that are not numbers
+  // yet. A ticker absent from here is showing its applied weight.
   const [drafts, setDrafts] = useState({});
   const [refused, setRefused] = useState(null);
+  const [confirming, setConfirming] = useState(false);
 
-  const total = totalWeight(holdings);
+  // Switching portfolio with edits in flight would otherwise apply one
+  // portfolio's weights to another. Adjusted during render rather than in
+  // an effect, as App.jsx does with its selection — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [editingId, setEditingId] = useState(portfolioId);
+  if (editingId !== portfolioId) {
+    setEditingId(portfolioId);
+    setDrafts({});
+    setRefused(null);
+    setConfirming(false);
+  }
+
+  // The basket as typed. Text that is not a usable number leaves that
+  // holding at its applied weight, so the total never reads as though a
+  // half-typed row were zero.
+  const edited = holdings.map(holding => {
+    const raw = drafts[holding.ticker];
+    if (raw === undefined) return holding;
+    const value = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(value) || value < 0) return holding;
+    return { ...holding, weight: value };
+  });
+
+  const changes = edited
+    .map((holding, i) => ({ ticker: holding.ticker, from: holdings[i].weight, to: holding.weight }))
+    .filter(change => change.from !== change.to);
+
+  const total = totalWeight(edited);
+  const appliedTotal = totalWeight(holdings);
   const over = total > 100 + TOLERANCE;
   const balanced = Math.abs(total - 100) <= TOLERANCE;
 
@@ -76,19 +121,16 @@ export const HoldingsTable = memo(function HoldingsTable({
   const windowStart = simulation?.start || null;
 
   const setWeight = (ticker, text) => {
-    setDrafts(d => ({ ...d, [ticker]: text }));
-    if (text.trim() === '') return;
+    setDrafts(current => ({ ...current, [ticker]: text }));
     const value = Number(text);
-    if (!Number.isFinite(value)) return;
-    if (value < 0) {
+    if (text.trim() !== '' && Number.isFinite(value) && value < 0) {
       setRefused('Weights cannot be negative — shorting is not modelled.');
-      return;
+    } else {
+      setRefused(null);
     }
-    setRefused(null);
-    onChange(holdings.map(h => (h.ticker === ticker ? { ...h, weight: value } : h)));
   };
 
-  const commit = (ticker) => {
+  const revert = (ticker) => {
     setDrafts(current => {
       const next = { ...current };
       delete next[ticker];
@@ -97,7 +139,27 @@ export const HoldingsTable = memo(function HoldingsTable({
     setRefused(null);
   };
 
-  const remove = (ticker) => onChange(holdings.filter(h => h.ticker !== ticker));
+  // Normalize is an edit like any other: it fills the boxes with what the
+  // simulation would do to these weights anyway, and waits to be applied.
+  const normalize = () => {
+    const normalised = normaliseWeights(edited);
+    setDrafts(Object.fromEntries(normalised.map(h => [h.ticker, String(h.weight)])));
+    setRefused(null);
+  };
+
+  const apply = () => {
+    onChange(edited);
+    setDrafts({});
+    setRefused(null);
+    setConfirming(false);
+  };
+
+  // Removing a holding is not a weight edit — it changes what the
+  // portfolio is, and applies at once. Pending weights survive it.
+  const remove = (ticker) => {
+    revert(ticker);
+    onChange(holdings.filter(h => h.ticker !== ticker));
+  };
 
   return (
     <div>
@@ -111,11 +173,24 @@ export const HoldingsTable = memo(function HoldingsTable({
             {total}% allocated
           </span>
           <button
-            onClick={() => onChange(normaliseWeights(holdings))}
+            onClick={normalize}
             disabled={holdings.length === 0 || total <= 0 || balanced}
             className="px-2.5 py-1 text-[12px] font-semibold text-[var(--fg-1)] bg-[var(--bg-2)] border border-[var(--border)] rounded-[var(--radius-sm)] cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-3)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             Normalize
+          </button>
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={changes.length === 0}
+            title={
+              changes.length === 0
+                ? 'No weight changes to apply'
+                : 'Save these weights and run the simulation again'
+            }
+            className="px-2.5 py-1 text-[12px] font-semibold text-[var(--success)] bg-[var(--success-soft)] border border-[var(--success-ring)] rounded-[var(--radius-sm)] cursor-pointer transition-colors duration-150 hover:bg-[var(--success-ring)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--success)]"
+          >
+            Recompute
+            {changes.length > 0 && ` (${changes.length})`}
           </button>
         </div>
       </div>
@@ -151,7 +226,7 @@ export const HoldingsTable = memo(function HoldingsTable({
         </p>
       ) : (
         <div className="overflow-x-auto border border-[var(--border)] rounded-[var(--radius-md)]">
-          <table className="w-full border-collapse" style={{ opacity: stale ? 0.55 : 1, transition: 'opacity 120ms' }}>
+          <table className="w-full border-collapse">
             <thead>
               <tr className="border-b border-[var(--divider)]">
                 <th scope="col" className="eyebrow text-left px-3 py-2 font-normal">TICKER</th>
@@ -163,10 +238,11 @@ export const HoldingsTable = memo(function HoldingsTable({
               </tr>
             </thead>
             <tbody>
-              {holdings.map(holding => {
+              {holdings.map((holding, i) => {
                 const run = byTicker.get(holding.ticker);
                 const late = run && windowStart && run.firstDate && run.firstDate > windowStart;
                 const never = run && !run.firstDate;
+                const pending = edited[i].weight !== holding.weight;
                 return (
                   <tr key={holding.ticker} className="border-b border-[var(--divider)] last:border-b-0">
                     <td className="px-3 py-2.5">
@@ -193,24 +269,34 @@ export const HoldingsTable = memo(function HoldingsTable({
                           inputMode="decimal"
                           value={drafts[holding.ticker] ?? holding.weight}
                           onChange={e => setWeight(holding.ticker, e.target.value)}
-                          onBlur={() => commit(holding.ticker)}
-                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                          onKeyDown={e => {
+                            // Escape puts this row back to the weight the
+                            // simulation actually used.
+                            if (e.key === 'Escape') revert(holding.ticker);
+                            if (e.key === 'Enter' && changes.length > 0) setConfirming(true);
+                          }}
                           aria-label={`Weight of ${holding.ticker}, percent`}
-                          className="w-[68px] h-[28px] px-2 text-right bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-sm)] font-[var(--font-mono)] text-[12.5px] text-[var(--fg)] outline-none focus:border-[var(--accent-ring)]"
+                          className="w-[68px] h-[28px] px-2 text-right bg-[var(--bg-1)] border rounded-[var(--radius-sm)] font-[var(--font-mono)] text-[12.5px] text-[var(--fg)] outline-none focus:border-[var(--accent-ring)]"
+                          style={{ borderColor: pending ? 'var(--success-ring)' : 'var(--border)' }}
                         />
                         <span className="text-[var(--fg-2)]">%</span>
                       </span>
                     </Cell>
-                    <Cell className="text-[var(--fg-1)]">
-                      {run ? CURRENCY.format(run.finalValue) : '—'}
+                    {/* The simulated columns describe the applied weights,
+                        so they dim while a run is in flight rather than
+                        while somebody is still typing. */}
+                    <Cell className="text-[var(--fg-1)]" >
+                      <span style={{ opacity: stale ? 0.5 : 1 }}>
+                        {run ? CURRENCY.format(run.finalValue) : '—'}
+                      </span>
                     </Cell>
                     <Cell>
-                      <span style={{ color: toneOf(run?.return) }}>
+                      <span style={{ color: toneOf(run?.return), opacity: stale ? 0.5 : 1 }}>
                         {run ? signed(run.return, v => `${v.toFixed(1)}%`) : '—'}
                       </span>
                     </Cell>
                     <Cell>
-                      <span style={{ color: toneOf(run?.contribution) }}>
+                      <span style={{ color: toneOf(run?.contribution), opacity: stale ? 0.5 : 1 }}>
                         {run ? signed(run.contribution, v => CURRENCY.format(v)) : '—'}
                       </span>
                     </Cell>
@@ -231,6 +317,23 @@ export const HoldingsTable = memo(function HoldingsTable({
             </tbody>
           </table>
         </div>
+      )}
+
+      {changes.length > 0 && (
+        <p className="text-[12px] text-[var(--fg-2)] leading-relaxed m-0 mt-2">
+          {changes.length === 1 ? 'One weight has' : `${changes.length} weights have`} changed.
+          The columns above still describe the weights last applied — Recompute to run these.
+        </p>
+      )}
+
+      {confirming && (
+        <ApplyWeightsDialog
+          changes={changes}
+          totalBefore={appliedTotal}
+          totalAfter={total}
+          onConfirm={apply}
+          onCancel={() => setConfirming(false)}
+        />
       )}
     </div>
   );

@@ -7,11 +7,14 @@
  * and the metrics come back with the run. This hook is only responsible
  * for asking at a sensible moment.
  *
- * Typing a weight is a stream of intermediate portfolios, most of them
- * half-written, so the request is debounced: one simulation after the
- * typing stops rather than one per keystroke. `stale` says the numbers on
- * screen describe the portfolio as it was a moment ago, which lets the
- * table dim them instead of pretending they are current.
+ * Weight edits arrive already batched — the holdings table applies a
+ * whole set at once — so the short debounce here is not absorbing a
+ * keystroke storm. It collapses the bursts that are left: an amount
+ * committed and a method changed in the same breath, or React's
+ * development double-render, which would otherwise be two identical runs
+ * of the same portfolio. `stale` says the numbers on screen describe the
+ * portfolio as it was a moment ago, which lets the table dim them instead
+ * of pretending they are current.
  *
  * A portfolio with nothing to invest — no holdings, or every weight zero
  * — is not simulated at all. The backend rejects it (rightly: there is no
@@ -23,9 +26,10 @@ import { useDebouncedValue } from './useDebouncedValue';
 import { useFetch } from './useFetch';
 import { api } from '../utils/api';
 
-/** Long enough to sit through a number being typed, short enough that
- *  pausing feels like the answer arriving rather than a wait. */
-const SETTLE_MS = 400;
+/** Short: every change reaching here is now a deliberate one, and making
+ *  a deliberate action wait is just latency. Long enough to collapse two
+ *  changes made in the same moment. */
+const SETTLE_MS = 120;
 
 export function usePortfolioSimulation(portfolio) {
   // The request as a string, which is both the cache key and the payload:
