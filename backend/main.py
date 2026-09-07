@@ -44,7 +44,12 @@ allow_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_methods=["GET"],
+    # POST is here for one endpoint: /api/portfolio/simulate, which reads
+    # nothing and stores nothing but takes a whole portfolio in its body
+    # rather than in a URL. Without it the browser's preflight fails and
+    # the simulation is unreachable from the frontend, while curl works
+    # fine - a confusing way to discover a one-word omission.
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 

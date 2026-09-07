@@ -902,6 +902,12 @@ def get_closes(
     correlation matrix and anything else that needs a set of tickers priced
     over the same stretch of time.
 
+    The index is a tz-naive DatetimeIndex either way. The DB path pivots on
+    the `date` column's ISO strings and yfinance hands back timestamps, so
+    without normalising here a caller doing date arithmetic - the portfolio
+    simulator deciding where a month boundary falls - would be reading a
+    different type depending on which path happened to answer.
+
     Returns None when neither path has usable data. Raises ValueError for
     an unusable period/window pair (see resolve_window), and DataUnavailable
     / SymbolNotFound from the live path.
@@ -918,7 +924,14 @@ def get_closes(
             "price history for these holdings",
             _closes_live, tickers, period, interval, start=start, end=end,
         )
-    return closes
+    if closes is None:
+        return None
+
+    closes = closes.copy()
+    closes.index = pd.to_datetime(closes.index)
+    if closes.index.tz is not None:
+        closes.index = closes.index.tz_localize(None)
+    return closes.sort_index()
 
 
 def compute_correlation_matrix(
