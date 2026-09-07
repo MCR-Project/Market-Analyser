@@ -11,6 +11,8 @@ Endpoints:
   GET /api/etf/{etf_id}          — full ETF detail with holdings
   GET /api/stock/{ticker}        — single stock metadata
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
+  GET /api/tickers/search?q=      — search the tracked universe
+  GET /api/tickers/{symbol}       — resolve one symbol, tracked or not
   GET /api/series/{ticker}       — historical price series, by period or
                                    by explicit start/end window
   GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings
@@ -29,6 +31,7 @@ from services.market_data import (
     list_etf_summaries,
 )
 from services.portfolio import simulate_portfolio
+from services.tickers import DEFAULT_SEARCH_LIMIT, resolve_ticker, search_tickers
 from config import SECTOR_TAG
 
 router = APIRouter(prefix="/api")
@@ -97,6 +100,49 @@ def get_stocks(tickers: str = Query(..., description="Comma-separated ticker lis
     """
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     return [get_stock_info(t) for t in ticker_list]
+
+
+# ── Ticker lookup ─────────────────────────────────────────────────────────────
+
+# Declared before /tickers/{symbol}: FastAPI matches routes in the order
+# they are added, so the other way round "search" would be read as a
+# symbol and this endpoint would be unreachable.
+
+@router.get("/tickers/search")
+def search_universe(
+    q: str = Query("", description="Symbol or name fragment; empty lists the universe"),
+    limit: int = Query(DEFAULT_SEARCH_LIMIT, ge=1, le=50),
+):
+    """Search the tracked universe by symbol or name.
+
+    Answers from a cached snapshot of the `ticker` and `etfs` tables, with
+    symbol matches ranked above name matches - it is the as-you-type path,
+    so it never calls yfinance and never touches the network per keystroke.
+
+    A real but untracked symbol will not appear here; GET /api/tickers/{symbol}
+    is what confirms one of those, once somebody has chosen it.
+    """
+    return search_tickers(q, limit=limit)
+
+
+@router.get("/tickers/{symbol}")
+def resolve_symbol(symbol: str):
+    """Confirm one symbol can be priced, and describe it.
+
+    Returns a search result's shape plus `firstDate`, the earliest close
+    available for it - which is how far back a portfolio holding it can be
+    simulated. `tracked` says whether it came from the tracked universe or
+    was resolved live.
+
+    404 when upstream has no history for the symbol (a fact about the
+    symbol, which the frontend must not retry), 503 when upstream could
+    not be reached (a fact about right now, which it should), and 400 for
+    something that is not a symbol at all.
+    """
+    try:
+        return resolve_ticker(symbol)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 # ── Price series ──────────────────────────────────────────────────────────────

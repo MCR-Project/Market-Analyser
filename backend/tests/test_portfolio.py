@@ -220,7 +220,7 @@ class LateListingTests(unittest.TestCase):
         firstDate says so."""
         closes = frame({"OLD": [100.0, 120.0]}, ["2020-01-02", "2020-02-03"])
 
-        with patch("services.portfolio.get_price_series", return_value=[{"date": "2021-01-04", "close": 10.0}]):
+        with patch("services.portfolio.resolve_ticker", return_value={"symbol": "NEW", "name": "New Co", "tracked": False, "firstDate": "2021-01-04"}):
             result = run(closes, [{"ticker": "OLD", "weight": 50},
                                   {"ticker": "NEW", "weight": 50}])
 
@@ -234,7 +234,8 @@ class LateListingTests(unittest.TestCase):
         of the symbol - a typo must not be simulated as a pile of cash."""
         closes = frame({"OLD": [100.0, 120.0]}, ["2020-01-02", "2020-02-03"])
 
-        with patch("services.portfolio.get_price_series", return_value=[]):
+        with patch("services.portfolio.resolve_ticker",
+                   side_effect=SymbolNotFound("no price history for 'ZZZZ'")):
             with self.assertRaises(SymbolNotFound) as ctx:
                 run(closes, [{"ticker": "OLD", "weight": 50}, {"ticker": "ZZZZ", "weight": 50}])
 
@@ -419,7 +420,8 @@ class SimulateRouteTests(unittest.TestCase):
     def test_an_unknown_holding_is_a_404_naming_the_ticker(self):
         db = _WriteHostileClient(self._rows())
         with patch("services.market_data.get_client_optional", return_value=db), \
-             patch("services.portfolio.get_price_series", return_value=[]):
+             patch("services.portfolio.resolve_ticker",
+                   side_effect=SymbolNotFound("no price history for 'ZZZZ'")):
             resp = client.post(
                 "/api/portfolio/simulate",
                 json=self._body(holdings=[{"ticker": "AAPL", "weight": 50},
