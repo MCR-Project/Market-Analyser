@@ -7,6 +7,11 @@
  * table's job — so a portfolio with none says so plainly rather than
  * pretending to be a form that does not work yet.
  *
+ * A copied portfolio says where it came from, and — for a fund — what
+ * share of it the copy actually accounted for. That note is history, not
+ * a link: the copy is independent from the moment it exists, and the fund
+ * moves on without it.
+ *
  * Rename is inline on the title: the name is the thing being edited, so
  * editing it in place beats a dialog that shows the same word in a box.
  * Enter or blur commits, Escape restores what was there — an empty name
@@ -93,6 +98,38 @@ function Title({ portfolio, onRename }) {
   );
 }
 
+/** A fund copy is not the fund: only constituents weighing at least 1%
+ *  are tracked, so a copy of SPY is its largest names and a bit over half
+ *  its weight. Below this, the panel says so rather than leaving the
+ *  number to speak for itself. */
+const WHOLE_FUND_COVERAGE = 99;
+
+function Provenance({ source }) {
+  if (!source) return null;
+
+  if (source.kind === 'portfolio') {
+    return (
+      <p className="text-[12.5px] text-[var(--fg-2)] leading-relaxed m-0 mb-5">
+        Copied from “{source.name}”. The two have been independent ever since.
+      </p>
+    );
+  }
+
+  const coverage = Number.isFinite(source.coverage) ? source.coverage : null;
+  return (
+    <p className="text-[12.5px] text-[var(--fg-2)] leading-relaxed m-0 mb-5">
+      Copied from{' '}
+      <span className="font-[var(--font-mono)] text-[var(--fg-1)] font-bold">{source.id}</span>
+      {source.name && source.name !== source.id ? ` · ${source.name}` : ''}
+      {coverage === null
+        ? '.'
+        : coverage >= WHOLE_FUND_COVERAGE
+          ? `, whose tracked holdings covered ${coverage.toFixed(1)}% of its published weights, rescaled to 100% here.`
+          : `, whose tracked holdings covered ${coverage.toFixed(1)}% of its published weights — the rest of the fund sits in constituents too small to track, so this is a portfolio of its larger names rather than the fund itself.`}
+    </p>
+  );
+}
+
 function Fact({ label, children }) {
   return (
     <div>
@@ -124,6 +161,8 @@ export function PortfolioPanel({ portfolio, onRename, onDuplicate, onDelete }) {
           </button>
         </div>
       </div>
+
+      <Provenance source={portfolio.source} />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)]">
         <Fact label="AMOUNT">{CURRENCY.format(portfolio.value)}</Fact>

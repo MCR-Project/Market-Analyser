@@ -23,6 +23,7 @@ import { useNavigate, useParams } from 'react-router';
 import { usePortfolios } from '../hooks/usePortfolios';
 import { PortfolioSidebar } from '../components/portfolio/PortfolioSidebar';
 import { PortfolioPanel } from '../components/portfolio/PortfolioPanel';
+import { CreatePortfolioDialog } from '../components/portfolio/CreatePortfolioDialog';
 import { DeletePortfolioDialog } from '../components/portfolio/DeletePortfolioDialog';
 import { StorageNotice } from '../components/portfolio/StorageNotice';
 
@@ -31,13 +32,17 @@ export function PortfolioPage() {
   const navigate = useNavigate();
   const { portfolios, status, create, rename, duplicate, remove } = usePortfolios();
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [creating, setCreating] = useState(false);
 
   const open = portfolios.find(p => p.id === portfolioId) || null;
   const unknownId = !!portfolioId && !open;
 
   // Creating opens what was created: the point of the button is to start
   // working on the new portfolio, not to admire it in the list.
-  const handleCreate = () => navigate(`/portfolio/${create().id}`);
+  const handleCreate = (seed) => {
+    setCreating(false);
+    navigate(`/portfolio/${create(seed).id}`);
+  };
 
   const handleDuplicate = () => {
     const copy = duplicate(open.id);
@@ -55,7 +60,7 @@ export function PortfolioPage() {
   return (
     <div className="flex-1 min-h-0 flex">
       <aside className="flex-none w-[264px] border-r border-[var(--border)] p-4 min-h-0">
-        <PortfolioSidebar portfolios={portfolios} onCreate={handleCreate} />
+        <PortfolioSidebar portfolios={portfolios} onCreate={() => setCreating(true)} />
       </aside>
 
       <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
@@ -73,9 +78,17 @@ export function PortfolioPage() {
         ) : unknownId ? (
           <NotFound portfolioId={portfolioId} />
         ) : (
-          <Landing hasPortfolios={portfolios.length > 0} onCreate={handleCreate} />
+          <Landing hasPortfolios={portfolios.length > 0} onCreate={() => setCreating(true)} />
         )}
       </main>
+
+      {creating && (
+        <CreatePortfolioDialog
+          portfolios={portfolios}
+          onCreate={handleCreate}
+          onClose={() => setCreating(false)}
+        />
+      )}
 
       {pendingDelete && (
         <DeletePortfolioDialog
