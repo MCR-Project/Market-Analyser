@@ -1,9 +1,9 @@
 /**
  * Header — the bar shared by every page.
  *
- *  ┌──────────────────────────────────────────────────────────────┐
- *  │ Market Analyser      Analyser | Docs      LIVE · daily returns ☀ │
- *  └──────────────────────────────────────────────────────────────┘
+ *  ┌──────────────────────────────────────────────────────────────────┐
+ *  │ Market Analyser  Analyser | Portfolios | Docs  LIVE · returns ☀ │
+ *  └──────────────────────────────────────────────────────────────────┘
  *
  * Three columns: the brand, the page tabs, and the status/theme controls.
  * The side columns are equal fractions and the middle is auto-width, so
@@ -15,7 +15,7 @@
  * status (see hooks/useLiveStatus): "LIVE · daily returns" is a claim
  * about the dashboard's data, and would be meaningless above the docs.
  */
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { Link, useLocation } from 'react-router';
 
 const TAB_CLASS =
@@ -37,8 +37,13 @@ export const Header = memo(function Header({
   const { pathname } = useLocation();
   // Which tab is current is decided by the section of the app being
   // shown, not by an exact URL match — the dashboard has many URLs
-  // (/etf/SMH/matrix and so on) and all of them are "Analyser".
-  const onDocs = pathname.startsWith('/docs');
+  // (/etf/SMH/matrix and so on) and all of them are "Analyser", just as
+  // every /portfolio/:id is "Portfolios".
+  const section = pathname.startsWith('/docs')
+    ? 'docs'
+    : pathname.startsWith('/portfolio')
+      ? 'portfolio'
+      : 'analyser';
 
   return (
     // minmax(0,·) rather than plain 1fr: a grid track's default minimum is
@@ -61,23 +66,23 @@ export const Header = memo(function Header({
       </div>
 
       <nav aria-label="Pages" className="justify-self-center flex items-center gap-1">
-        <Link
-          to={dashboardPath}
-          aria-current={onDocs ? undefined : 'page'}
-          className={TAB_CLASS}
-          style={tabStyle(!onDocs)}
-        >
-          Analyser
-        </Link>
-        <span aria-hidden="true" className="text-[var(--fg-3)] select-none">|</span>
-        <Link
-          to="/docs"
-          aria-current={onDocs ? 'page' : undefined}
-          className={TAB_CLASS}
-          style={tabStyle(onDocs)}
-        >
-          Docs
-        </Link>
+        {[
+          { key: 'analyser', label: 'Analyser', to: dashboardPath },
+          { key: 'portfolio', label: 'Portfolios', to: '/portfolio' },
+          { key: 'docs', label: 'Docs', to: '/docs' },
+        ].map((tab, i) => (
+          <Fragment key={tab.key}>
+            {i > 0 && <span aria-hidden="true" className="text-[var(--fg-3)] select-none">|</span>}
+            <Link
+              to={tab.to}
+              aria-current={section === tab.key ? 'page' : undefined}
+              className={TAB_CLASS}
+              style={tabStyle(section === tab.key)}
+            >
+              {tab.label}
+            </Link>
+          </Fragment>
+        ))}
       </nav>
 
       <div className="flex items-center justify-end gap-4 min-w-0">
