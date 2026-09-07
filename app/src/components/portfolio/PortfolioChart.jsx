@@ -26,8 +26,10 @@
  * The geometry matches useChartHover's own constants, which is what makes
  * the crosshair land on the date the tooltip is describing.
  */
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
+import { useChartBrush } from '../../hooks/useChartBrush';
 import { useChartHover } from '../../hooks/useChartHover';
+import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
 
 /** Shared with useChartHover — the hover maths reads these exact numbers,
  *  so the crosshair and the bands cannot disagree about where a date is. */
@@ -125,6 +127,7 @@ export const PortfolioChart = memo(function PortfolioChart({
   sectorOf,
   sectorsReady,
   stale,
+  onSelectWindow,
 }) {
   const bands = useMemo(
     () => buildBands(simulation, groupBy, sectorOf),
@@ -136,6 +139,20 @@ export const PortfolioChart = memo(function PortfolioChart({
     null,
     simulation.dates
   );
+
+  // Bands are positioned by row, so a position across the plot resolves
+  // to a row - the same arithmetic the hover uses, from the same
+  // constants.
+  const resolve = useCallback((fraction) => {
+    const dates = simulation.dates;
+    if (dates.length === 0) return null;
+    const index = Math.round(
+      Math.max(0, Math.min(1, (fraction * W - PAD) / (W - 2 * PAD))) * (dates.length - 1)
+    );
+    return { index, date: dates[index] };
+  }, [simulation.dates]);
+
+  const brush = useChartBrush({ resolve, onSelect: onSelectWindow || (() => {}) });
 
   const { paths, ceiling } = useMemo(() => {
     const dates = simulation.dates;
@@ -246,7 +263,9 @@ export const PortfolioChart = memo(function PortfolioChart({
             />
           ))}
 
-          {hoverIdx != null && (
+          <BrushShading selection={brush.selection} width={W} height={H} />
+
+          {hoverIdx != null && !brush.active && (
             <line
               x1={PAD + (hoverIdx / Math.max(1, simulation.dates.length - 1)) * (W - 2 * PAD)}
               x2={PAD + (hoverIdx / Math.max(1, simulation.dates.length - 1)) * (W - 2 * PAD)}
@@ -264,11 +283,14 @@ export const PortfolioChart = memo(function PortfolioChart({
             fill="transparent"
             onMouseMove={onMouseMove}
             onMouseLeave={onMouseLeave}
-            style={{ cursor: 'crosshair' }}
+            {...(onSelectWindow ? brush.handlers : {})}
+            style={{ cursor: 'crosshair', ...(onSelectWindow ? brush.handlers.style : {}) }}
           />
         </svg>
 
-        {tooltip && (
+        <BrushLabel selection={brush.selection} />
+
+        {tooltip && !brush.active && (
           <StackedTooltip
             tooltip={tooltip}
             bands={bands}
@@ -281,6 +303,12 @@ export const PortfolioChart = memo(function PortfolioChart({
           <span>{simulation.dates[0]}</span>
           <span>{simulation.dates[simulation.dates.length - 1]}</span>
         </div>
+
+        {brush.refused && (
+          <p role="status" className="text-[11.5px] text-[var(--warning)] m-0 mt-1.5">
+            That was too short a stretch to simulate — drag across a wider one.
+          </p>
+        )}
       </div>
 
       <ul className="list-none flex flex-wrap gap-x-4 gap-y-1.5 m-0 mt-3 p-0">

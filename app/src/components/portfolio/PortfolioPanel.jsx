@@ -24,7 +24,7 @@
  * is refused by the library rather than leaving a row with nothing to
  * click.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
 import { useComparisonRuns } from '../../hooks/useComparisonRuns';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
@@ -247,6 +247,33 @@ export function PortfolioPanel({
   const holdings = useMemo(() => portfolio.holdings || [], [portfolio.holdings]);
   const [groupBy, setGroupBy] = useState('holding');
   const { preset, request, start, end, selectPreset, setWindow } = useSimulationWindow();
+
+  // What the window was before a drag replaced it. A drag is easy to do
+  // by accident and fiddly to undo by hand; choosing the window any other
+  // way means the old one is no longer what anybody wants back.
+  const [beforeDrag, setBeforeDrag] = useState(null);
+
+  const selectByDrag = useCallback((dragged) => {
+    setBeforeDrag(current => current ?? (preset ? { preset } : { start, end }));
+    setWindow(dragged);
+  }, [preset, start, end, setWindow]);
+
+  const resetWindow = useCallback(() => {
+    if (!beforeDrag) return;
+    if (beforeDrag.preset) selectPreset(beforeDrag.preset);
+    else setWindow(beforeDrag);
+    setBeforeDrag(null);
+  }, [beforeDrag, selectPreset, setWindow]);
+
+  const chooseWindow = useCallback((chosen) => {
+    setBeforeDrag(null);
+    setWindow(chosen);
+  }, [setWindow]);
+
+  const choosePreset = useCallback((key) => {
+    setBeforeDrag(null);
+    selectPreset(key);
+  }, [selectPreset]);
   const { simulation, loading, error, stale, retry } = usePortfolioSimulation(portfolio, request);
 
   // Sectors are only fetched once somebody asks to group by them: the
@@ -360,8 +387,10 @@ export function PortfolioPanel({
         end={end}
         resolvedStart={simulation?.start || null}
         resolvedEnd={simulation?.end || null}
-        onSelectPreset={selectPreset}
-        onSetWindow={setWindow}
+        onSelectPreset={choosePreset}
+        onSetWindow={chooseWindow}
+        canReset={!!beforeDrag}
+        onReset={resetWindow}
       />
 
       <SimulationStatus
@@ -389,7 +418,11 @@ export function PortfolioPanel({
       {comparison?.comparing ? (
         comparisonRuns.runs ? (
           <>
-            <ComparisonChart runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
+            <ComparisonChart
+              runs={comparisonRuns.runs}
+              stale={comparisonRuns.stale}
+              onSelectWindow={selectByDrag}
+            />
             <ComparisonSummary runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
           </>
         ) : (
@@ -405,6 +438,7 @@ export function PortfolioPanel({
             sectorOf={sectorOf}
             sectorsReady={!!stocks}
             stale={stale || loading}
+            onSelectWindow={selectByDrag}
           />
         </>
       )}
