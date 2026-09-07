@@ -6,6 +6,8 @@
 //   /etf/:etfId/:view        → dashboard, named view (table|matrix|network)
 //   /docs                    → measurement documentation index
 //   /docs/:measurementId     → one measurement's documentation
+//   /portfolio               → the portfolio library
+//   /portfolio/:portfolioId  → one saved portfolio
 //
 // The dashboard's ETF and view live in the URL rather than in memory, so
 // a reload or a shared link reopens the same fund and the same view.
@@ -15,6 +17,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import './index.css';
 import App from './App';
 import { AppLayout } from './components/layout/AppLayout';
+import { PortfolioPage } from './views/PortfolioPage';
 import { DEFAULT_ETF_ID } from './store/useEtfStore';
 
 // Split out so the dashboard doesn't carry the docs page's weight —
@@ -42,6 +45,11 @@ createRoot(document.getElementById('root')).render(
           <Route path="/etf/:etfId/:view" element={<App />} />
           <Route path="/docs" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
           <Route path="/docs/:measurementId" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
+          {/* Not split out like the docs page: the library has no heavy
+              dependencies of its own, so a separate chunk would cost a
+              round-trip to save nothing. */}
+          <Route path="/portfolio" element={<PortfolioPage />} />
+          <Route path="/portfolio/:portfolioId" element={<PortfolioPage />} />
           {/* Anything unrecognised lands on the default ETF rather than a
               blank screen. */}
           <Route path="*" element={<Navigate to="/" replace />} />
