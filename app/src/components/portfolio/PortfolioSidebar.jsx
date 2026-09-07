@@ -16,10 +16,13 @@
  *  │ 28 holdings        │
  *  └────────────────────┘
  *
- * Rows are links and nothing else. Renaming, duplicating and deleting
- * live on the open portfolio's own panel rather than on every row: with
- * thirty portfolios, three controls each is thirty times the clutter for
- * an action taken once in a while.
+ * A row is a link plus one control: the toggle that puts that portfolio
+ * on the chart beside the open one. Renaming, duplicating and deleting
+ * live on the open portfolio's own panel rather than on every row —
+ * with thirty portfolios, three controls each is thirty times the clutter
+ * for an action taken once in a while — but comparing is a thing you do
+ * *from* the list, to a portfolio you are not currently looking at, so it
+ * has to be here.
  */
 import { memo } from 'react';
 import { NavLink } from 'react-router';
@@ -36,7 +39,15 @@ function describe(portfolio) {
   return `${holdings} · ${CURRENCY.format(portfolio.value)}`;
 }
 
-export const PortfolioSidebar = memo(function PortfolioSidebar({ portfolios, onCreate }) {
+export const PortfolioSidebar = memo(function PortfolioSidebar({
+  portfolios,
+  onCreate,
+  openId,
+  comparedIds,
+  onToggleCompare,
+  comparisonFull,
+}) {
+  const compared = new Set(comparedIds || []);
   return (
     // The column, not its contents, owns the height: the button is
     // flex-none and the list is the only thing that scrolls.
@@ -58,8 +69,11 @@ export const PortfolioSidebar = memo(function PortfolioSidebar({ portfolios, onC
       ) : (
         <div className="corr-scroll flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
           <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
-            {portfolios.map(portfolio => (
-              <li key={portfolio.id}>
+            {portfolios.map(portfolio => {
+              const isOpen = portfolio.id === openId;
+              const isCompared = compared.has(portfolio.id);
+              return (
+              <li key={portfolio.id} className="relative group">
                 <NavLink
                   to={`/portfolio/${portfolio.id}`}
                   className="block px-3 py-2 rounded-[var(--radius-sm)] no-underline transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] aria-[current=page]:bg-[var(--accent-soft)] hover:bg-[var(--bg-2)]"
@@ -81,8 +95,36 @@ export const PortfolioSidebar = memo(function PortfolioSidebar({ portfolios, onC
                     </>
                   )}
                 </NavLink>
+                {onToggleCompare && !isOpen && (
+                  <button
+                    onClick={() => onToggleCompare(portfolio.id)}
+                    aria-pressed={isCompared}
+                    disabled={comparisonFull && !isCompared}
+                    title={
+                      isCompared
+                        ? `Stop comparing ${portfolio.name}`
+                        : comparisonFull
+                          ? 'The chart is full'
+                          : `Compare ${portfolio.name} with the open portfolio`
+                    }
+                    className="absolute top-1.5 right-1.5 w-6 h-6 grid place-items-center rounded-[var(--radius-sm)] border cursor-pointer transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                    style={{
+                      // Out of the way until it is wanted, but never
+                      // hidden from a keyboard: focus brings it back.
+                      opacity: isCompared ? 1 : undefined,
+                      background: isCompared ? 'var(--accent-soft)' : 'var(--bg-1)',
+                      borderColor: isCompared ? 'var(--accent-ring)' : 'var(--border)',
+                      color: isCompared ? 'var(--accent)' : 'var(--fg-2)',
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      {isCompared ? <path d="M20 6 9 17l-5-5" /> : <path d="M12 5v14M5 12h14" />}
+                    </svg>
+                  </button>
+                )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}

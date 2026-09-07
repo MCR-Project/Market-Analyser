@@ -26,12 +26,16 @@
  */
 import { useMemo, useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
+import { useComparisonRuns } from '../../hooks/useComparisonRuns';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
 import { useSimulationWindow } from '../../hooks/useSimulationWindow';
 import { REBALANCE_FREQUENCIES } from '../../store/portfolioStorage';
 import { describeFetchError } from '../../utils/errorCopy';
 import { api } from '../../utils/api';
 import { AddHolding } from './AddHolding';
+import { BenchmarkBar } from './BenchmarkBar';
+import { ComparisonChart } from './ComparisonChart';
+import { ComparisonSummary } from './ComparisonSummary';
 import { PortfolioChart } from './PortfolioChart';
 import { PortfolioSummary } from './PortfolioSummary';
 import { HoldingsTable } from './HoldingsTable';
@@ -219,8 +223,28 @@ function SimulationStatus({ simulation, loading, error, onRetry, hasWeight }) {
   );
 }
 
-export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onDelete }) {
-  const holdings = portfolio.holdings || [];
+/** A simulate payload for one line of the comparison. */
+function requestFor(holdings, value, rebalance, windowRequest) {
+  return {
+    holdings: holdings.filter(h => h.weight > 0).map(h => ({ ticker: h.ticker, weight: h.weight })),
+    value,
+    rebalance,
+    ...windowRequest,
+  };
+}
+
+export function PortfolioPanel({
+  portfolio,
+  onRename,
+  onUpdate,
+  onDuplicate,
+  onDelete,
+  compared = [],
+  comparison,
+}) {
+  // Memoised because it keys the comparison's request set: a fresh []
+  // for a portfolio with no holdings would re-simulate every render.
+  const holdings = useMemo(() => portfolio.holdings || [], [portfolio.holdings]);
   const [groupBy, setGroupBy] = useState('holding');
   const { preset, request, start, end, selectPreset, setWindow } = useSimulationWindow();
   const { simulation, loading, error, stale, retry } = usePortfolioSimulation(portfolio, request);
@@ -240,6 +264,37 @@ export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onD
     () => new Map((stocks || []).map(stock => [stock.ticker, stock.sectorTag || 'UNKNOWN'])),
     [stocks]
   );
+
+  // Every line on the comparison chart is a run of the same endpoint over
+  // the same window: this portfolio, the others chosen from the list, and
+  // each benchmark as a basket of one. A benchmark is given this
+  // portfolio's own starting amount, so the dollar view compares two
+  // answers to the same question rather than two different bets.
+  const lines = useMemo(() => {
+    if (!comparison?.comparing) return [];
+    return [
+      {
+        key: portfolio.id,
+        label: portfolio.name,
+        kind: 'portfolio',
+        request: requestFor(holdings, portfolio.value, portfolio.rebalance, request),
+      },
+      ...compared.map(other => ({
+        key: other.id,
+        label: other.name,
+        kind: 'portfolio',
+        request: requestFor(other.holdings || [], other.value, other.rebalance, request),
+      })),
+      ...comparison.benchmarks.map(symbol => ({
+        key: `benchmark:${symbol}`,
+        label: symbol,
+        kind: 'benchmark',
+        request: requestFor([{ ticker: symbol, weight: 100 }], portfolio.value, 'none', request),
+      })),
+    ];
+  }, [comparison, portfolio, holdings, compared, request]);
+
+  const comparisonRuns = useComparisonRuns(lines);
 
   const addHolding = (ticker) => {
     // The first holding takes the whole portfolio, because a basket where
@@ -317,7 +372,30 @@ export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onD
         hasWeight={holdings.some(h => h.weight > 0)}
       />
 
-      {simulation && (
+      {comparison && (
+        <BenchmarkBar
+          benchmarks={comparison.benchmarks}
+          disabled={comparison.full}
+          onAdd={comparison.addBenchmark}
+          onRemove={comparison.removeBenchmark}
+        />
+      )}
+
+      {/* One portfolio and nothing beside it is a question about its
+          composition, which the stacked chart answers. The moment there is
+          something to compare it with, the question becomes which grew
+          faster - and a stack of one portfolio's holdings cannot answer
+          that. */}
+      {comparison?.comparing ? (
+        comparisonRuns.runs ? (
+          <>
+            <ComparisonChart runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
+            <ComparisonSummary runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
+          </>
+        ) : (
+          <p className="text-[12px] text-[var(--fg-2)] m-0 mb-4">Simulating each line…</p>
+        )
+      ) : simulation && (
         <>
           <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} />
           <PortfolioChart
