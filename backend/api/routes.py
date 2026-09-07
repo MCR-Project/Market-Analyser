@@ -259,10 +259,15 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
     """Value a basket of tickers over a window, day by day.
 
     Returns the run in columnar form - `dates`, `total`, `cash`, and a
-    `values` array per holding - plus the normalised weight and first
-    priced date of each holding. See services/portfolio.py for the model
-    itself: buy and hold unless a rebalance frequency is named, weights
-    normalised, and an allocation held as cash until its holding lists.
+    `values` array per holding - alongside `metrics` (final value, total
+    return, CAGR, annualised volatility, deepest drawdown with the dates
+    of both ends) and, per holding, its own price return, final value,
+    share of the finished portfolio and dollar contribution to its gain.
+
+    See services/portfolio.py for the model and for what every number
+    means: buy and hold unless a rebalance frequency is named, weights
+    normalised, an allocation held as cash until its holding lists, and
+    the annualisation read off the run's own calendar rather than assumed.
 
     A request that cannot be simulated is a 400 naming what is wrong, and
     a holding that does not exist is a 404 naming the ticker (via

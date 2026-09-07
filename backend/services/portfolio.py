@@ -31,6 +31,32 @@ The model, in the order the decisions were made:
     cash converts at exactly that price, the portfolio's total does not
     move on the day it happens.
 
+How the run is then scored, in one place because a number is only worth
+as much as the convention behind it:
+
+  - **Returns are simple, not logarithmic**, taken between consecutive
+    rows of the run's own calendar.
+
+  - **A year is 365.25 days.** CAGR compounds over the calendar time the
+    window actually covers, so the same year answered in twelve monthly
+    buckets or 250 daily rows annualises to the same rate.
+
+  - **Volatility is annualised to 252 trading days**, with each return
+    first divided by the root of the trading time it actually covers. For
+    a window of daily rows that is exactly the textbook "daily standard
+    deviation times root 252"; for the older half of a long window, where
+    `prices` answers in weekly or monthly buckets, it is what stops a
+    week's movement being read as a day's.
+
+  - **Drawdown is measured on the total**, the only series a holder
+    experiences. A single holding can fall much further without the
+    portfolio noticing.
+
+  - **A holding's contribution is its final value less every dollar put
+    into it.** Once a rebalance starts moving money between holdings, a
+    final value says nothing about which holding earned it; the flows
+    have to be netted out. Contributions add up to the portfolio's gain.
+
 The calendar every holding is aligned onto is the union of the dates the
 price rows cover, not the intersection: one holding missing one day must
 not delete that day for the others. A gap inside a holding's own history
@@ -62,6 +88,16 @@ REBALANCE_FREQUENCIES = ("none", "monthly", "quarterly", "yearly")
 # above them.
 MONEY_DP = 2
 
+# Percentages keep more precision than they will be shown at, so a caller
+# can round them for display without the rounding having happened twice.
+PERCENT_DP = 4
+
+# Annualisation. Volatility is scaled to a year of trading days; a year is
+# 365.25 calendar days, which is also what CAGR compounds over, so the two
+# agree about how long a year is.
+TRADING_DAYS_PER_YEAR = 252
+DAYS_PER_YEAR = 365.25
+
 
 def _period_key(timestamp: pd.Timestamp, frequency: str):
     """Which period a date belongs to. A rebalance happens on the first
@@ -71,6 +107,117 @@ def _period_key(timestamp: pd.Timestamp, frequency: str):
     if frequency == "quarterly":
         return timestamp.year, (timestamp.month - 1) // 3
     return timestamp.year
+
+
+def _trading_days(gap_days: int) -> float:
+    """How much trading time one gap between rows covers.
+
+    Consecutive rows of the daily tier are one trading day apart whether
+    or not a weekend sits between them - Friday to Monday is one day of
+    market, not three. A coarser bucket is converted in proportion: a
+    weekly row spans about 4.8 trading days, a monthly one about 21.
+    """
+    if gap_days <= 4:
+        return 1.0
+    return gap_days * TRADING_DAYS_PER_YEAR / DAYS_PER_YEAR
+
+
+def _volatility(totals: list[float], dates: list[str]) -> float | None:
+    """Annualised standard deviation of the run's returns, as a percentage.
+
+    Each return is first divided by the square root of the trading time it
+    covers, which puts a weekly bucket's return and a daily row's return
+    into the same units before either is annualised by the usual 252. For
+    a window answered entirely from the daily tier this is exactly the
+    textbook "standard deviation of daily returns, times root 252"; the
+    scaling only starts to matter when `prices` answers in coarser buckets
+    (issue #10).
+
+    That is not a refinement. A real 2019-2026 basket comes back as 198
+    daily gaps, 207 weekly ones and 27 monthly: annualising every one of
+    them by 252 reads a week's movement as a day's and reported 54%
+    volatility where the same basket's true daily history gives 35% and
+    its weekly 31%. Picking one factor for the whole window instead only
+    moves which half of it is wrong. Scaling each return by its own gap is
+    what makes the number mean one thing across a window spanning tiers.
+
+    None rather than 0 when there are fewer than two returns to compare:
+    a single return has no dispersion to measure, and reporting 0 would
+    claim a portfolio held for two days was riskless.
+    """
+    parsed = [pd.Timestamp(d) for d in dates]
+    scaled = [
+        (totals[i] / totals[i - 1] - 1) / math.sqrt(_trading_days((parsed[i] - parsed[i - 1]).days))
+        for i in range(1, len(totals))
+        if totals[i - 1] > 0
+    ]
+    if len(scaled) < 2:
+        return None
+    mean = sum(scaled) / len(scaled)
+    variance = sum((r - mean) ** 2 for r in scaled) / (len(scaled) - 1)
+    return round(math.sqrt(variance) * math.sqrt(TRADING_DAYS_PER_YEAR) * 100, PERCENT_DP)
+
+
+def _cagr(totals: list[float], dates: list[str]) -> float | None:
+    """Compound annual growth rate, as a percentage, over the calendar
+    time the run actually covers.
+
+    Elapsed calendar days rather than a row count, so a window answered in
+    twelve monthly buckets and one answered in 250 daily rows over the same
+    year annualise to the same rate. None when there is no elapsed time to
+    compound over - a single row, or every row on one date.
+    """
+    if len(totals) < 2 or totals[0] <= 0:
+        return None
+    days = (pd.Timestamp(dates[-1]) - pd.Timestamp(dates[0])).days
+    if days <= 0:
+        return None
+    growth = totals[-1] / totals[0]
+    return round((growth ** (DAYS_PER_YEAR / days) - 1) * 100, PERCENT_DP)
+
+
+def _max_drawdown(totals: list[float], dates: list[str]) -> dict:
+    """The deepest peak-to-trough fall in the run, as a negative
+    percentage, with the dates of both ends.
+
+    Measured on the total value, which is the only series a holder
+    experiences - an individual holding can fall much further without the
+    portfolio noticing. A run that never falls reports 0 and no dates:
+    there is no peak and no trough to point at, and naming the first date
+    would invent a drawdown that did not happen.
+    """
+    worst, peak_at, trough_at = 0.0, None, None
+    peak, peak_date = totals[0], dates[0]
+    for date_str, total in zip(dates, totals):
+        if total > peak:
+            peak, peak_date = total, date_str
+        if peak > 0:
+            drawdown = total / peak - 1
+            if drawdown < worst:
+                worst, peak_at, trough_at = drawdown, peak_date, date_str
+    return {
+        "value": round(worst * 100, PERCENT_DP),
+        "peakDate": peak_at,
+        "troughDate": trough_at,
+    }
+
+
+def _metrics(totals: list[float], dates: list[str]) -> dict:
+    """How the run did, as one object beside the series rather than
+    interleaved into it - a summary is read whole, not walked date by
+    date."""
+    start_value, final_value = totals[0], totals[-1]
+    total_return = (
+        round((final_value / start_value - 1) * 100, PERCENT_DP) if start_value > 0 else None
+    )
+    return {
+        "startValue": start_value,
+        "finalValue": final_value,
+        "totalReturn": total_return,
+        "cagr": _cagr(totals, dates),
+        "volatility": _volatility(totals, dates),
+        "maxDrawdown": _max_drawdown(totals, dates),
+    }
 
 
 def _normalise_holdings(holdings) -> list[tuple[str, float]]:
@@ -156,6 +303,13 @@ def simulate_portfolio(
     shape a stacked chart consumes, and it does not repeat a ticker's name
     once per date.
 
+    Alongside the series: `metrics` scores the run as a whole (final
+    value, total return, CAGR, volatility, deepest drawdown), and each
+    holding carries its own price return, final value, share of the
+    finished portfolio, and dollar contribution to its gain. Both are read
+    whole rather than walked date by date, so they sit beside the arrays
+    instead of inside them.
+
     Raises ValueError for an unusable request (see _normalise_holdings and
     resolve_window), SymbolNotFound for a holding that does not exist, and
     DataUnavailable when the price read fails upstream. Nothing is written
@@ -201,6 +355,16 @@ def simulate_portfolio(
     cash_series: list[float] = []
     values: dict[str, list[float]] = {ticker: [] for ticker in tickers}
     first_priced: dict[str, str | None] = {ticker: None for ticker in tickers}
+    # Every dollar ever moved into a holding's position, less every dollar
+    # taken back out of it by a rebalance. What is left over at the end -
+    # final value minus this - is the money the holding actually made, and
+    # it is the only way to attribute a gain once rebalancing starts moving
+    # money between holdings (each holding's "contribution", below).
+    flows = {ticker: 0.0 for ticker in tickers}
+    # The holding's own price at each end of the stretch it was held over,
+    # for the price return reported per holding.
+    first_price: dict[str, float | None] = {ticker: None for ticker in tickers}
+    last_price: dict[str, float | None] = {ticker: None for ticker in tickers}
 
     previous = None
     for timestamp, row in closes.iterrows():
@@ -216,7 +380,10 @@ def simulate_portfolio(
         for ticker, price in priced.items():
             if first_priced[ticker] is None:
                 first_priced[ticker] = timestamp.date().isoformat()
+                first_price[ticker] = float(price)
+            last_price[ticker] = float(price)
             if idle[ticker] > 0:
+                flows[ticker] += idle[ticker]
                 invested[ticker] += idle[ticker] / price
                 idle[ticker] = 0.0
 
@@ -234,6 +401,9 @@ def simulate_portfolio(
                     # cash rather than being spent on the others.
                     invested[ticker], idle[ticker] = 0.0, target
                 else:
+                    # Topping the position up or selling it down is money
+                    # in or out of it, not a gain or a loss.
+                    flows[ticker] += target - invested[ticker] * price
                     invested[ticker], idle[ticker] = target / price, 0.0
 
         dates.append(timestamp.date().isoformat())
@@ -256,6 +426,7 @@ def simulate_portfolio(
         "dates": dates,
         "total": totals,
         "cash": cash_series,
+        "metrics": _metrics(totals, dates),
         "holdings": [
             {
                 "ticker": ticker,
@@ -267,6 +438,27 @@ def simulate_portfolio(
                 # its allocation sat in cash throughout.
                 "firstDate": first_priced[ticker],
                 "values": values[ticker],
+                # The holding's own price return over the stretch it was
+                # actually held - measured from its first close, which for
+                # a late-listing holding is not the window's start, because
+                # before that there was no price to return from.
+                "return": (
+                    round((last_price[ticker] / first_price[ticker] - 1) * 100, PERCENT_DP)
+                    if first_price[ticker]
+                    else None
+                ),
+                "finalValue": values[ticker][-1],
+                # How much of the portfolio it ended up being.
+                "share": (
+                    round(values[ticker][-1] / totals[-1] * 100, PERCENT_DP)
+                    if totals[-1] > 0
+                    else 0.0
+                ),
+                # Dollars of the portfolio's gain that came from it: what
+                # the position is worth, less every dollar put into it.
+                # Rebalancing moves money between holdings, so a final
+                # value on its own says nothing about who earned it.
+                "contribution": round(values[ticker][-1] - flows[ticker], MONEY_DP),
             }
             for ticker, share in weights
         ],
