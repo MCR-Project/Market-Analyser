@@ -10,10 +10,23 @@
  * view answers the other one ("what would I have ended up with?"), and
  * the toggle is a re-draw of data already in hand rather than a refetch.
  *
- * Lines are drawn against a shared date axis built from every run, not
- * from the first one. Two portfolios can cover different stretches of the
- * same window — one holding something that lists later starts later — and
- * a line that simply begins further along is the honest way to show that.
+ * **Lines do not share a calendar, and must not be drawn as though they
+ * did.** `prices` tiers history by age (issue #10), so a portfolio of
+ * tracked stocks comes back weekly for anything one to five years old,
+ * while an ETF benchmark — which has no rows of its own and is answered
+ * live — comes back daily for the whole window. Over five years that is
+ * 461 rows against 1254.
+ *
+ * So each line is positioned by its dates rather than by its place in a
+ * merged list, drawn through its own observations however far apart they
+ * fall, and read at a hovered date as of its last observation. Snapping
+ * every line onto one shared index instead left the weekly one as a few
+ * hundred isolated points — an SVG moveto with no lineto draws nothing,
+ * so the line vanished while its values still appeared under the cursor.
+ *
+ * Two portfolios can also cover different stretches of the same window —
+ * one holding something that lists later starts later — and a line that
+ * simply begins further along is the honest way to show that.
  *
  * A benchmark is drawn dashed. It is not a portfolio anybody owns here,
  * and the eye should be able to tell without reading the legend.
@@ -43,31 +56,58 @@ function formatValue(value, mode) {
   return `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(1)}%`;
 }
 
+const DAY = 24 * 60 * 60 * 1000;
+
+function time(date) {
+  return new Date(date + "T00:00:00Z").getTime();
+}
+
 /**
- * Put every run on one date axis, and on one scale.
+ * Put every run on one time axis, and on one scale.
  *
  * In percent mode each line is measured from its own first value, so all
  * of them start at zero however much money they started with.
+ *
+ * Each line keeps two things: `observations`, the points it actually has,
+ * which is what gets drawn; and `readings`, one value per date on the
+ * shared axis, carried forward from the last observation. A weekly line
+ * does have a value on a Wednesday, in the sense that its last close
+ * still describes what it was worth — the same forward-fill the
+ * simulation applies inside a run (services/portfolio.py). Before a
+ * line's first observation there is nothing to carry, and it reads as
+ * absent.
  */
 function buildSeries(runs, mode) {
   const dates = [...new Set(runs.flatMap(run => run.simulation?.dates || []))].sort();
-  const index = new Map(dates.map((date, i) => [date, i]));
+  const first = dates.length ? time(dates[0]) : 0;
+  const span = dates.length ? Math.max(time(dates[dates.length - 1]) - first, DAY) : DAY;
 
   const series = runs.map((run, i) => {
-    const points = new Array(dates.length).fill(null);
     const simulation = run.simulation;
+    const observations = [];
+    const readings = new Array(dates.length).fill(null);
+
     if (simulation) {
       const base = simulation.total[0] || 1;
+      const own = new Map();
       simulation.dates.forEach((date, j) => {
-        const value = simulation.total[j];
-        points[index.get(date)] = mode === 'value' ? value : (value / base - 1) * 100;
+        const total = simulation.total[j];
+        const value = mode === "value" ? total : (total / base - 1) * 100;
+        own.set(date, value);
+        observations.push({ at: (time(date) - first) / span, value });
+      });
+      let carried = null;
+      dates.forEach((date, j) => {
+        if (own.has(date)) carried = own.get(date);
+        readings[j] = carried;
       });
     }
-    return { ...run, points, color: PALETTE[i % PALETTE.length] };
+
+    return { ...run, observations, readings, color: PALETTE[i % PALETTE.length] };
   });
 
-  const values = series.flatMap(line => line.points).filter(value => value !== null);
-  const min = values.length ? Math.min(...values, mode === 'percent' ? 0 : Infinity) : 0;
+  const values = series.flatMap(line => line.observations.map(point => point.value));
+  const min = values.length ? Math.min(...values, mode === "percent" ? 0 : Infinity) : 0;
   const max = values.length ? Math.max(...values) : 1;
   return { dates, series, min, max: max === min ? min + 1 : max };
 }
@@ -78,27 +118,49 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
 
   const { dates, series, min, max } = useMemo(() => buildSeries(runs, mode), [runs, mode]);
 
-  const x = i => PAD + (i / Math.max(1, dates.length - 1)) * (W - 2 * PAD);
+  // Every line failed, so there is no axis to draw one against. The
+  // summary table below still lists each line and what happened to it.
+  if (dates.length === 0) {
+    return (
+      <p className="text-[12.5px] text-[var(--warning)] leading-relaxed m-0 mb-4">
+        None of these lines could be simulated over this window.
+      </p>
+    );
+  }
+
+  // Positioned by date, not by place in the merged list: a line sampled
+  // weekly has a quarter of the points of a daily one over the same
+  // stretch, and spacing them evenly would stretch its half of the chart.
+  const axisStart = dates.length ? time(dates[0]) : 0;
+  const axisSpan = dates.length
+    ? Math.max(time(dates[dates.length - 1]) - axisStart, DAY)
+    : DAY;
+  const xAt = fraction => PAD + fraction * (W - 2 * PAD);
+  const x = i => xAt((time(dates[i]) - axisStart) / axisSpan);
   const y = value => H - ((value - min) / (max - min)) * H;
 
-  const paths = series.map(line => {
-    let d = '';
-    let open = false;
-    line.points.forEach((value, i) => {
-      if (value === null) { open = false; return; }
-      d += `${open ? 'L' : 'M'}${x(i).toFixed(2)} ${y(value).toFixed(2)} `;
-      open = true;
-    });
-    return { ...line, d: d.trim() };
-  });
+  // Drawn through the line's own observations, however far apart they
+  // fall. A gap in the shared axis is not a gap in the line.
+  const paths = series.map(line => ({
+    ...line,
+    d: line.observations
+      .map((point, i) => (i ? "L" : "M") + xAt(point.at).toFixed(2) + " " + y(point.value).toFixed(2))
+      .join(" "),
+  }));
 
   const onMouseMove = (event) => {
     const box = event.currentTarget.getBoundingClientRect();
-    const relative = (event.clientX - box.left) / box.width;
-    const i = Math.round(
-      Math.max(0, Math.min(1, (relative * W - PAD) / (W - 2 * PAD))) * (dates.length - 1)
-    );
-    setHoverIdx(i);
+    const relative = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+    const target = axisStart + ((relative * W - PAD) / (W - 2 * PAD)) * axisSpan;
+    // The nearest date in time, since the axis is time and the dates on
+    // it are not evenly spread.
+    let nearest = 0;
+    let best = Infinity;
+    dates.forEach((date, i) => {
+      const distance = Math.abs(time(date) - target);
+      if (distance < best) { best = distance; nearest = i; }
+    });
+    setHoverIdx(nearest);
   };
 
   const at = hoverIdx ?? dates.length - 1;
@@ -215,7 +277,7 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
             <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] mb-1">{dates[at]}</div>
             <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
               {[...series]
-                .sort((a, b) => (b.points[at] ?? -Infinity) - (a.points[at] ?? -Infinity))
+                .sort((a, b) => (b.readings[at] ?? -Infinity) - (a.readings[at] ?? -Infinity))
                 .map(line => (
                   <li key={line.key} className="flex items-center gap-2 text-[11.5px]">
                     <span
@@ -225,7 +287,7 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
                     />
                     <span className="font-[var(--font-mono)] text-[var(--fg-1)] flex-1">{line.label}</span>
                     <span className="font-[var(--font-mono)] text-[var(--fg)] tabular-nums">
-                      {formatValue(line.points[at], mode)}
+                      {formatValue(line.readings[at], mode)}
                     </span>
                   </li>
                 ))}
@@ -253,7 +315,7 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
             <span className="font-semibold text-[var(--fg)]">{line.label}</span>
             {line.kind === 'benchmark' && <span className="eyebrow">BENCHMARK</span>}
             <span className="font-[var(--font-mono)] text-[var(--fg-2)]">
-              {formatValue(line.points[at], mode)}
+              {formatValue(line.readings[at], mode)}
             </span>
           </li>
         ))}
