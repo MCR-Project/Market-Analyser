@@ -72,7 +72,8 @@ import math
 
 import pandas as pd
 
-from services.market_data import SymbolNotFound, get_closes, get_price_series
+from services.market_data import get_closes
+from services.tickers import resolve_ticker
 
 # A ceiling on basket size, so one request cannot ask for an unbounded
 # price read. Well clear of what a portfolio copied from a tracked ETF
@@ -266,27 +267,16 @@ def _verify_absent(tickers: list[str]) -> None:
     """Decide what a holding with no price rows in the window means.
 
     A typo and a company that had not listed yet look identical from the
-    window's price read alone - both are simply an absent column. Asking
-    for the symbol's whole history separates them: a real holding has one
-    (starting after the window, which is why it is absent), and a typo has
-    none, so it must not be quietly simulated as a pile of cash.
-
-    The question is deliberately "does this have prices" rather than "does
-    Yahoo know the name": a made-up ticker's info request comes back as a
-    shell dict rather than an error (the same quirk api/routes.py's get_etf
-    works around), so a name proves nothing, while a symbol with no price
-    history cannot be simulated whatever it is called. Issue #58 replaces
-    this with a shared resolver that also reports the first date available.
+    window's price read alone - both are simply an absent column. The
+    resolver settles it: a real holding has history (starting after the
+    window, which is why it is absent) and is simulated as cash, while a
+    symbol with none is a typo that must not be quietly simulated as a
+    pile of money.
 
     Raises SymbolNotFound naming the ticker; main.py answers 404.
     """
     for ticker in tickers:
-        try:
-            history = get_price_series(ticker, period="max")
-        except SymbolNotFound as exc:
-            raise SymbolNotFound(f"no such symbol: '{ticker}'") from exc
-        if not history:
-            raise SymbolNotFound(f"no price history for '{ticker}'")
+        resolve_ticker(ticker)
 
 
 def simulate_portfolio(

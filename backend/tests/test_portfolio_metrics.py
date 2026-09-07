@@ -306,8 +306,8 @@ class PerHoldingTests(unittest.TestCase):
         allocation."""
         closes = frame({"OLD": [100.0, 120.0]}, ["2020-01-02", "2020-02-03"])
 
-        with patch("services.portfolio.get_price_series",
-                   return_value=[{"date": "2021-01-04", "close": 10.0}]):
+        with patch("services.portfolio.resolve_ticker",
+                   return_value={"symbol": "NEW", "name": "New Co", "tracked": False, "firstDate": "2021-01-04"}):
             result = run(closes, [{"ticker": "OLD", "weight": 50},
                                   {"ticker": "NEW", "weight": 50}])
 
@@ -349,8 +349,8 @@ class DegenerateRunTests(unittest.TestCase):
     def test_a_portfolio_that_never_leaves_cash_is_flat_not_broken(self):
         closes = frame({"OLD": [100.0, 100.0]}, ["2020-01-02", "2020-02-03"])
 
-        with patch("services.portfolio.get_price_series",
-                   return_value=[{"date": "2021-01-04", "close": 10.0}]):
+        with patch("services.portfolio.resolve_ticker",
+                   return_value={"symbol": "NEW", "name": "New Co", "tracked": False, "firstDate": "2021-01-04"}):
             metrics = run(closes, [{"ticker": "OLD", "weight": 50},
                                    {"ticker": "NEW", "weight": 50}])["metrics"]
 
