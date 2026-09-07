@@ -72,6 +72,24 @@ export function newId() {
   return `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Where a portfolio was seeded from, when it was copied rather than
+ *  built by hand. Kept as a note, not a link: the copy is independent
+ *  from the moment it exists, and the fund it came from will move on
+ *  without it. */
+function normaliseSource(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (raw.kind !== 'etf' && raw.kind !== 'portfolio') return undefined;
+  if (typeof raw.id !== 'string' || !raw.id) return undefined;
+  return {
+    kind: raw.kind,
+    id: raw.id,
+    name: typeof raw.name === 'string' && raw.name ? raw.name : raw.id,
+    // The share of the fund's published weights the copy accounted for at
+    // the time. Only meaningful for an ETF, and only as history.
+    ...(raw.kind === 'etf' && Number.isFinite(raw.coverage) ? { coverage: raw.coverage } : {}),
+  };
+}
+
 function normaliseHoldings(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -111,6 +129,7 @@ export function migratePortfolio(raw) {
     rebalance: REBALANCE_FREQUENCIES.includes(raw.rebalance) ? raw.rebalance : 'none',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now(),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now(),
+    source: normaliseSource(raw.source),
   };
 }
 
@@ -186,8 +205,8 @@ export function untitledName(existing) {
   }
 }
 
-/** A blank portfolio, or one seeded from `seed` — the shape #60 fills in
- *  when it copies an ETF or another portfolio. */
+/** A blank portfolio, or one seeded from `seed` — a fund's constituents,
+ *  or another portfolio's, with `source` recording which. */
 export function makePortfolio(seed = {}) {
   const timestamp = now();
   return {
@@ -199,6 +218,7 @@ export function makePortfolio(seed = {}) {
     rebalance: REBALANCE_FREQUENCIES.includes(seed.rebalance) ? seed.rebalance : 'none',
     createdAt: timestamp,
     updatedAt: timestamp,
+    source: normaliseSource(seed.source),
   };
 }
 
