@@ -15,9 +15,11 @@ Endpoints:
                                    by explicit start/end window
   GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings
   GET /api/sectors/{etf_id}      — sector weight breakdown
+  POST /api/portfolio/simulate   — value a basket of tickers over a window
 """
 
 from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel, Field
 from services.market_data import (
     get_etf_info,
     get_etf_holdings,
@@ -26,6 +28,7 @@ from services.market_data import (
     compute_correlation_matrix,
     list_etf_summaries,
 )
+from services.portfolio import simulate_portfolio
 from config import SECTOR_TAG
 
 router = APIRouter(prefix="/api")
@@ -221,3 +224,59 @@ def get_sectors(etf_id: str):
         "topSector": sectors[0] if sectors else None,
         "sectorLabel": "TOP SECTOR",
     }
+
+
+# ── Portfolio simulation ──────────────────────────────────────────────────────
+
+class HoldingIn(BaseModel):
+    """One line of a portfolio: a ticker and how much of the portfolio it
+    is. Weights are relative - the simulation normalises them - so any
+    non-negative numbers describe the same basket by their ratio."""
+
+    ticker: str
+    weight: float = 0
+
+
+class PortfolioIn(BaseModel):
+    """A whole portfolio, sent with every request.
+
+    Nothing about it is stored: there are no accounts here, portfolios live
+    in the browser that authored them, and this endpoint is the arithmetic
+    they ask for. That is also why it is a POST with a body rather than a
+    GET - a basket of holdings does not belong in a URL - even though it
+    reads nothing and changes nothing.
+    """
+
+    holdings: list[HoldingIn]
+    value: float = Field(10_000, description="Total invested at the start date, in USD")
+    start: str | None = Field(None, description="Window start, ISO-8601 (YYYY-MM-DD), inclusive")
+    end: str | None = Field(None, description="Window end, ISO-8601 (YYYY-MM-DD), inclusive")
+    rebalance: str = Field("none", description="none, monthly, quarterly, yearly")
+
+
+@router.post("/portfolio/simulate")
+def post_portfolio_simulate(portfolio: PortfolioIn):
+    """Value a basket of tickers over a window, day by day.
+
+    Returns the run in columnar form - `dates`, `total`, `cash`, and a
+    `values` array per holding - plus the normalised weight and first
+    priced date of each holding. See services/portfolio.py for the model
+    itself: buy and hold unless a rebalance frequency is named, weights
+    normalised, and an allocation held as cash until its holding lists.
+
+    A request that cannot be simulated is a 400 naming what is wrong, and
+    a holding that does not exist is a 404 naming the ticker (via
+    SymbolNotFound) - both facts about the request rather than about right
+    now, so neither is worth retrying. A failure to reach the price source
+    stays a retryable 503, like everywhere else.
+    """
+    try:
+        return simulate_portfolio(
+            [holding.model_dump() for holding in portfolio.holdings],
+            value=portfolio.value,
+            start=portfolio.start,
+            end=portfolio.end,
+            rebalance=portfolio.rebalance,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
