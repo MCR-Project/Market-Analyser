@@ -31,7 +31,7 @@ import { api } from '../utils/api';
  *  changes made in the same moment. */
 const SETTLE_MS = 120;
 
-export function usePortfolioSimulation(portfolio) {
+export function usePortfolioSimulation(portfolio, windowRequest) {
   // The request as a string, which is both the cache key and the payload:
   // useFetch's deps must be primitives, and deriving one from the other
   // keeps them from ever describing different portfolios.
@@ -42,8 +42,11 @@ export function usePortfolioSimulation(portfolio) {
       holdings: holdings.map(h => ({ ticker: h.ticker, weight: h.weight })),
       value: portfolio.value,
       rebalance: portfolio.rebalance,
+      // Either a period or a start/end pair, never both - the backend
+      // refuses the combination rather than picking one.
+      ...(windowRequest || {}),
     });
-  }, [portfolio]);
+  }, [portfolio, windowRequest]);
 
   const settled = useDebouncedValue(requestKey, SETTLE_MS);
 

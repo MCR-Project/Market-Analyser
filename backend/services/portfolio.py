@@ -282,11 +282,19 @@ def _verify_absent(tickers: list[str]) -> None:
 def simulate_portfolio(
     holdings,
     value: float,
+    period: str | None = None,
     start: str | None = None,
     end: str | None = None,
     rebalance: str = "none",
 ) -> dict:
     """Simulate `holdings` over a window, starting from `value` in cash.
+
+    The stretch of history is named the same two ways every read in this
+    codebase names one (see market_data.resolve_window): a `period`
+    counting back from today, or an explicit `start`/`end`. They are
+    mutually exclusive. "max" is the one a caller cannot express as dates,
+    since how far back a basket reaches is a fact about its holdings
+    rather than something to be guessed at and clamped.
 
     Returns the run in columnar form - one date array, one total array,
     one cash array, and one value array per holding - because that is the
@@ -299,6 +307,11 @@ def simulate_portfolio(
     finished portfolio, and dollar contribution to its gain. Both are read
     whole rather than walked date by date, so they sit beside the arrays
     instead of inside them.
+
+    The `start` and `end` in the response are the window actually
+    simulated, which for "max" - or for any window reaching past the data -
+    is narrower than the one asked for. It is the honest boundary, and
+    what the frontend shows.
 
     Raises ValueError for an unusable request (see _normalise_holdings and
     resolve_window), SymbolNotFound for a holding that does not exist, and
@@ -317,7 +330,7 @@ def simulate_portfolio(
         )
 
     tickers = [ticker for ticker, _ in weights]
-    closes = get_closes(tickers, start=start, end=end, min_tickers=1)
+    closes = get_closes(tickers, period=period, start=start, end=end, min_tickers=1)
     if closes is None or closes.empty:
         raise ValueError(
             "no price data in the requested window - it may contain no trading days"

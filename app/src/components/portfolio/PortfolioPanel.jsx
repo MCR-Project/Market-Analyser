@@ -26,10 +26,12 @@
  */
 import { useState } from 'react';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
+import { useSimulationWindow } from '../../hooks/useSimulationWindow';
 import { REBALANCE_FREQUENCIES } from '../../store/portfolioStorage';
 import { describeFetchError } from '../../utils/errorCopy';
 import { AddHolding } from './AddHolding';
 import { HoldingsTable } from './HoldingsTable';
+import { WindowControls } from './WindowControls';
 
 const CURRENCY = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -215,7 +217,8 @@ function SimulationStatus({ simulation, loading, error, onRetry, hasWeight }) {
 
 export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onDelete }) {
   const holdings = portfolio.holdings || [];
-  const { simulation, loading, error, stale, retry } = usePortfolioSimulation(portfolio);
+  const { preset, request, start, end, selectPreset, setWindow } = useSimulationWindow();
+  const { simulation, loading, error, stale, retry } = usePortfolioSimulation(portfolio, request);
 
   const addHolding = (ticker) => {
     // The first holding takes the whole portfolio, because a basket where
@@ -274,6 +277,16 @@ export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onD
           </div>
         </Field>
       </div>
+
+      <WindowControls
+        preset={preset}
+        start={start}
+        end={end}
+        resolvedStart={simulation?.start || null}
+        resolvedEnd={simulation?.end || null}
+        onSelectPreset={selectPreset}
+        onSetWindow={setWindow}
+      />
 
       <SimulationStatus
         simulation={simulation}

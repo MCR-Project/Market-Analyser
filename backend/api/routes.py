@@ -295,6 +295,7 @@ class PortfolioIn(BaseModel):
 
     holdings: list[HoldingIn]
     value: float = Field(10_000, description="Total invested at the start date, in USD")
+    period: str | None = Field(None, description="Lookback from today: 1y, 5y, max… (excludes start/end)")
     start: str | None = Field(None, description="Window start, ISO-8601 (YYYY-MM-DD), inclusive")
     end: str | None = Field(None, description="Window end, ISO-8601 (YYYY-MM-DD), inclusive")
     rebalance: str = Field("none", description="none, monthly, quarterly, yearly")
@@ -315,6 +316,11 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
     normalised, an allocation held as cash until its holding lists, and
     the annualisation read off the run's own calendar rather than assumed.
 
+    The window is named as a `period` counting back from today or as an
+    explicit `start`/`end`, never both. "max" reaches as far back as the
+    holdings go, which only the data knows: the response's own `start` and
+    `end` are the window actually simulated.
+
     A request that cannot be simulated is a 400 naming what is wrong, and
     a holding that does not exist is a 404 naming the ticker (via
     SymbolNotFound) - both facts about the request rather than about right
@@ -325,6 +331,7 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
         return simulate_portfolio(
             [holding.model_dump() for holding in portfolio.holdings],
             value=portfolio.value,
+            period=portfolio.period,
             start=portfolio.start,
             end=portfolio.end,
             rebalance=portfolio.rebalance,
