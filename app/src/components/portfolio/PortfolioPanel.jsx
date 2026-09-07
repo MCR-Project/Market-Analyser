@@ -24,12 +24,16 @@
  * is refused by the library rather than leaving a row with nothing to
  * click.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useFetch } from '../../hooks/useFetch';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
 import { useSimulationWindow } from '../../hooks/useSimulationWindow';
 import { REBALANCE_FREQUENCIES } from '../../store/portfolioStorage';
 import { describeFetchError } from '../../utils/errorCopy';
+import { api } from '../../utils/api';
 import { AddHolding } from './AddHolding';
+import { PortfolioChart } from './PortfolioChart';
+import { PortfolioSummary } from './PortfolioSummary';
 import { HoldingsTable } from './HoldingsTable';
 import { WindowControls } from './WindowControls';
 
@@ -217,8 +221,25 @@ function SimulationStatus({ simulation, loading, error, onRetry, hasWeight }) {
 
 export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onDelete }) {
   const holdings = portfolio.holdings || [];
+  const [groupBy, setGroupBy] = useState('holding');
   const { preset, request, start, end, selectPreset, setWindow } = useSimulationWindow();
   const { simulation, loading, error, stale, retry } = usePortfolioSimulation(portfolio, request);
+
+  // Sectors are only fetched once somebody asks to group by them: the
+  // chart is about holdings until it isn't, and this is a request per
+  // basket rather than per holding.
+  const tickers = holdings.map(h => h.ticker).join(',');
+  const { data: stocks } = useFetch(
+    (signal) => (groupBy === 'sector' && tickers
+      ? api.getStocks(tickers.split(','), { signal })
+      : Promise.resolve(null)),
+    [groupBy, tickers],
+    { fallback: null }
+  );
+  const sectorOf = useMemo(
+    () => new Map((stocks || []).map(stock => [stock.ticker, stock.sectorTag || 'UNKNOWN'])),
+    [stocks]
+  );
 
   const addHolding = (ticker) => {
     // The first holding takes the whole portfolio, because a basket where
@@ -295,6 +316,20 @@ export function PortfolioPanel({ portfolio, onRename, onUpdate, onDuplicate, onD
         onRetry={retry}
         hasWeight={holdings.some(h => h.weight > 0)}
       />
+
+      {simulation && (
+        <>
+          <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} />
+          <PortfolioChart
+            simulation={simulation}
+            groupBy={groupBy}
+            onGroupByChange={setGroupBy}
+            sectorOf={sectorOf}
+            sectorsReady={!!stocks}
+            stale={stale || loading}
+          />
+        </>
+      )}
 
       <HoldingsTable
         portfolioId={portfolio.id}
