@@ -35,6 +35,12 @@
  * Negative weights are the one thing refused outright: shorting is not
  * modelled, and coercing -5 to 5 or to 0 would both be inventing an
  * intention nobody expressed.
+ *
+ * **Read-only** drops every control and leaves the numbers: the weights
+ * become text, and the simulated columns are unchanged, because those
+ * were never editable and are the reason somebody was sent the link
+ * (#66). What is gone is gone rather than disabled — a greyed-out
+ * Recompute is an invitation to work out why it will not work.
  */
 import { memo, useState } from 'react';
 import { normaliseWeights, totalWeight } from '../../utils/weights';
@@ -77,6 +83,8 @@ export const HoldingsTable = memo(function HoldingsTable({
   simulation,
   stale,
   onChange,
+  /** A portfolio that is not this browser's to change (#66). */
+  readOnly = false,
   // Rendered at the head of the section rather than after the rows: on a
   // portfolio of any size the bottom of the table is a scroll away, and
   // adding a holding is the one action here that has nothing to do with
@@ -177,26 +185,30 @@ export const HoldingsTable = memo(function HoldingsTable({
           >
             {total}% allocated
           </span>
-          <button
-            onClick={normalize}
-            disabled={holdings.length === 0 || total <= 0 || balanced}
-            className="px-2.5 py-1 text-[12px] font-semibold text-[var(--fg-1)] bg-[var(--bg-2)] border border-[var(--border)] rounded-[var(--radius-sm)] cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-3)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-          >
-            Normalize
-          </button>
-          <button
-            onClick={() => setConfirming(true)}
-            disabled={changes.length === 0}
-            title={
-              changes.length === 0
-                ? 'No weight changes to apply'
-                : 'Save these weights and run the simulation again'
-            }
-            className="px-2.5 py-1 text-[12px] font-semibold text-[var(--success)] bg-[var(--success-soft)] border border-[var(--success-ring)] rounded-[var(--radius-sm)] cursor-pointer transition-colors duration-150 hover:bg-[var(--success-ring)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--success)]"
-          >
-            Recompute
-            {changes.length > 0 && ` (${changes.length})`}
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                onClick={normalize}
+                disabled={holdings.length === 0 || total <= 0 || balanced}
+                className="px-2.5 py-1 text-[12px] font-semibold text-[var(--fg-1)] bg-[var(--bg-2)] border border-[var(--border)] rounded-[var(--radius-sm)] cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-3)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              >
+                Normalize
+              </button>
+              <button
+                onClick={() => setConfirming(true)}
+                disabled={changes.length === 0}
+                title={
+                  changes.length === 0
+                    ? 'No weight changes to apply'
+                    : 'Save these weights and run the simulation again'
+                }
+                className="px-2.5 py-1 text-[12px] font-semibold text-[var(--success)] bg-[var(--success-soft)] border border-[var(--success-ring)] rounded-[var(--radius-sm)] cursor-pointer transition-colors duration-150 hover:bg-[var(--success-ring)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--success)]"
+              >
+                Recompute
+                {changes.length > 0 && ` (${changes.length})`}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -214,9 +226,17 @@ export const HoldingsTable = memo(function HoldingsTable({
           <p className="text-[12.5px] text-[var(--fg-1)] leading-relaxed m-0">
             These weights add up to {total}%. They are ratios rather than a
             budget, so the simulation scales them down to 100% and runs the
-            portfolio you would expect — <strong className="font-bold">Normalize</strong> writes
-            those scaled weights back here, if you would rather read them
-            that way.
+            portfolio you would expect
+            {readOnly ? (
+              '.'
+            ) : (
+              <>
+                {' — '}
+                <strong className="font-bold">Normalize</strong> writes those
+                scaled weights back here, if you would rather read them that
+                way.
+              </>
+            )}
           </p>
         </div>
       )}
@@ -229,7 +249,7 @@ export const HoldingsTable = memo(function HoldingsTable({
 
       {holdings.length === 0 ? (
         <p className="text-[13.5px] text-[var(--fg-2)] leading-relaxed m-0">
-          This portfolio has no holdings yet.
+          {readOnly ? 'This portfolio has no holdings.' : 'This portfolio has no holdings yet.'}
         </p>
       ) : (
         <div className="overflow-x-auto border border-[var(--border)] rounded-[var(--radius-md)]">
@@ -241,7 +261,7 @@ export const HoldingsTable = memo(function HoldingsTable({
                 <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">VALUE</th>
                 <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">RETURN</th>
                 <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">CONTRIBUTION</th>
-                <th scope="col" className="px-3 py-2"><span className="sr-only">Remove</span></th>
+                {!readOnly && <th scope="col" className="px-3 py-2"><span className="sr-only">Remove</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -268,26 +288,30 @@ export const HoldingsTable = memo(function HoldingsTable({
                       )}
                     </td>
                     <Cell>
-                      <span className="inline-flex items-center gap-1">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          inputMode="decimal"
-                          value={drafts[holding.ticker] ?? holding.weight}
-                          onChange={e => setWeight(holding.ticker, e.target.value)}
-                          onKeyDown={e => {
-                            // Escape puts this row back to the weight the
-                            // simulation actually used.
-                            if (e.key === 'Escape') revert(holding.ticker);
-                            if (e.key === 'Enter' && changes.length > 0) setConfirming(true);
-                          }}
-                          aria-label={`Weight of ${holding.ticker}, percent`}
-                          className="w-[68px] h-[28px] px-2 text-right bg-[var(--bg-1)] border rounded-[var(--radius-sm)] font-[var(--font-mono)] text-[12.5px] text-[var(--fg)] outline-none focus:border-[var(--accent-ring)]"
-                          style={{ borderColor: pending ? 'var(--success-ring)' : 'var(--border)' }}
-                        />
-                        <span className="text-[var(--fg-2)]">%</span>
-                      </span>
+                      {readOnly ? (
+                        <span className="text-[var(--fg)]">{holding.weight}%</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={drafts[holding.ticker] ?? holding.weight}
+                            onChange={e => setWeight(holding.ticker, e.target.value)}
+                            onKeyDown={e => {
+                              // Escape puts this row back to the weight the
+                              // simulation actually used.
+                              if (e.key === 'Escape') revert(holding.ticker);
+                              if (e.key === 'Enter' && changes.length > 0) setConfirming(true);
+                            }}
+                            aria-label={`Weight of ${holding.ticker}, percent`}
+                            className="w-[68px] h-[28px] px-2 text-right bg-[var(--bg-1)] border rounded-[var(--radius-sm)] font-[var(--font-mono)] text-[12.5px] text-[var(--fg)] outline-none focus:border-[var(--accent-ring)]"
+                            style={{ borderColor: pending ? 'var(--success-ring)' : 'var(--border)' }}
+                          />
+                          <span className="text-[var(--fg-2)]">%</span>
+                        </span>
+                      )}
                     </Cell>
                     {/* The simulated columns describe the applied weights,
                         so they dim while a run is in flight rather than
@@ -307,17 +331,19 @@ export const HoldingsTable = memo(function HoldingsTable({
                         {run ? signed(run.contribution, v => CURRENCY.format(v)) : '—'}
                       </span>
                     </Cell>
-                    <td className="px-3 py-2.5 text-right">
-                      <button
-                        onClick={() => remove(holding.ticker)}
-                        aria-label={`Remove ${holding.ticker}`}
-                        className="w-7 h-7 grid place-items-center bg-transparent border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--fg-2)] cursor-pointer transition-colors duration-150 hover:text-[var(--danger)] hover:border-[var(--danger-ring)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--danger)]"
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-                          <path d="M18 6 6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </td>
+                    {!readOnly && (
+                      <td className="px-3 py-2.5 text-right">
+                        <button
+                          onClick={() => remove(holding.ticker)}
+                          aria-label={`Remove ${holding.ticker}`}
+                          className="w-7 h-7 grid place-items-center bg-transparent border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--fg-2)] cursor-pointer transition-colors duration-150 hover:text-[var(--danger)] hover:border-[var(--danger-ring)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--danger)]"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                            <path d="M18 6 6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
