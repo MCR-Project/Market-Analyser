@@ -103,7 +103,12 @@ import math
 
 import pandas as pd
 
-from services.market_data import get_closes, get_dividends, tracked_tickers
+from services.market_data import (
+    DataUnavailable,
+    get_closes,
+    get_dividends,
+    tracked_tickers,
+)
 from services.tickers import resolve_ticker
 
 # A ceiling on basket size, so one request cannot ask for an unbounded
@@ -494,20 +499,39 @@ def _normalise_contribution(contribution) -> tuple[float, str | None]:
     return float(amount), frequency
 
 
-def _verify_absent(tickers: list[str]) -> None:
+def _verify_absent(tickers: list[str], window_start: str) -> None:
     """Decide what a holding with no price rows in the window means.
 
-    A typo and a company that had not listed yet look identical from the
-    window's price read alone - both are simply an absent column. The
-    resolver settles it: a real holding has history (starting after the
-    window, which is why it is absent) and is simulated as cash, while a
-    symbol with none is a typo that must not be quietly simulated as a
-    pile of money.
+    Three things look identical from the window's price read alone - all
+    of them are simply an absent column - and they need three different
+    answers. The resolver tells them apart:
 
-    Raises SymbolNotFound naming the ticker; main.py answers 404.
+      - **A typo.** No history at all, so `resolve_ticker` raises
+        SymbolNotFound and main.py answers 404. It must not be quietly
+        simulated as a pile of money.
+      - **A holding that had not listed yet.** Real, with history starting
+        after the window, which is exactly why the window has none of it.
+        Simulated as cash until it lists (#56).
+      - **A holding that should have been priced and was not.** Real, with
+        history reaching back *before* the window started. There is no
+        reading of that where the right answer is cash: the price read
+        failed, and saying so is the only honest option (#86). This used
+        to be the silent case - a portfolio holding one tracked stock and
+        one ETF valued the ETF at zero for the whole run and reported the
+        difference as cash.
+
+    Raises SymbolNotFound (404) for the first and DataUnavailable (503)
+    for the third. The third is retryable because it usually is: the
+    upstream read that should have supplied those prices is what failed.
     """
     for ticker in tickers:
-        resolve_ticker(ticker)
+        resolved = resolve_ticker(ticker)
+        first = resolved.get("firstDate")
+        if first and first < window_start:
+            raise DataUnavailable(
+                f"{ticker} has prices from {first} but none could be read for this "
+                "window - it cannot be valued right now"
+            )
 
 
 def simulate_portfolio(
@@ -581,7 +605,7 @@ def simulate_portfolio(
     # had not listed by the end of the window (cash for the whole run).
     absent = [ticker for ticker in tickers if ticker not in closes.columns]
     if absent:
-        _verify_absent(absent)
+        _verify_absent(absent, closes.index[0].date().isoformat())
         closes = closes.copy()
         for ticker in absent:
             closes[ticker] = float("nan")

@@ -74,10 +74,25 @@ and split events stay as a separate sparse record in the `dividends` and
 daily; one to five years old are weekly OHLC buckets; older than five are
 monthly. A row carries a `granularity` of `D`, `W` or `M`, and a coarse
 row's `date` is its **bucket anchor** — the Monday of the ISO week, or the
-1st of the month — not a trading day. Anything reading a long window is
+1st of the month — not a trading day, while its `close` is the bucket's
+**last** close. Those are different days, which matters to anything
+aligning another series to this one. Anything reading a long window is
 therefore reading buckets, not days, which is why the portfolio simulator
 scales each return by the trading time it actually covers rather than
 assuming one row is one day.
+
+**A basket only partly held in Supabase is completed live.** `get_closes`
+answers from the database where it can, and any requested ticker with no
+rows there — every ETF, since those live in `etfs`, and anything resolved
+live — is fetched from yfinance and put onto the calendar the database
+frame already uses, taking each bucket's last live close. One granularity
+across every column is what keeps a mixed basket comparing like with like;
+the cost is that a holding merged onto a coarse calendar is sampled as
+coarsely as its basket-mates, so it reports slightly less volatility than
+the same holding simulated on its own daily rows. Before this, a partial
+answer was returned short and the simulator read the missing column as a
+holding that had not listed yet — valuing an ETF at zero for a whole run
+(issue #86).
 
 ### Measurements
 
