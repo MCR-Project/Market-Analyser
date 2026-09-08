@@ -552,56 +552,58 @@ class ContributionValidationTests(unittest.TestCase):
 
 class ContributionRouteTests(unittest.TestCase):
     """The wiring: the request model carries the schedule and the response
-    carries it back, and a bad schedule is a 400 rather than a 500."""
+    carries it back, and a bad schedule is a 400 rather than a 500.
+
+    The fake below answers `prices` with the **symbol** in the ticker
+    column, which is what _closes_db pivots on. Answering with a numeric id
+    instead leaves the column named 1, AAPL looks like a holding with no
+    prices, and the whole run sits in cash - which still satisfies every
+    assertion about contributions while proving nothing, and reaches for
+    the network to check whether AAPL is a real symbol. The final-value
+    assertions here exist to make that failure loud rather than silent.
+    """
 
     class _Client:
-        """Read-only stand-in for Supabase, with prices for one ticker."""
+        """Read-only stand-in for Supabase. AAPL on the 5th of each month
+        of 2020, rising 100, 110, 120 … so a contribution buying at a
+        later date buys visibly less."""
 
-        ROWS = {
-            "AAPL": [
-                {"date": f"2020-{month:02d}-05", "close": 100.0 + month, "granularity": "D"}
-                for month in range(1, 13)
-            ],
-        }
+        ROWS = [
+            {"ticker": "AAPL", "date": f"2020-{month:02d}-05", "close": 90.0 + 10 * month}
+            for month in range(1, 13)
+        ]
 
-        def table(self, name):
-            self.name = name
+        def table(self, *_args, **_kwargs):
             return self
 
         def select(self, *_args, **_kwargs):
             return self
 
-        def eq(self, column, value):
-            if column == "symbol":
-                self.symbol = value
+        def eq(self, *_args, **_kwargs):
             return self
 
-        def in_(self, _column, values):
-            self.symbols = values
+        def in_(self, *_args, **_kwargs):
             return self
 
-        def gte(self, *_args):
+        def gte(self, *_args, **_kwargs):
             return self
 
-        def lte(self, *_args):
+        def lte(self, *_args, **_kwargs):
             return self
 
         def order(self, *_args, **_kwargs):
             return self
 
-        def range(self, *_args):
+        def range(self, *_args, **_kwargs):
             return self
 
-        def limit(self, *_args):
+        def limit(self, *_args, **_kwargs):
             return self
 
         def execute(self):
             from types import SimpleNamespace
 
-            if self.name == "ticker":
-                return SimpleNamespace(data=[{"id": 1, "symbol": "AAPL", "name": "Apple"}])
-            rows = [{**row, "ticker": 1} for row in self.ROWS["AAPL"]]
-            return SimpleNamespace(data=rows)
+            return SimpleNamespace(data=self.ROWS)
 
     def _post(self, body):
         with patch("services.market_data.get_client_optional", return_value=self._Client()):
@@ -623,16 +625,29 @@ class ContributionRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["contribution"], {"amount": 500.0, "frequency": "monthly"})
+        # Eleven payments: every month after the one the window opens in.
         self.assertEqual(body["metrics"]["contributed"], 11 * 500)
         self.assertEqual(body["metrics"]["totalInvested"], 10_000 + 11 * 500)
         self.assertEqual(len(body["invested"]), len(body["dates"]))
+        self.assertEqual(body["invested"][-1], body["metrics"]["totalInvested"])
+        # The holding was actually priced and actually bought: nothing is
+        # left in cash, and the price rose 100 to 210 over the window.
+        self.assertEqual(body["cash"], [0.0] * len(body["dates"]))
+        self.assertEqual(body["metrics"]["totalReturn"], 110.0)
+        self.assertGreater(body["metrics"]["gain"], 0)
 
     def test_omitting_the_schedule_leaves_it_off(self):
         resp = self._post(self.BODY)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertIsNone(resp.json()["contribution"])
-        self.assertEqual(resp.json()["metrics"]["contributed"], 0.0)
+        body = resp.json()
+        self.assertIsNone(body["contribution"])
+        self.assertIsNone(body["unitValue"])
+        self.assertEqual(body["metrics"]["contributed"], 0.0)
+        self.assertEqual(body["metrics"]["totalInvested"], 10_000)
+        # 100 to 210 is 110%, on the lump sum alone.
+        self.assertEqual(body["metrics"]["finalValue"], 21_000.0)
+        self.assertEqual(body["metrics"]["gain"], 11_000.0)
 
     def test_an_unusable_schedule_is_a_400_naming_it(self):
         resp = self._post({
