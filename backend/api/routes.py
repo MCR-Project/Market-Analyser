@@ -11,13 +11,15 @@ Endpoints:
   GET /api/etf/{etf_id}          — full ETF detail with holdings
   GET /api/stock/{ticker}        — single stock metadata
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
-  GET /api/tickers/search?q=      — search the tracked universe
-  GET /api/tickers/{symbol}       — resolve one symbol, tracked or not
+  GET /api/tickers/search?q=     — search the tracked universe
+  GET /api/tickers/{symbol}      — resolve one symbol, tracked or not
   GET /api/series/{ticker}       — historical price series, by period or
                                    by explicit start/end window
   GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings
   GET /api/sectors/{etf_id}      — sector weight breakdown
-  POST /api/portfolio/simulate   — value a basket of tickers over a window
+  POST /api/portfolio/simulate   — value a basket of tickers over a window,
+                                   with optional rebalancing and recurring
+                                   contributions
 """
 
 from fastapi import APIRouter, Query, HTTPException
