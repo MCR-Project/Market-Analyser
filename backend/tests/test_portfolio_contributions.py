@@ -56,7 +56,15 @@ def frame(columns: dict, dates: list[str]) -> pd.DataFrame:
 
 
 def run(closes, holdings, value=1000.0, rebalance="none", contribution=None, **kwargs):
-    with patch("services.portfolio.get_closes", return_value=closes):
+    # Dividends are read separately from the prices (#68), so patching
+    # only the price read would leave the simulation reaching for Supabase
+    # - slow wherever it answers, and a different run depending on whether
+    # it did. Silenced here; income has its own file.
+    with (
+        patch("services.portfolio.get_closes", return_value=closes),
+        patch("services.portfolio.get_dividends", return_value={}),
+        patch("services.portfolio.tracked_tickers", return_value=set()),
+    ):
         return simulate_portfolio(
             holdings, value=value, start="2019-01-01", end="2023-12-31",
             rebalance=rebalance, contribution=contribution, **kwargs

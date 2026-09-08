@@ -884,6 +884,90 @@ def _closes_db(
     return closes
 
 
+def tracked_tickers(tickers: list[str]) -> set[str]:
+    """Which of `tickers` the `ticker` table knows about.
+
+    The distinction matters wherever an absent row could mean two things.
+    A tracked holding with no dividend rows genuinely paid nothing; an
+    untracked one - every ETF, since those live in `etfs` and never get a
+    `ticker` row, and any symbol resolved live - simply has no record here,
+    which is not the same claim at all. Reporting one as the other would
+    tell somebody SPY pays no dividend.
+
+    An empty set when Supabase is unreachable: nothing is known to be
+    tracked, so nothing is claimed about it.
+    """
+    if not tickers:
+        return set()
+    db = get_client_optional()
+    if db is None:
+        return set()
+    try:
+        rows = paginated_select(
+            lambda: db.table("ticker").select("id").in_("id", tickers).order("id")
+        )
+    except Exception:
+        return set()
+    return {row["id"] for row in rows if row.get("id")}
+
+
+def get_dividends(
+    tickers: list[str], start: str | None = None, end: str | None = None
+) -> dict[str, list[tuple[str, float]]]:
+    """Dividend events per ticker over [start, end], oldest first.
+
+    `dividends` is a sparse event table (sql/001_optimize_prices_storage.sql):
+    one row per ex-date per ticker, holding the cash amount per share as it
+    was actually declared. It is deliberately *not* adjusted - `prices`
+    carries adjusted closes, so the return already includes these, and
+    adjusting them again would be counting the same money twice with the
+    arithmetic to match.
+
+    There is no live fallback. yfinance could answer for a symbol the DB
+    has never seen, but a number that sometimes comes from a record and
+    sometimes from a network call is a number nobody can reconcile; a
+    caller wanting to know whether the silence is real asks
+    `tracked_tickers`. A ticker with no events in the window is absent from
+    the result rather than present with an empty list, so a caller has to
+    decide what absence means rather than being handed a zero.
+    """
+    if not tickers:
+        return {}
+    db = get_client_optional()
+    if db is None:
+        return {}
+
+    def build_query():
+        query = (
+            db.table("dividends")
+            .select("ticker,date,dividends")
+            .in_("ticker", tickers)
+            .order("date")
+            .order("ticker")
+        )
+        return _window_filtered(query, start, end)
+
+    try:
+        rows = paginated_select(build_query)
+    except Exception:
+        return {}
+
+    events: dict[str, list[tuple[str, float]]] = {}
+    for row in rows:
+        symbol, when, amount = row.get("ticker"), row.get("date"), row.get("dividends")
+        if not symbol or not when or amount is None:
+            continue
+        amount = float(amount)
+        # A zero row is not an event. The table is meant to hold only
+        # non-zero ones, but a zero would otherwise read as a payment.
+        if amount <= 0:
+            continue
+        events.setdefault(symbol, []).append((str(when), amount))
+    for series in events.values():
+        series.sort()
+    return events
+
+
 def get_closes(
     tickers: list[str],
     period: str | None = None,

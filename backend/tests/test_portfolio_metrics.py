@@ -46,7 +46,15 @@ def frame(columns: dict, dates: list[str]) -> pd.DataFrame:
 
 
 def run(closes, holdings, value=1000.0, rebalance="none"):
-    with patch("services.portfolio.get_closes", return_value=closes):
+    # Dividends are read separately from the prices (#68), so patching
+    # only the price read would leave the simulation reaching for Supabase
+    # - slow wherever it answers, and a different run depending on whether
+    # it did. Silenced here; income has its own file.
+    with (
+        patch("services.portfolio.get_closes", return_value=closes),
+        patch("services.portfolio.get_dividends", return_value={}),
+        patch("services.portfolio.tracked_tickers", return_value=set()),
+    ):
         return simulate_portfolio(
             holdings, value=value, start="2015-01-01", end="2024-12-31",
             rebalance=rebalance,
@@ -419,6 +427,9 @@ class MetricsRouteTests(unittest.TestCase):
             # on every run, so a caller reads the same shape whether or not
             # anything was ever paid in.
             "contributed", "totalInvested", "gain", "moneyWeightedReturn",
+            # What was paid out rather than what the price did (issue #68),
+            # likewise present whether or not anything pays.
+            "dividendIncome", "dividendYield", "incomeUnknownFor",
         })
         # Nothing was paid in beyond the opening amount, so the two
         # families of number agree.

@@ -73,6 +73,16 @@ as much as the convention behind it:
     experiences. A single holding can fall much further without the
     portfolio noticing.
 
+  - **Dividend income is reported, never added.** `prices` stores
+    split- and dividend-adjusted closes (issue #13), so every return here
+    is already a total return: the income is in the value, spent the
+    moment it arrived on more of the same holding. Adding the cash on top
+    would count it twice. It is computed from the sparse `dividends` event
+    table and reported beside the run as the answer to a different
+    question - how much of this came from being paid rather than from the
+    price moving - and a holding whose dividends are not on record reports
+    that it does not know rather than reporting nothing.
+
   - **A holding's contribution is its final value less every dollar put
     into it.** Once a rebalance starts moving money between holdings, a
     final value says nothing about which holding earned it; the flows
@@ -93,7 +103,7 @@ import math
 
 import pandas as pd
 
-from services.market_data import get_closes
+from services.market_data import get_closes, get_dividends, tracked_tickers
 from services.tickers import resolve_ticker
 
 # A ceiling on basket size, so one request cannot ask for an unbounded
@@ -346,6 +356,8 @@ def _metrics(
     units: list[float],
     flows: list[tuple[pd.Timestamp, float]],
     contributed: float,
+    income: dict[str, float],
+    unknown: list[str],
 ) -> dict:
     """How the run did, as one object beside the series rather than
     interleaved into it - a summary is read whole, not walked date by
@@ -382,6 +394,23 @@ def _metrics(
         # What the portfolio made, as opposed to what was paid into it.
         "gain": round(final_value - invested, MONEY_DP),
         "moneyWeightedReturn": _money_weighted_return(flows),
+        # Income over the window, from the holdings the `dividends` table
+        # can speak for. Never added to `finalValue`: the adjusted closes
+        # already spent it (issue #13), and adding it would count the same
+        # money twice.
+        "dividendIncome": round(sum(income.values()), MONEY_DP),
+        # As a percentage of every dollar paid in, which for a portfolio
+        # funded once is its starting value and for one paid into monthly
+        # is the whole of it. Dividing by the opening amount alone would
+        # credit five years of deposits with the income they earned while
+        # pretending they were never made.
+        "dividendYield": (
+            round(sum(income.values()) / invested * 100, PERCENT_DP) if invested > 0 else None
+        ),
+        # Holdings the income figure could not include, named rather than
+        # counted: a total that quietly omits two of five holdings is worse
+        # than one that says which two.
+        "incomeUnknownFor": unknown,
     }
 
 
@@ -593,6 +622,18 @@ def simulate_portfolio(
     first_price: dict[str, float | None] = {ticker: None for ticker in tickers}
     last_price: dict[str, float | None] = {ticker: None for ticker in tickers}
 
+    # Dividends over exactly the window the run turned out to cover, and
+    # which of these holdings the record can speak for at all. Read here
+    # rather than per holding: one query for the basket, like the prices.
+    window_start = closes.index[0].date().isoformat()
+    window_end = closes.index[-1].date().isoformat()
+    events = get_dividends(tickers, start=window_start, end=window_end)
+    on_record = tracked_tickers(tickers)
+    income = {ticker: 0.0 for ticker in tickers}
+    # How far through each holding's event list the walk has got. The
+    # lists are sorted, so each is consumed once across the whole run.
+    next_event = {ticker: 0 for ticker in tickers}
+
     previous = None
     for timestamp, row in closes.iterrows():
         prices = {ticker: row[ticker] for ticker in tickers}
@@ -601,6 +642,27 @@ def simulate_portfolio(
             for ticker, price in prices.items()
             if price == price and price > 0  # price == price rejects NaN
         }
+
+        # Dividends whose ex-date has been reached, paid on the shares held
+        # going into this row - that is, before anything this row does.
+        # Holding *before* the ex-date is what earns the payment, so a
+        # dividend dated on the window's own first row pays nothing: those
+        # shares are bought at that close, after the fact.
+        #
+        # This only counts. It does not touch `invested`, `idle` or any
+        # series, because the adjusted closes have already spent this money
+        # on more of the same holding (issue #13) - the value is right, and
+        # the income is a separate reading of the same run.
+        for ticker in tickers:
+            series = events.get(ticker)
+            if not series:
+                continue
+            held = invested[ticker]
+            index = next_event[ticker]
+            while index < len(series) and series[index][0] <= timestamp.date().isoformat():
+                income[ticker] += held * series[index][1]
+                index += 1
+            next_event[ticker] = index
 
         # Anything holding cash that can now be bought, is bought - at this
         # date's close, so the conversion moves no money.
@@ -700,7 +762,11 @@ def simulate_portfolio(
         # were no contributions, because then it is `total` again and
         # sending a copy would say there was a difference.
         "unitValue": None if units is totals else [round(u, MONEY_DP) for u in units],
-        "metrics": _metrics(totals, dates, units, cash_flows, contributed),
+        "metrics": _metrics(
+            totals, dates, units, cash_flows, contributed,
+            income={t: v for t, v in income.items() if t in on_record},
+            unknown=[t for t in tickers if t not in on_record],
+        ),
         "holdings": [
             {
                 "ticker": ticker,
@@ -733,6 +799,17 @@ def simulate_portfolio(
                 # Rebalancing moves money between holdings, so a final
                 # value on its own says nothing about who earned it.
                 "contribution": round(values[ticker][-1] - flows[ticker], MONEY_DP),
+                # Cash paid out by this holding over the window, on the
+                # shares held at each ex-date. Already inside `finalValue`
+                # via the adjusted closes, so it is a reading of the run
+                # rather than something to add to it.
+                #
+                # None, not 0.0, for a holding the `dividends` table has no
+                # record of - every ETF, and any symbol resolved live.
+                # "Paid nothing" and "not on record here" are different
+                # claims, and answering the second with the first would say
+                # SPY pays no dividend.
+                "income": round(income[ticker], MONEY_DP) if ticker in on_record else None,
             }
             for ticker, share in weights
         ],

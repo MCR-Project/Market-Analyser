@@ -178,6 +178,36 @@ the stacked chart so the gap to the top of the stack is the gain, and adds
 a money-weighted column to the comparison table as soon as any line is
 funded this way.
 
+### Dividends
+
+**Every return the simulator reports is already a total return.** `prices`
+stores split- and dividend-adjusted closes (issue #13 and
+`sql/003_store_adjusted_prices.sql`), so income is inside every value —
+treated as reinvested in more of the same holding the moment it arrived.
+That is correct but invisible, which is why the income is also reported
+on its own: `metrics.dividendIncome`, `metrics.dividendYield`, and an
+`income` figure per holding.
+
+It is **reported, never added**. Adding the cash on top of a value that
+already contains it would count the same money twice, and the UI says so
+rather than leaving a reader to wonder why the two do not sum.
+
+Income is computed from the sparse `dividends` event table — one row per
+ex-date per ticker, holding the cash amount as declared, deliberately
+unadjusted. A dividend is paid on **the shares held at the last row before
+its ex-date**, which is what the holder owned going into it. That is not
+the same as the shares held at the start: buy and hold lets a position
+drift, a rebalance resets it, and a contribution grows it, so the same
+dividend schedule pays three different amounts under the three models.
+
+**Silence is not zero.** A tracked holding with no dividend rows in the
+window genuinely paid nothing and reports `0`. A holding with no row in
+the `ticker` table at all — every ETF, since those live in `etfs`, and
+anything resolved live — reports `null` and is named in
+`metrics.incomeUnknownFor`. Answering the second case with the first would
+state, in a figure, that SPY pays no dividend. The value and the return
+still include that income; only the income figure cannot see it.
+
 ## Frontend
 
 ```bash

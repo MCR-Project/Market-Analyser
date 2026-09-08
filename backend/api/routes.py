@@ -328,6 +328,15 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
     return, final value, share of the finished portfolio and dollar
     contribution to its gain.
 
+    Dividend income is reported and never added: `prices` holds adjusted
+    closes (issue #13), so every return here is already a total return and
+    the income is inside the value. `metrics.dividendIncome`,
+    `metrics.dividendYield` and each holding's `income` answer the separate
+    question of how much came from being paid rather than from the price
+    moving. A holding the `dividends` table has no record of - every ETF,
+    and anything resolved live - reports null rather than zero, and is
+    named in `metrics.incomeUnknownFor`.
+
     An optional `contribution` of `{amount, frequency}` pays money in on
     the first row of every new month, quarter or year after the start.
     Omit it for a single lump sum, which is the default. Once money keeps
