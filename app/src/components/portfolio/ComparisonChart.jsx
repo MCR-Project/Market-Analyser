@@ -31,7 +31,9 @@
  * A benchmark is drawn dashed. It is not a portfolio anybody owns here,
  * and the eye should be able to tell without reading the legend.
  */
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { useChartBrush } from '../../hooks/useChartBrush';
+import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
 
 const W = 360;
 const PAD = 4;
@@ -112,21 +114,12 @@ function buildSeries(runs, mode) {
   return { dates, series, min, max: max === min ? min + 1 : max };
 }
 
-export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
+export const ComparisonChart = memo(function ComparisonChart({ runs, stale, onSelectWindow }) {
   const [mode, setMode] = useState('percent');
   const [hoverIdx, setHoverIdx] = useState(null);
 
   const { dates, series, min, max } = useMemo(() => buildSeries(runs, mode), [runs, mode]);
 
-  // Every line failed, so there is no axis to draw one against. The
-  // summary table below still lists each line and what happened to it.
-  if (dates.length === 0) {
-    return (
-      <p className="text-[12.5px] text-[var(--warning)] leading-relaxed m-0 mb-4">
-        None of these lines could be simulated over this window.
-      </p>
-    );
-  }
 
   // Positioned by date, not by place in the merged list: a line sampled
   // weekly has a quarter of the points of a daily one over the same
@@ -148,19 +141,39 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
       .join(" "),
   }));
 
-  const onMouseMove = (event) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    const relative = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
-    const target = axisStart + ((relative * W - PAD) / (W - 2 * PAD)) * axisSpan;
-    // The nearest date in time, since the axis is time and the dates on
-    // it are not evenly spread.
+  // The nearest date in time to a position across the plot, since the
+  // axis is time and the dates on it are not evenly spread.
+  const resolve = useCallback((fraction) => {
+    if (dates.length === 0) return null;
+    const target = axisStart + ((fraction * W - PAD) / (W - 2 * PAD)) * axisSpan;
     let nearest = 0;
     let best = Infinity;
     dates.forEach((date, i) => {
       const distance = Math.abs(time(date) - target);
       if (distance < best) { best = distance; nearest = i; }
     });
-    setHoverIdx(nearest);
+    return { index: nearest, date: dates[nearest] };
+  }, [dates, axisStart, axisSpan]);
+
+  const brush = useChartBrush({ resolve, onSelect: onSelectWindow || (() => {}) });
+
+  // Every line failed, so there is no axis to draw one against. Checked
+  // after the hooks above rather than before them: an early return has to
+  // come after every hook a render can make, or the next render makes a
+  // different set.
+  if (dates.length === 0) {
+    return (
+      <p className="text-[12.5px] text-[var(--warning)] leading-relaxed m-0 mb-4">
+        None of these lines could be simulated over this window.
+      </p>
+    );
+  }
+
+  const onMouseMove = (event) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const relative = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+    const found = resolve(relative);
+    if (found) setHoverIdx(found.index);
   };
 
   const at = hoverIdx ?? dates.length - 1;
@@ -249,7 +262,9 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
             />
           ))}
 
-          {hoverIdx !== null && (
+          <BrushShading selection={brush.selection} width={W} height={H} />
+
+          {hoverIdx !== null && !brush.active && (
             <line
               x1={x(at)} x2={x(at)} y1={0} y2={H}
               stroke="var(--fg)" strokeWidth={1} strokeDasharray="3 2" opacity={0.5}
@@ -261,11 +276,14 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
             x={0} y={0} width={W} height={H} fill="transparent"
             onMouseMove={onMouseMove}
             onMouseLeave={() => setHoverIdx(null)}
-            style={{ cursor: 'crosshair' }}
+            {...(onSelectWindow ? brush.handlers : {})}
+            style={{ cursor: 'crosshair', ...(onSelectWindow ? brush.handlers.style : {}) }}
           />
         </svg>
 
-        {hoverIdx !== null && (
+        <BrushLabel selection={brush.selection} />
+
+        {hoverIdx !== null && !brush.active && (
           <div
             className="absolute top-4 bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-md)] px-3 py-2 pointer-events-none shadow-[var(--shadow-lg)] whitespace-nowrap z-20"
             style={
@@ -299,6 +317,12 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale }) {
           <span>{dates[0]}</span>
           <span>{dates[dates.length - 1]}</span>
         </div>
+
+        {brush.refused && (
+          <p role="status" className="text-[11.5px] text-[var(--warning)] m-0 mt-1.5">
+            That was too short a stretch to simulate — drag across a wider one.
+          </p>
+        )}
       </div>
 
       <ul className="list-none flex flex-wrap gap-x-4 gap-y-1.5 m-0 mt-3 p-0">

@@ -16,6 +16,11 @@
  * basket reaches is a fact about its holdings. It asks the backend for
  * everything and reports the window that came back, which is why the
  * boundary is shown rather than assumed.
+ *
+ * Dragging across the chart writes here too (#65), which is why Reset
+ * exists: a drag is easy to do by accident and fiddly to undo by hand,
+ * so the window it replaced is kept until the window is chosen some
+ * other way.
  */
 import { useState } from 'react';
 import { PRESETS, today, windowProblem } from '../../hooks/useSimulationWindow';
@@ -28,6 +33,8 @@ export function WindowControls({
   resolvedEnd,
   onSelectPreset,
   onSetWindow,
+  canReset,
+  onReset,
 }) {
   // What is in the boxes, which is not the window until it makes sense as
   // one. Null means "showing whatever the window resolved to".
@@ -80,6 +87,16 @@ export function WindowControls({
             })}
           </div>
         </div>
+
+        {canReset && (
+          <button
+            onClick={onReset}
+            className="h-[30px] px-3 text-[12px] font-semibold text-[var(--fg-1)] bg-[var(--bg-2)] border border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-3)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+            title="Back to the window in force before the drag"
+          >
+            Reset
+          </button>
+        )}
 
         <div className="flex items-end gap-2">
           <label>
