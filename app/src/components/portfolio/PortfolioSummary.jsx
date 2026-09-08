@@ -23,6 +23,15 @@
  * With a single lump sum the two questions have the same answer, and
  * printing it twice under two headings would imply a distinction that is
  * not there.
+ *
+ * **Dividend income is a sentence, not a tile** (#68). Every figure above
+ * is already a total return — `prices` stores adjusted closes (#13), so
+ * the income was spent on more of the same holding the moment it arrived.
+ * The thing worth saying is therefore a *relationship*: how much of what
+ * is already there came from being paid rather than from the price
+ * moving, and that it is not to be added on top. A tile reading
+ * "DIVIDENDS $1,234" beside "FINAL VALUE" invites exactly the addition
+ * the note exists to prevent.
  */
 import { memo } from 'react';
 
@@ -50,6 +59,50 @@ function Stat({ label, value, tone, title }) {
         {value}
       </div>
     </div>
+  );
+}
+
+/**
+ * Why the returns above are already total returns, and what the income
+ * inside them came to.
+ *
+ * Always shown, including when the answer is nothing: "these are total
+ * returns and this portfolio paid no income" is a useful thing to learn,
+ * and a note that appeared only for payers would leave everyone else
+ * wondering whether dividends were counted at all.
+ */
+function DividendNote({ metrics }) {
+  const income = metrics.dividendIncome;
+  if (income === null || income === undefined) return null;
+  const unknown = metrics.incomeUnknownFor || [];
+
+  return (
+    <p className="text-[12px] text-[var(--fg-2)] leading-relaxed m-0 px-5 pb-4 -mt-1">
+      <strong className="font-bold text-[var(--fg-1)]">These are total returns.</strong>{' '}
+      Prices here are dividend-adjusted, so the figures above already
+      include income —{' '}
+      {income > 0 ? (
+        <>
+          <strong className="font-bold text-[var(--fg-1)]">{CURRENCY.format(income)}</strong>{' '}
+          of it over this window, {percent(metrics.dividendYield)} of everything
+          paid in. It is counted where it was reinvested rather than added on
+          top, which would be the same money twice.
+        </>
+      ) : (
+        <>and over this window there was none to include.</>
+      )}
+      {unknown.length > 0 && (
+        <>
+          {' '}
+          <span className="text-[var(--warning)]">
+            {unknown.join(', ')} {unknown.length === 1 ? 'is a fund whose' : 'are funds whose'}{' '}
+            dividends are not on record here, so {unknown.length === 1 ? 'its' : 'their'}{' '}
+            income is missing from that figure — the value and the return still
+            include it.
+          </span>
+        </>
+      )}
+    </p>
   );
 }
 
@@ -107,6 +160,8 @@ export const PortfolioSummary = memo(function PortfolioSummary({ metrics, stale 
           }
         />
       </div>
+
+      <DividendNote metrics={metrics} />
 
       {funded && (
         <>

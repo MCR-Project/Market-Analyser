@@ -43,6 +43,12 @@
  * modelled, and coercing -5 to 5 or to 0 would both be inventing an
  * intention nobody expressed.
  *
+ * An INCOME column appears only when the run found some (#68). It is
+ * money the holding paid out, already inside its VALUE via the adjusted
+ * closes, so it sits at the end of the row rather than beside the value
+ * it is part of. A dash means the holding is not on record here — every
+ * ETF — which is a different answer from the $0 a tracked non-payer gets.
+ *
  * **Read-only** drops every control and leaves the numbers: the weights
  * become text, and the simulated columns are unchanged, because those
  * were never editable and are the reason somebody was sent the link
@@ -139,6 +145,11 @@ export const HoldingsTable = memo(function HoldingsTable({
 
   const byTicker = new Map((simulation?.holdings || []).map(h => [h.ticker, h]));
   const windowStart = simulation?.start || null;
+  // Nothing paid and nothing unknown means a column of zeroes, which is
+  // width spent to say what the note above the table already said.
+  const showIncome = (simulation?.holdings || []).some(
+    h => h.income === null || h.income > 0
+  );
 
   const setWeight = (ticker, text) => {
     setDrafts(current => ({ ...current, [ticker]: text }));
@@ -274,6 +285,15 @@ export const HoldingsTable = memo(function HoldingsTable({
                 >
                   GAIN
                 </th>
+                {showIncome && (
+                  <th
+                    scope="col"
+                    className="eyebrow text-right px-3 py-2 font-normal"
+                    title="Dividends paid on the shares held at each ex-date, already inside this holding's value"
+                  >
+                    INCOME
+                  </th>
+                )}
                 {!readOnly && <th scope="col" className="px-3 py-2"><span className="sr-only">Remove</span></th>}
               </tr>
             </thead>
@@ -344,6 +364,23 @@ export const HoldingsTable = memo(function HoldingsTable({
                         {run ? signed(run.contribution, v => CURRENCY.format(v)) : '—'}
                       </span>
                     </Cell>
+                    {showIncome && (
+                      <Cell>
+                        <span
+                          className="text-[var(--fg-1)]"
+                          style={{ opacity: stale ? 0.5 : 1 }}
+                          title={
+                            run && run.income === null
+                              ? `${holding.ticker} is not in the tracked universe, so its dividends are not on record here`
+                              : undefined
+                          }
+                        >
+                          {run && run.income !== null && run.income !== undefined
+                            ? CURRENCY.format(run.income)
+                            : '—'}
+                        </span>
+                      </Cell>
+                    )}
                     {!readOnly && (
                       <td className="px-3 py-2.5 text-right">
                         <button
