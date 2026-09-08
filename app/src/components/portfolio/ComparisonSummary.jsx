@@ -8,6 +8,13 @@
  * A line whose run failed keeps its row and says so, rather than being
  * dropped — a missing row would read as "not compared" when what happened
  * was "could not be priced".
+ *
+ * A money-weighted column appears as soon as any line is funded by
+ * contributions (#67), and only then. RETURN and CAGR are always
+ * time-weighted — they describe the holdings, not the account — which is
+ * the difference the note under the table exists to name. With every line
+ * funded by a single lump sum the two are the same number, and a second
+ * column of it would invent a distinction.
  */
 import { memo } from 'react';
 
@@ -31,7 +38,10 @@ function tone(value) {
 }
 
 export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }) {
+  const funded = runs.some(run => (run.simulation?.metrics?.contributed || 0) > 0);
+
   return (
+    <>
     <div
       className="overflow-x-auto border border-[var(--border)] rounded-[var(--radius-md)] mb-6"
       style={{ opacity: stale ? 0.6 : 1, transition: 'opacity 120ms' }}
@@ -45,6 +55,9 @@ export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }
             <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">CAGR</th>
             <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">VOLATILITY</th>
             <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">MAX DRAWDOWN</th>
+            {funded && (
+              <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">MONEY-WEIGHTED</th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -73,9 +86,14 @@ export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }
                     <td className="px-3 py-2.5 font-[var(--font-mono)] text-[12.5px] text-right" style={{ color: tone(metrics.maxDrawdown?.value) }}>
                       {percent(metrics.maxDrawdown?.value, { signed: true })}
                     </td>
+                    {funded && (
+                      <td className="px-3 py-2.5 font-[var(--font-mono)] text-[12.5px] text-right" style={{ color: tone(metrics.moneyWeightedReturn) }}>
+                        {percent(metrics.moneyWeightedReturn, { signed: true })}
+                      </td>
+                    )}
                   </>
                 ) : (
-                  <td colSpan={5} className="px-3 py-2.5 text-[12.5px] text-right text-[var(--warning)]">
+                  <td colSpan={funded ? 6 : 5} className="px-3 py-2.5 text-[12.5px] text-right text-[var(--warning)]">
                     {run.error ? 'could not be simulated over this window' : 'simulating…'}
                   </td>
                 )}
@@ -85,5 +103,17 @@ export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }
         </tbody>
       </table>
     </div>
+    {funded && (
+      <p className="text-[12px] text-[var(--fg-2)] leading-relaxed m-0 -mt-4 mb-6">
+        <strong className="font-bold text-[var(--fg-1)]">Return</strong> and{' '}
+        <strong className="font-bold text-[var(--fg-1)]">CAGR</strong> are
+        time-weighted: contributions are taken out before they are measured,
+        so they describe the holdings rather than the account growing.{' '}
+        <strong className="font-bold text-[var(--fg-1)]">Money-weighted</strong>{' '}
+        is the rate the money itself earned, counting when each payment
+        arrived.
+      </p>
+    )}
+    </>
   );
 });

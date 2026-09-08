@@ -189,6 +189,10 @@ export function CreatePortfolioDialog({ portfolios, onCreate, onClose }) {
         holdings: copySource.holdings.map(h => ({ ...h })),
         value: copySource.value,
         rebalance: copySource.rebalance,
+        // How it is funded is part of what the portfolio is, so a copy
+        // that dropped the schedule would simulate differently from the
+        // thing it says it is a copy of.
+        contribution: copySource.contribution && { ...copySource.contribution },
         source: { kind: 'portfolio', id: copySource.id, name: copySource.name },
       });
     } else {

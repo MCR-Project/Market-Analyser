@@ -31,11 +31,32 @@ The model, in the order the decisions were made:
     cash converts at exactly that price, the portfolio's total does not
     move on the day it happens.
 
+  - **Contributions are optional, and land on the first row of a new
+    period** - the same definition a rebalance uses, and for the same
+    reason: the 1st of a month is often not a trading day, and an old
+    enough window has no daily rows at all. A contribution is spread
+    across the target weights at that row's prices, and any part of it
+    belonging to a holding that has not listed waits in cash exactly as
+    the opening allocation does. The window's first row is the opening
+    lump sum, never a contribution, so a year of monthly contributions is
+    the twelve times money arrived *after* the start.
+
 How the run is then scored, in one place because a number is only worth
 as much as the convention behind it:
 
   - **Returns are simple, not logarithmic**, taken between consecutive
     rows of the run's own calendar.
+
+  - **Performance is time-weighted; the account is money-weighted.** A
+    deposit is not a gain. Paying $100 into a $1,000 portfolio moves the
+    total 10% on a day the market did nothing, and left alone that flows
+    straight into the volatility, the drawdown and the return. So every
+    metric describing *the portfolio* - total return, CAGR, volatility,
+    drawdown - is computed on a flow-free unit value that only moves when
+    prices do, while the money-weighted return (IRR) answers the different
+    question of what the money itself earned given when it arrived. With
+    no contributions the unit value is the total, and the two questions
+    have the same answer.
 
   - **A year is 365.25 days.** CAGR compounds over the calendar time the
     window actually covers, so the same year answered in twelve monthly
@@ -82,6 +103,10 @@ MAX_HOLDINGS = 100
 
 # How often the target weights are restored. "none" is buy and hold.
 REBALANCE_FREQUENCIES = ("none", "monthly", "quarterly", "yearly")
+
+# How often money is paid in, when it is. There is no "none" here: a
+# contribution is absent by being absent, and an amount of zero is off.
+CONTRIBUTION_FREQUENCIES = ("monthly", "quarterly", "yearly")
 
 # Money is reported to the cent. Each holding's value is rounded, and the
 # total is summed from those rounded parts rather than computed alongside
@@ -177,6 +202,118 @@ def _cagr(totals: list[float], dates: list[str]) -> float | None:
     return round((growth ** (DAYS_PER_YEAR / days) - 1) * 100, PERCENT_DP)
 
 
+def _unit_values(totals: list[float], inflows: list[float]) -> list[float]:
+    """The total with the deposits taken back out of it.
+
+    A contribution is not a gain. Paying $100 into a $1,000 portfolio
+    takes the total to $1,100 on a day the market did nothing, and any
+    metric read straight off the total records that as a 10% day - which
+    then lands in the volatility, in the drawdown, and in the return.
+
+    So each step is measured against the money that was actually working
+    before it: the row's total less whatever arrived that day, over the
+    previous row's total. Chaining those steps gives a series that starts
+    where the portfolio started and only ever moves because prices did -
+    the standard time-weighted construction, in the one place every metric
+    reads from.
+
+    Returned as `totals` itself when nothing was ever paid in, so a run
+    without contributions is not merely close to the old result but the
+    same object.
+    """
+    if not any(inflows):
+        return totals
+
+    units = [totals[0]]
+    for i in range(1, len(totals)):
+        previous = totals[i - 1]
+        # A portfolio worth nothing has no proportion left to grow by, and
+        # dividing by it would invent one. It stays where it is.
+        if previous <= 0:
+            units.append(units[-1])
+            continue
+        units.append(units[-1] * (totals[i] - inflows[i]) / previous)
+    return units
+
+
+def _npv(rate: float, flows: list[tuple[pd.Timestamp, float]]) -> float:
+    """Present value of `flows` at `rate`, discounting by calendar time.
+
+    The same 365.25-day year CAGR compounds over, so the two annual rates
+    are answers to different questions rather than to different calendars.
+    A rate close to -100% raises the discount factor of a distant flow to
+    an enormous power; that overflows to infinity rather than raising, and
+    infinity is the correct end of the bracket the search below wants.
+    """
+    origin = flows[0][0]
+    total = 0.0
+    for timestamp, amount in flows:
+        years = (timestamp - origin).days / DAYS_PER_YEAR
+        try:
+            total += amount / (1 + rate) ** years
+        except OverflowError:
+            return math.inf if amount > 0 else -math.inf
+    return total
+
+
+def _money_weighted_return(flows: list[tuple[pd.Timestamp, float]]) -> float | None:
+    """The annualised rate at which the money itself grew, as a percentage.
+
+    This is the internal rate of return: the single annual rate that makes
+    every dollar paid in, discounted from the day it arrived, add up to
+    what the portfolio is worth at the end. It is the number a plain total
+    return cannot give once money keeps arriving - $1,000 that became
+    $1,100 after a $100 deposit last week has not returned 10%.
+
+    `flows` is signed from the holder's point of view: negative going in,
+    and one positive flow at the end for what it is all worth. That shape
+    has exactly one sign change, so there is exactly one rate that solves
+    it, and bisection finds it without needing a derivative or a starting
+    guess to be lucky. NPV falls as the rate rises, so the bracket is
+    widened upward until it does turn negative.
+
+    None when the question does not arise - nothing was paid in, or no
+    time passed. A portfolio that ended at nothing returns -100%: every
+    dollar went, and no rate describes that better than all of it.
+    """
+    if len(flows) < 2:
+        return None
+    paid_in = -sum(amount for _, amount in flows if amount < 0)
+    received = sum(amount for _, amount in flows if amount > 0)
+    if paid_in <= 0:
+        return None
+    if (flows[-1][0] - flows[0][0]).days <= 0:
+        return None
+    if received <= 0:
+        return -100.0
+
+    low, high = -0.9999, 1.0
+    # NPV decreases as the rate rises; push the ceiling up until it is
+    # past the root. Ten doublings covers a 1,000x-per-year portfolio,
+    # which no window of real prices reaches.
+    for _ in range(40):
+        if _npv(high, flows) <= 0:
+            break
+        high *= 2
+    else:
+        return None
+    if _npv(low, flows) <= 0:
+        # Even a near-total-loss rate cannot discount the deposits down to
+        # what came back. Reporting the floor is honest; a null here would
+        # hide a real and very bad answer.
+        return round(low * 100, PERCENT_DP)
+
+    for _ in range(200):
+        middle = (low + high) / 2
+        if _npv(middle, flows) > 0:
+            low = middle
+        else:
+            high = middle
+        if high - low < 1e-12:
+            break
+    return round((low + high) / 2 * 100, PERCENT_DP)
+
+
 def _max_drawdown(totals: list[float], dates: list[str]) -> dict:
     """The deepest peak-to-trough fall in the run, as a negative
     percentage, with the dates of both ends.
@@ -203,21 +340,48 @@ def _max_drawdown(totals: list[float], dates: list[str]) -> dict:
     }
 
 
-def _metrics(totals: list[float], dates: list[str]) -> dict:
+def _metrics(
+    totals: list[float],
+    dates: list[str],
+    units: list[float],
+    flows: list[tuple[pd.Timestamp, float]],
+    contributed: float,
+) -> dict:
     """How the run did, as one object beside the series rather than
     interleaved into it - a summary is read whole, not walked date by
-    date."""
+    date.
+
+    Two families of number, and the split is the point. Total return,
+    CAGR, volatility and drawdown are read off `units` - the flow-free
+    unit value - and describe **the portfolio**: what a dollar left alone
+    in it would have done. Contributed, invested, gain and the
+    money-weighted return are read off the cash flows and describe **the
+    account**: what actually went in, what came out, and the rate that
+    reconciles the two given when each dollar arrived.
+
+    With no contributions `units` is `totals` and the two families agree,
+    which is why a run with contributions switched off is unchanged.
+    """
     start_value, final_value = totals[0], totals[-1]
+    unit_start, unit_end = units[0], units[-1]
     total_return = (
-        round((final_value / start_value - 1) * 100, PERCENT_DP) if start_value > 0 else None
+        round((unit_end / unit_start - 1) * 100, PERCENT_DP) if unit_start > 0 else None
     )
+    invested = round(start_value + contributed, MONEY_DP)
     return {
         "startValue": start_value,
         "finalValue": final_value,
         "totalReturn": total_return,
-        "cagr": _cagr(totals, dates),
-        "volatility": _volatility(totals, dates),
-        "maxDrawdown": _max_drawdown(totals, dates),
+        "cagr": _cagr(units, dates),
+        "volatility": _volatility(units, dates),
+        "maxDrawdown": _max_drawdown(units, dates),
+        # Recurring contributions only: the opening lump sum is
+        # `startValue`, and adding the two is what `totalInvested` is for.
+        "contributed": round(contributed, MONEY_DP),
+        "totalInvested": invested,
+        # What the portfolio made, as opposed to what was paid into it.
+        "gain": round(final_value - invested, MONEY_DP),
+        "moneyWeightedReturn": _money_weighted_return(flows),
     }
 
 
@@ -263,6 +427,44 @@ def _normalise_holdings(holdings) -> list[tuple[str, float]]:
     return [(ticker, weight / total_weight) for ticker, weight in pairs]
 
 
+def _normalise_contribution(contribution) -> tuple[float, str | None]:
+    """Validate an optional recurring contribution into (amount, frequency).
+
+    Off is `(0.0, None)`, and there are three ways to mean it: send
+    nothing, send null, or send an amount of zero. All three are the same
+    request, and all three must simulate exactly as a run with no
+    contributions at all - which is what makes "off by default" a promise
+    rather than a hope.
+
+    A frequency is required as soon as there is an amount to pay: "$100"
+    without saying how often is not a schedule, and picking one for the
+    caller would put money into their portfolio on dates they never asked
+    for. Raises ValueError naming what is wrong.
+    """
+    if contribution is None:
+        return 0.0, None
+    if not isinstance(contribution, dict):
+        raise ValueError("`contribution` must be an object with `amount` and `frequency`")
+
+    amount = contribution.get("amount", 0) or 0
+    if not isinstance(amount, (int, float)) or isinstance(amount, bool) or not math.isfinite(amount):
+        raise ValueError(f"`contribution.amount` must be a number: {amount!r}")
+    if amount < 0:
+        raise ValueError(
+            f"`contribution.amount` cannot be negative ({amount}) - withdrawals are not modelled"
+        )
+    if amount == 0:
+        return 0.0, None
+
+    frequency = contribution.get("frequency")
+    if frequency not in CONTRIBUTION_FREQUENCIES:
+        raise ValueError(
+            "`contribution.frequency` must be one of "
+            f"{', '.join(CONTRIBUTION_FREQUENCIES)}: {frequency!r}"
+        )
+    return float(amount), frequency
+
+
 def _verify_absent(tickers: list[str]) -> None:
     """Decide what a holding with no price rows in the window means.
 
@@ -286,6 +488,7 @@ def simulate_portfolio(
     start: str | None = None,
     end: str | None = None,
     rebalance: str = "none",
+    contribution=None,
 ) -> dict:
     """Simulate `holdings` over a window, starting from `value` in cash.
 
@@ -302,11 +505,19 @@ def simulate_portfolio(
     once per date.
 
     Alongside the series: `metrics` scores the run as a whole (final
-    value, total return, CAGR, volatility, deepest drawdown), and each
-    holding carries its own price return, final value, share of the
-    finished portfolio, and dollar contribution to its gain. Both are read
-    whole rather than walked date by date, so they sit beside the arrays
-    instead of inside them.
+    value, total return, CAGR, volatility, deepest drawdown, and - once
+    money keeps arriving - what was paid in, what was gained and the
+    money-weighted return), and each holding carries its own price return,
+    final value, share of the finished portfolio, and dollar contribution
+    to its gain. Both are read whole rather than walked date by date, so
+    they sit beside the arrays instead of inside them.
+
+    `contribution` is optional and off by default: `{"amount": 100,
+    "frequency": "monthly"}` pays that much in on the first row of every
+    new month after the start, spread across the target weights. The
+    `invested` array beside `total` is the running sum of everything paid
+    in, so a chart can draw the money against the value without having to
+    reconstruct the schedule.
 
     The `start` and `end` in the response are the window actually
     simulated, which for "max" - or for any window reaching past the data -
@@ -328,6 +539,7 @@ def simulate_portfolio(
         raise ValueError(
             f"`rebalance` must be one of {', '.join(REBALANCE_FREQUENCIES)}: {rebalance!r}"
         )
+    pay_in, pay_every = _normalise_contribution(contribution)
 
     tickers = [ticker for ticker, _ in weights]
     closes = get_closes(tickers, period=period, start=start, end=end, min_tickers=1)
@@ -356,6 +568,18 @@ def simulate_portfolio(
     dates: list[str] = []
     totals: list[float] = []
     cash_series: list[float] = []
+    # Money paid in, running: the opening lump sum, then each
+    # contribution as it lands. Drawn against `total` on the chart, so
+    # what was deposited is never read as what was earned.
+    invested_series: list[float] = []
+    # Every payment, signed from the holder's side, for the IRR. The
+    # closing value is appended as the one positive flow once it is known.
+    cash_flows: list[tuple[pd.Timestamp, float]] = []
+    paid_in = float(value)
+    contributed = 0.0
+    # What arrived on each row, which is exactly what has to be taken back
+    # out again before a return is measured (see _unit_values).
+    inflows: list[float] = []
     values: dict[str, list[float]] = {ticker: [] for ticker in tickers}
     first_priced: dict[str, str | None] = {ticker: None for ticker in tickers}
     # Every dollar ever moved into a holding's position, less every dollar
@@ -390,6 +614,32 @@ def simulate_portfolio(
                 invested[ticker] += idle[ticker] / price
                 idle[ticker] = 0.0
 
+        # Money arriving, on the first row of a new period. Never on the
+        # first row of the window: that one is the opening lump sum, and
+        # paying a contribution into it as well would bill the holder
+        # twice for the day they started.
+        arrived = 0.0
+        if (
+            pay_every is not None
+            and previous is not None
+            and _period_key(timestamp, pay_every) != _period_key(previous, pay_every)
+        ):
+            arrived = pay_in
+            contributed += pay_in
+            paid_in += pay_in
+            cash_flows.append((timestamp, -pay_in))
+            # Spread across the target weights at this row's prices, with
+            # a not-yet-listed holding's share waiting in cash exactly as
+            # the opening allocation does.
+            for ticker, share in weights:
+                slice_of = pay_in * share
+                price = priced.get(ticker)
+                if price is None:
+                    idle[ticker] += slice_of
+                else:
+                    flows[ticker] += slice_of
+                    invested[ticker] += slice_of / price
+
         if (
             rebalance != "none"
             and previous is not None
@@ -419,17 +669,38 @@ def simulate_portfolio(
         cash = round(sum(idle.values()), MONEY_DP)
         cash_series.append(cash)
         totals.append(round(held + cash, MONEY_DP))
+        invested_series.append(round(paid_in, MONEY_DP))
+        inflows.append(arrived)
         previous = timestamp
+
+    # The opening lump sum, and the closing value it all turned into: the
+    # two ends of the IRR, with every contribution already in between.
+    cash_flows.insert(0, (pd.Timestamp(dates[0]), -float(value)))
+    cash_flows.append((pd.Timestamp(dates[-1]), totals[-1]))
+    units = _unit_values(totals, inflows)
 
     return {
         "start": dates[0],
         "end": dates[-1],
         "startValue": round(float(value), MONEY_DP),
         "rebalance": rebalance,
+        # Echoed the way `rebalance` is, so a response says what it was a
+        # simulation of. Null when nothing was paid in.
+        "contribution": (
+            {"amount": round(pay_in, MONEY_DP), "frequency": pay_every} if pay_every else None
+        ),
         "dates": dates,
         "total": totals,
         "cash": cash_series,
-        "metrics": _metrics(totals, dates),
+        "invested": invested_series,
+        # The flow-free series the metrics are read off, for a chart that
+        # plots return rather than value: a percentage taken off `total`
+        # would count the deposits, and then the chart and the summary
+        # beside it would disagree about the same line. Null when there
+        # were no contributions, because then it is `total` again and
+        # sending a copy would say there was a difference.
+        "unitValue": None if units is totals else [round(u, MONEY_DP) for u in units],
+        "metrics": _metrics(totals, dates, units, cash_flows, contributed),
         "holdings": [
             {
                 "ticker": ticker,

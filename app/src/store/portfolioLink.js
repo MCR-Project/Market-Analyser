@@ -38,12 +38,23 @@
  * hundred-holding one around 1.8 kB — links that survive being pasted
  * into a chat window.
  */
-import { REBALANCE_FREQUENCIES } from './portfolioStorage';
+import { CONTRIBUTION_FREQUENCIES, REBALANCE_FREQUENCIES } from './portfolioStorage';
 
 /** The payload's own version, independent of the storage schema: this is
  *  a wire format that other people's browsers have to read, so it changes
- *  for its own reasons and says so in the payload. */
-const LINK_VERSION = 1;
+ *  for its own reasons and says so in the payload.
+ *
+ *  Version 2 added the optional recurring contribution (#67). It had to
+ *  travel: a shared portfolio that simulated without the sender's monthly
+ *  payments would be a different portfolio wearing the same name, and
+ *  reproducing the sender's result is the whole promise of the link. */
+const LINK_VERSION = 2;
+
+/** Payloads this build can still read. A version 1 link predates
+ *  contributions and simply has none, which is a portfolio this app can
+ *  represent exactly - so old links keep working rather than being
+ *  refused for being old. */
+const READABLE_VERSIONS = [1, 2];
 
 /** The query parameter carrying the payload. Short because it is in
  *  every shared link. */
@@ -108,12 +119,16 @@ function fromBase64Url(payload) {
  * their screen.
  */
 export function encodePortfolio(portfolio) {
+  const schedule = portfolio.contribution;
   return toBase64Url(JSON.stringify({
     v: LINK_VERSION,
     n: String(portfolio.name || '').trim().slice(0, MAX_NAME),
     a: portfolio.value,
     r: portfolio.rebalance,
     h: (portfolio.holdings || []).slice(0, MAX_LINK_HOLDINGS).map(h => [h.ticker, h.weight]),
+    // Omitted entirely when there is no schedule, so the common link
+    // stays the length it was.
+    ...(schedule ? { c: [schedule.amount, schedule.frequency] } : {}),
   }));
 }
 
@@ -160,7 +175,7 @@ export function decodePortfolio(payload) {
   // Checked before the fields, so a payload from a future format is told
   // apart from a broken one. A newer version is the sender's app being
   // ahead of this one, which is nobody's mistake.
-  if (raw.v !== LINK_VERSION) {
+  if (!READABLE_VERSIONS.includes(raw.v)) {
     return bad(
       Number.isInteger(raw.v) && raw.v > LINK_VERSION
         ? 'This link was made by a newer version of this app, which this one cannot read yet.'
@@ -213,8 +228,27 @@ export function decodePortfolio(payload) {
     holdings.push({ ticker: symbol, weight });
   }
 
+  // Absent on a version 1 link, and absent on a version 2 one that has no
+  // schedule. Refused rather than dropped when it is present and wrong:
+  // silently simulating without somebody's monthly payments would show
+  // the reader a different portfolio and call it the sender's.
+  let contribution;
+  if (raw.c !== undefined && raw.c !== null) {
+    if (!Array.isArray(raw.c) || raw.c.length !== 2) {
+      return bad(`This link has a contribution that could not be read. ${ASK_AGAIN}`);
+    }
+    const [amount, frequency] = raw.c;
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > MAX_VALUE) {
+      return bad(`This link has a contribution that is not a usable amount. ${ASK_AGAIN}`);
+    }
+    if (!CONTRIBUTION_FREQUENCIES.includes(frequency)) {
+      return bad(`This link contributes on a schedule this app does not have. ${ASK_AGAIN}`);
+    }
+    contribution = { amount, frequency };
+  }
+
   return {
-    portfolio: { name, value: raw.a, rebalance: raw.r, holdings },
+    portfolio: { name, value: raw.a, rebalance: raw.r, holdings, contribution },
     error: null,
   };
 }

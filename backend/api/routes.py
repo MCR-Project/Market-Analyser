@@ -283,6 +283,18 @@ class HoldingIn(BaseModel):
     weight: float = 0
 
 
+class ContributionIn(BaseModel):
+    """Money paid in on a schedule, rather than only at the start.
+
+    Optional on the request and off by default: absent, null, or an amount
+    of zero all mean the same thing, and all three simulate exactly as a
+    run with no contributions (issue #67).
+    """
+
+    amount: float = Field(0, description="Paid in each time, in USD; 0 is off")
+    frequency: str | None = Field(None, description="monthly, quarterly, yearly")
+
+
 class PortfolioIn(BaseModel):
     """A whole portfolio, sent with every request.
 
@@ -299,17 +311,29 @@ class PortfolioIn(BaseModel):
     start: str | None = Field(None, description="Window start, ISO-8601 (YYYY-MM-DD), inclusive")
     end: str | None = Field(None, description="Window end, ISO-8601 (YYYY-MM-DD), inclusive")
     rebalance: str = Field("none", description="none, monthly, quarterly, yearly")
+    contribution: ContributionIn | None = Field(
+        None, description="Optional recurring contribution; omit for a single lump sum"
+    )
 
 
 @router.post("/portfolio/simulate")
 def post_portfolio_simulate(portfolio: PortfolioIn):
     """Value a basket of tickers over a window, day by day.
 
-    Returns the run in columnar form - `dates`, `total`, `cash`, and a
-    `values` array per holding - alongside `metrics` (final value, total
-    return, CAGR, annualised volatility, deepest drawdown with the dates
-    of both ends) and, per holding, its own price return, final value,
-    share of the finished portfolio and dollar contribution to its gain.
+    Returns the run in columnar form - `dates`, `total`, `cash`,
+    `invested`, and a `values` array per holding - alongside `metrics`
+    (final value, total return, CAGR, annualised volatility, deepest
+    drawdown with the dates of both ends, what was paid in, what was
+    gained, and the money-weighted return) and, per holding, its own price
+    return, final value, share of the finished portfolio and dollar
+    contribution to its gain.
+
+    An optional `contribution` of `{amount, frequency}` pays money in on
+    the first row of every new month, quarter or year after the start.
+    Omit it for a single lump sum, which is the default. Once money keeps
+    arriving the two families of number stop agreeing on purpose: total
+    return, CAGR, volatility and drawdown describe the portfolio and are
+    time-weighted, while `moneyWeightedReturn` describes the account.
 
     See services/portfolio.py for the model and for what every number
     means: buy and hold unless a rebalance frequency is named, weights
@@ -335,6 +359,9 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
             start=portfolio.start,
             end=portfolio.end,
             rebalance=portfolio.rebalance,
+            contribution=(
+                portfolio.contribution.model_dump() if portfolio.contribution else None
+            ),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

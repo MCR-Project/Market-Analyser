@@ -7,7 +7,7 @@
  * line of total value cannot show and a rebalanced run does not do — so
  * the same portfolio looks visibly different depending on how it is run.
  *
- * Three decisions worth knowing about:
+ * Four decisions worth knowing about:
  *
  *  - **Colour follows the ticker, not the ranking.** Bands are stacked
  *    largest-first so the shape reads from the bottom up, but that order
@@ -22,6 +22,15 @@
  *  - **No text inside the SVG.** The chart stretches horizontally to its
  *    container (preserveAspectRatio="none"), which would distort any
  *    glyph drawn in it, so every label is HTML positioned over the top.
+ *
+ *  - **Money paid in is a line, not a band** (#67). A portfolio funded
+ *    monthly climbs whether or not anything went up, and a stack alone
+ *    cannot say which of the two happened. The paid-in line is drawn over
+ *    the bands as a staircase — flat between contributions, stepping on
+ *    each one — so the gap between it and the top of the stack is the
+ *    gain, readable at a glance and at every date rather than only at the
+ *    end. It is absent when there is nothing to say: with a single lump
+ *    sum it would be a horizontal rule across the chart.
  *
  * The geometry matches useChartHover's own constants, which is what makes
  * the crosshair land on the date the tooltip is describing.
@@ -51,6 +60,9 @@ const PALETTE = [
 ];
 const CASH_COLOR = 'var(--fg-3)';
 const OTHER_COLOR = 'var(--fg-2)';
+// Deliberately not from the palette: money paid in is not a holding, and
+// a line the same colour as a band would read as one.
+const INVESTED_COLOR = 'var(--fg-1)';
 
 const CURRENCY = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -154,9 +166,20 @@ export const PortfolioChart = memo(function PortfolioChart({
 
   const brush = useChartBrush({ resolve, onSelect: onSelectWindow || (() => {}) });
 
-  const { paths, ceiling } = useMemo(() => {
+  // Only worth drawing once money has arrived more than once: with a
+  // single lump sum the line is a horizontal rule saying nothing.
+  const invested = simulation.invested;
+  const showInvested = !!invested && invested[invested.length - 1] > invested[0];
+
+  const { paths, ceiling, investedPath } = useMemo(() => {
     const dates = simulation.dates;
-    const ceiling = Math.max(...simulation.total, 1);
+    // The paid-in line is inside the plot too - a portfolio worth less
+    // than was put into it would otherwise draw it off the top edge.
+    const ceiling = Math.max(
+      ...simulation.total,
+      ...(showInvested ? invested : []),
+      1
+    );
     const x = i => PAD + (i / Math.max(1, dates.length - 1)) * (W - 2 * PAD);
     const y = value => H - (value / ceiling) * H;
 
@@ -173,8 +196,23 @@ export const PortfolioChart = memo(function PortfolioChart({
         .join(' ');
       return { ...band, d: `${top} ${bottom} Z` };
     });
-    return { paths, ceiling };
-  }, [bands, simulation]);
+
+    // A staircase rather than a slope: the money did not arrive gradually
+    // between two contributions, it arrived on one date and sat there.
+    let investedPath = null;
+    if (showInvested) {
+      const points = [`M${x(0).toFixed(2)} ${y(invested[0]).toFixed(2)}`];
+      for (let i = 1; i < dates.length; i += 1) {
+        if (invested[i] !== invested[i - 1]) {
+          points.push(`L${x(i).toFixed(2)} ${y(invested[i - 1]).toFixed(2)}`);
+        }
+        points.push(`L${x(i).toFixed(2)} ${y(invested[i]).toFixed(2)}`);
+      }
+      investedPath = points.join(' ');
+    }
+
+    return { paths, ceiling, investedPath };
+  }, [bands, simulation, invested, showInvested]);
 
   const at = hoverIdx ?? simulation.dates.length - 1;
   const totalAt = simulation.total[at];
@@ -263,6 +301,17 @@ export const PortfolioChart = memo(function PortfolioChart({
             />
           ))}
 
+          {investedPath && (
+            <path
+              d={investedPath}
+              fill="none"
+              stroke={INVESTED_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+
           <BrushShading selection={brush.selection} width={W} height={H} />
 
           {hoverIdx != null && !brush.active && (
@@ -296,6 +345,7 @@ export const PortfolioChart = memo(function PortfolioChart({
             bands={bands}
             at={at}
             total={totalAt}
+            paidIn={showInvested ? invested[at] : null}
           />
         )}
 
@@ -312,6 +362,17 @@ export const PortfolioChart = memo(function PortfolioChart({
       </div>
 
       <ul className="list-none flex flex-wrap gap-x-4 gap-y-1.5 m-0 mt-3 p-0">
+        {showInvested && (
+          <li className="flex items-center gap-1.5 text-[11.5px]">
+            <span
+              className="w-2.5 h-0 flex-none border-t-2 border-dashed"
+              style={{ borderColor: INVESTED_COLOR }}
+              aria-hidden="true"
+            />
+            <span className="font-[var(--font-mono)] font-bold text-[var(--fg)]">Paid in</span>
+            <span className="text-[var(--fg-2)]">{CURRENCY.format(invested[at])}</span>
+          </li>
+        )}
         {bands.map(band => {
           const value = band.values[at];
           const share = totalAt > 0 ? (value / totalAt) * 100 : 0;
@@ -338,7 +399,7 @@ export const PortfolioChart = memo(function PortfolioChart({
  * the question a stacked chart raises is how the total was divided, not
  * what it was.
  */
-function StackedTooltip({ tooltip, bands, at, total }) {
+function StackedTooltip({ tooltip, bands, at, total, paidIn }) {
   const position = tooltip.alignRight
     ? { right: `${Math.max(0, 98 - tooltip.pctX)}%` }
     : { left: `${Math.max(0, tooltip.pctX - 2)}%` };
@@ -357,9 +418,20 @@ function StackedTooltip({ tooltip, bands, at, total }) {
       style={position}
     >
       <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] mb-1">{tooltip.label}</div>
-      <div className="text-[14px] font-extrabold tabular-nums tracking-tight text-[var(--fg)] mb-1.5">
+      <div className="text-[14px] font-extrabold tabular-nums tracking-tight text-[var(--fg)]">
         {CURRENCY.format(total)}
       </div>
+      {/* The two numbers that matter side by side on a funded portfolio:
+          what it is worth, and what it cost to get there by this date. */}
+      {paidIn != null && (
+        <div className="font-[var(--font-mono)] text-[10.5px] text-[var(--fg-2)] mt-0.5">
+          {CURRENCY.format(paidIn)} paid in ·{' '}
+          <span style={{ color: total - paidIn >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            {total - paidIn >= 0 ? '+' : '−'}{CURRENCY.format(Math.abs(total - paidIn))}
+          </span>
+        </div>
+      )}
+      <div className="mb-1.5" />
       <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
         {ranked.map(band => (
           <li key={band.key} className="flex items-center gap-2 text-[11.5px]">

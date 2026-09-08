@@ -68,7 +68,12 @@ function time(date) {
  * Put every run on one time axis, and on one scale.
  *
  * In percent mode each line is measured from its own first value, so all
- * of them start at zero however much money they started with.
+ * of them start at zero however much money they started with - and off
+ * the flow-free series rather than the value, so a line paid into monthly
+ * is not credited with its own deposits (#67). Without that, a portfolio
+ * funded with $500 a month draws a return three times the one the summary
+ * table beside it reports for the same line. Value mode still plots the
+ * value, because there the deposits are the point.
  *
  * Each line keeps two things: `observations`, the points it actually has,
  * which is what gets drawn; and `readings`, one value per date on the
@@ -90,11 +95,15 @@ function buildSeries(runs, mode) {
     const readings = new Array(dates.length).fill(null);
 
     if (simulation) {
-      const base = simulation.total[0] || 1;
+      // `unitValue` is null unless contributions moved the two apart, so
+      // an ordinary run reads exactly the series it always did.
+      const performance = simulation.unitValue || simulation.total;
+      const base = performance[0] || 1;
       const own = new Map();
       simulation.dates.forEach((date, j) => {
-        const total = simulation.total[j];
-        const value = mode === "value" ? total : (total / base - 1) * 100;
+        const value = mode === "value"
+          ? simulation.total[j]
+          : (performance[j] / base - 1) * 100;
         own.set(date, value);
         observations.push({ at: (time(date) - first) / span, value });
       });

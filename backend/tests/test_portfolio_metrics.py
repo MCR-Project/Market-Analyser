@@ -415,7 +415,16 @@ class MetricsRouteTests(unittest.TestCase):
         self.assertEqual(metrics["totalReturn"], 60.0)
         self.assertEqual(set(metrics), {
             "startValue", "finalValue", "totalReturn", "cagr", "volatility", "maxDrawdown",
+            # The account, as opposed to the portfolio (issue #67). Present
+            # on every run, so a caller reads the same shape whether or not
+            # anything was ever paid in.
+            "contributed", "totalInvested", "gain", "moneyWeightedReturn",
         })
+        # Nothing was paid in beyond the opening amount, so the two
+        # families of number agree.
+        self.assertEqual(metrics["contributed"], 0.0)
+        self.assertEqual(metrics["totalInvested"], 10_000.0)
+        self.assertEqual(metrics["gain"], 6_000.0)
         aapl = next(h for h in resp.json()["holdings"] if h["ticker"] == "AAPL")
         self.assertEqual(aapl["contribution"], 6_000.0)
         self.assertEqual(aapl["return"], 100.0)
