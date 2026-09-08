@@ -23,6 +23,16 @@
  * Enter or blur commits, Escape restores what was there — an empty name
  * is refused by the library rather than leaving a row with nothing to
  * click.
+ *
+ * **Read-only** is the same panel with nothing to edit, used for a
+ * portfolio that arrived in a link (#66) and is not in this browser's
+ * library. It is the same component rather than a second one on purpose:
+ * a shared portfolio has to simulate, chart and read exactly like a saved
+ * one — that is the whole promise of the link — and two components
+ * drawing the same portfolio would drift. Every control that would write
+ * something is gone rather than disabled: a disabled row of buttons
+ * invites a reader to work out why they cannot use them, when the answer
+ * is that this portfolio is not theirs yet.
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
@@ -72,7 +82,7 @@ function formatDate(iso) {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function Title({ portfolio, onRename }) {
+function Title({ portfolio, onRename, readOnly }) {
   const [draft, setDraft] = useState(null);
 
   // Switching portfolio mid-rename would otherwise carry the draft across
@@ -89,6 +99,16 @@ function Title({ portfolio, onRename }) {
     if (draft !== null) onRename(draft);
     setDraft(null);
   };
+
+  // After the hooks above, not before them: an early return that skips a
+  // hook makes the next render a different component.
+  if (readOnly) {
+    return (
+      <h1 className="text-[24px] font-extrabold text-[var(--fg)] tracking-tight m-0 truncate min-w-0">
+        {portfolio.name}
+      </h1>
+    );
+  }
 
   if (draft === null) {
     return (
@@ -158,6 +178,16 @@ function Field({ label, children }) {
   return (
     <div>
       <div className="eyebrow mb-1">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+/** A field's value with no box around it — the same height as the inputs
+ *  beside it, so a read-only panel keeps the row on one line. */
+function Stated({ children }) {
+  return (
+    <div className="text-[14px] text-[var(--fg)] font-semibold h-[30px] flex items-center truncate">
       {children}
     </div>
   );
@@ -237,10 +267,15 @@ export function PortfolioPanel({
   portfolio,
   onRename,
   onUpdate,
+  onShare,
   onDuplicate,
   onDelete,
   compared = [],
   comparison,
+  /** This portfolio came out of a link and is not in the library: show
+   *  it, simulate it, and offer to keep it — but change nothing. */
+  readOnly = false,
+  onSaveCopy,
 }) {
   // Memoised because it keys the comparison's request set: a fresh []
   // for a portfolio with no holdings would re-simulate every render.
@@ -334,51 +369,77 @@ export function PortfolioPanel({
   return (
     <div className="max-w-[860px]">
       <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
-        <Title portfolio={portfolio} onRename={onRename} />
+        <Title portfolio={portfolio} onRename={onRename} readOnly={readOnly} />
         <div className="flex items-center gap-2 flex-none">
-          <button
-            onClick={onDuplicate}
-            className={`${ACTION_CLASS} text-[var(--fg-1)] bg-[var(--bg-2)] border-[var(--border)] hover:bg-[var(--bg-3)] focus-visible:outline-[var(--accent)]`}
-          >
-            Duplicate
-          </button>
-          <button
-            onClick={onDelete}
-            className={`${ACTION_CLASS} text-[var(--danger)] bg-[var(--danger-soft)] border-[var(--danger-ring)] hover:bg-[var(--danger-ring)] focus-visible:outline-[var(--danger)]`}
-          >
-            Delete
-          </button>
+          {readOnly ? (
+            <button
+              onClick={onSaveCopy}
+              className={`${ACTION_CLASS} text-[var(--accent)] bg-[var(--accent-soft)] border-[var(--accent-ring)] hover:bg-[var(--accent-ring)] focus-visible:outline-[var(--accent)]`}
+            >
+              Save a copy
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onShare}
+                className={`${ACTION_CLASS} text-[var(--fg-1)] bg-[var(--bg-2)] border-[var(--border)] hover:bg-[var(--bg-3)] focus-visible:outline-[var(--accent)]`}
+              >
+                Share
+              </button>
+              <button
+                onClick={onDuplicate}
+                className={`${ACTION_CLASS} text-[var(--fg-1)] bg-[var(--bg-2)] border-[var(--border)] hover:bg-[var(--bg-3)] focus-visible:outline-[var(--accent)]`}
+              >
+                Duplicate
+              </button>
+              <button
+                onClick={onDelete}
+                className={`${ACTION_CLASS} text-[var(--danger)] bg-[var(--danger-soft)] border-[var(--danger-ring)] hover:bg-[var(--danger-ring)] focus-visible:outline-[var(--danger)]`}
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       <Provenance source={portfolio.source} />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)]">
+      {/* Three columns read-only rather than four: when a portfolio came
+          out of a link there is no created date to show - the copy is
+          created when somebody keeps it. */}
+      <div className={`grid grid-cols-2 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] ${readOnly ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
         <Field label="AMOUNT">
-          <Amount value={portfolio.value} onCommit={value => onUpdate({ value })} />
+          {readOnly ? (
+            <Stated>{CURRENCY.format(portfolio.value)}</Stated>
+          ) : (
+            <Amount value={portfolio.value} onCommit={value => onUpdate({ value })} />
+          )}
         </Field>
         <Field label="METHOD">
-          <select
-            value={portfolio.rebalance}
-            aria-label="Rebalancing method"
-            onChange={e => onUpdate({ rebalance: e.target.value })}
-            className={`${FIELD_CLASS} cursor-pointer`}
-          >
-            {REBALANCE_FREQUENCIES.map(frequency => (
-              <option key={frequency} value={frequency}>{REBALANCE_LABELS[frequency]}</option>
-            ))}
-          </select>
+          {readOnly ? (
+            <Stated>{REBALANCE_LABELS[portfolio.rebalance]}</Stated>
+          ) : (
+            <select
+              value={portfolio.rebalance}
+              aria-label="Rebalancing method"
+              onChange={e => onUpdate({ rebalance: e.target.value })}
+              className={`${FIELD_CLASS} cursor-pointer`}
+            >
+              {REBALANCE_FREQUENCIES.map(frequency => (
+                <option key={frequency} value={frequency}>{REBALANCE_LABELS[frequency]}</option>
+              ))}
+            </select>
+          )}
         </Field>
         <Field label="HOLDINGS">
-          <div className="text-[14px] text-[var(--fg)] font-semibold h-[30px] flex items-center">
-            {holdings.length}
-          </div>
+          <Stated>{holdings.length}</Stated>
         </Field>
-        <Field label="CREATED">
-          <div className="text-[14px] text-[var(--fg)] font-semibold h-[30px] flex items-center">
-            {formatDate(portfolio.createdAt)}
-          </div>
-        </Field>
+        {!readOnly && (
+          <Field label="CREATED">
+            <Stated>{formatDate(portfolio.createdAt)}</Stated>
+          </Field>
+        )}
       </div>
 
       <WindowControls
@@ -448,13 +509,16 @@ export function PortfolioPanel({
         holdings={holdings}
         simulation={simulation}
         stale={stale || loading}
+        readOnly={readOnly}
         onChange={next => onUpdate({ holdings: next })}
         addControl={
-          <AddHolding
-            existing={holdings}
-            windowStart={simulation?.start || null}
-            onAdd={addHolding}
-          />
+          readOnly ? null : (
+            <AddHolding
+              existing={holdings}
+              windowStart={simulation?.start || null}
+              onAdd={addHolding}
+            />
+          )
         }
       />
     </div>

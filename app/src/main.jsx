@@ -7,6 +7,7 @@
 //   /docs                    → measurement documentation index
 //   /docs/:measurementId     → one measurement's documentation
 //   /portfolio               → the portfolio library
+//   /portfolio/shared?p=…    → a portfolio carried by the link itself
 //   /portfolio/:portfolioId  → one saved portfolio
 //
 // The dashboard's ETF and view live in the URL rather than in memory, so
@@ -49,6 +50,11 @@ createRoot(document.getElementById('root')).render(
               dependencies of its own, so a separate chunk would cost a
               round-trip to save nothing. */}
           <Route path="/portfolio" element={<PortfolioPage />} />
+          {/* Before the id route for readability; react-router ranks a
+              static segment above a dynamic one either way, and portfolio
+              ids are UUIDs, so "shared" is not one anybody can collide
+              with. */}
+          <Route path="/portfolio/shared" element={<PortfolioPage shared />} />
           <Route path="/portfolio/:portfolioId" element={<PortfolioPage />} />
           {/* Anything unrecognised lands on the default ETF rather than a
               blank screen. */}
