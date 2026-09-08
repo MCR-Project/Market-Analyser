@@ -34,6 +34,16 @@ export const DEFAULT_VALUE = 10000;
  *  unrecognised value is normalised back to buy and hold. */
 export const REBALANCE_FREQUENCIES = ['none', 'monthly', 'quarterly', 'yearly'];
 
+/** Mirrors CONTRIBUTION_FREQUENCIES in backend/services/portfolio.py.
+ *  There is no "none" in it: a portfolio with no schedule has no
+ *  `contribution` at all, rather than one that is switched off. */
+export const CONTRIBUTION_FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
+
+/** What the amount starts at when somebody first turns contributions on,
+ *  in USD. A round number that is obviously a placeholder to be changed,
+ *  rather than one that looks like a considered choice. */
+export const DEFAULT_CONTRIBUTION = 100;
+
 /**
  * How a read went, beyond the portfolios themselves:
  *  - `ok`          storage worked
@@ -90,6 +100,21 @@ function normaliseSource(raw) {
   };
 }
 
+/** An optional recurring contribution: how much, and how often (#67).
+ *
+ *  Absent is the answer to anything unusable — a missing frequency, a
+ *  frequency this build does not have, an amount that is not a positive
+ *  number. A portfolio whose schedule cannot be read is a portfolio with
+ *  no schedule, which simulates as the lump sum it always did; the
+ *  alternative is guessing at a frequency and putting money in on dates
+ *  nobody chose. */
+function normaliseContribution(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (!CONTRIBUTION_FREQUENCIES.includes(raw.frequency)) return undefined;
+  if (!Number.isFinite(raw.amount) || raw.amount <= 0) return undefined;
+  return { amount: raw.amount, frequency: raw.frequency };
+}
+
 function normaliseHoldings(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -127,6 +152,10 @@ export function migratePortfolio(raw) {
     value: Number.isFinite(raw.value) && raw.value > 0 ? raw.value : DEFAULT_VALUE,
     holdings: normaliseHoldings(raw.holdings),
     rebalance: REBALANCE_FREQUENCIES.includes(raw.rebalance) ? raw.rebalance : 'none',
+    // Added after version 1 was already in people's browsers, and
+    // optional, so an older record simply has none - which is exactly
+    // what "off by default" has to look like on read.
+    contribution: normaliseContribution(raw.contribution),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now(),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now(),
     source: normaliseSource(raw.source),
@@ -216,6 +245,7 @@ export function makePortfolio(seed = {}) {
     value: Number.isFinite(seed.value) && seed.value > 0 ? seed.value : DEFAULT_VALUE,
     holdings: normaliseHoldings(seed.holdings),
     rebalance: REBALANCE_FREQUENCIES.includes(seed.rebalance) ? seed.rebalance : 'none',
+    contribution: normaliseContribution(seed.contribution),
     createdAt: timestamp,
     updatedAt: timestamp,
     source: normaliseSource(seed.source),

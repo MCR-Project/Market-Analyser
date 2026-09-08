@@ -116,6 +116,68 @@ and executed as real JSX in the browser, which is safe only because they are
 first-party files reviewed like any other code here — never build one from
 external data.
 
+## Portfolio simulator
+
+A portfolio here is a simulation, not an account: a basket of tickers, the
+share of the money each one takes, and a stretch of history to value it
+over. Nothing is bought and nothing is connected to a broker. Portfolios
+live in the browser that authored them — there is no sign-in and no
+server-side copy — and reach the backend whole, in the request body of
+`POST /api/portfolio/simulate`, which stores nothing.
+
+`backend/services/portfolio.py` is the arithmetic and the full statement of
+the model. In outline: weights are ratios and are normalised, so 30/30/30
+and 33.33/33.33/33.33 are one portfolio; buy and hold is the default and a
+rebalance restores the target weights on the first row of each new period;
+an allocation waits in cash until its holding lists, and buys in at that
+day's close so the total does not jump.
+
+### Recurring contributions
+
+A portfolio can be funded once at the start, or paid into on a schedule —
+`{"amount": 100, "frequency": "monthly"}` beside the holdings, with
+`quarterly` and `yearly` also available. It is **off by default**: an
+absent contribution, a null one, and an amount of zero are all the same
+request, and all three simulate exactly as a single lump sum.
+
+Money arrives on **the first row of each new period after the start**, not
+on a fixed calendar date. The 1st of a month is frequently not a trading
+day, and `prices` tiers older history into weekly and monthly buckets
+(see the data pipeline above), so "the first row the month actually has"
+is the only rule that holds across the whole of history. A payment is
+never skipped for landing on a weekend; it moves to the next row there is.
+The window's own first row is the opening amount and never takes a
+contribution, so a year of monthly payments is the twelve times money
+arrived *after* the start. Each payment is spread across the target
+weights at that row's prices, and any part of it belonging to a holding
+that has not listed yet waits in cash exactly as the opening allocation
+does.
+
+**Two families of number, and the split is the point.** A deposit is not a
+gain: paying $100 into a $1,000 portfolio moves the total 10% on a day the
+market did nothing, and a metric read straight off the total records that
+as performance.
+
+- **Total return, CAGR, volatility and max drawdown describe the
+  portfolio.** They are time-weighted — computed on a unit value that only
+  moves when prices do — so they answer "what would a dollar left alone in
+  this have done".
+- **Paid in, contributed, gain and money-weighted return describe the
+  account.** The money-weighted return is the internal rate of return: the
+  annual rate that reconciles every deposit, discounted from the day it
+  arrived, with the final value.
+
+With no contributions the two agree exactly, which is why switching the
+feature off leaves every existing result unchanged. With contributions
+they can differ a lot, and neither is wrong — a holding can gain 54% over
+a window while the money in it earns 21% a year, because the later
+payments were working for less of it.
+
+The UI labels both families, shows the paid-in line as a staircase over
+the stacked chart so the gap to the top of the stack is the gain, and adds
+a money-weighted column to the comparison table as soon as any line is
+funded this way.
+
 ## Frontend
 
 ```bash

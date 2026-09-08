@@ -39,7 +39,11 @@ import { useFetch } from '../../hooks/useFetch';
 import { useComparisonRuns } from '../../hooks/useComparisonRuns';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
 import { useSimulationWindow } from '../../hooks/useSimulationWindow';
-import { REBALANCE_FREQUENCIES } from '../../store/portfolioStorage';
+import {
+  CONTRIBUTION_FREQUENCIES,
+  DEFAULT_CONTRIBUTION,
+  REBALANCE_FREQUENCIES,
+} from '../../store/portfolioStorage';
 import { describeFetchError } from '../../utils/errorCopy';
 import { api } from '../../utils/api';
 import { AddHolding } from './AddHolding';
@@ -62,6 +66,12 @@ const REBALANCE_LABELS = {
   monthly: 'Rebalance monthly',
   quarterly: 'Rebalance quarterly',
   yearly: 'Rebalance yearly',
+};
+
+const CONTRIBUTION_LABELS = {
+  monthly: 'a month',
+  quarterly: 'a quarter',
+  yearly: 'a year',
 };
 
 const ACTION_CLASS =
@@ -174,9 +184,9 @@ function Provenance({ source }) {
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, wide = false, children }) {
   return (
-    <div>
+    <div className={wide ? 'sm:col-span-2' : undefined}>
       <div className="eyebrow mb-1">{label}</div>
       {children}
     </div>
@@ -224,6 +234,71 @@ function Amount({ value, onCommit }) {
   );
 }
 
+/**
+ * Money paid in on a schedule, or not at all (#67).
+ *
+ * The frequency is the switch, and it leads: "None" is the whole control
+ * until there is a schedule to have an amount for, so a portfolio that
+ * takes a single lump sum shows one select rather than an amount box
+ * greyed out beside it. Turning it on fills in a placeholder amount at
+ * once, because a schedule of nothing per month is not a state worth
+ * being in on the way to a real one.
+ *
+ * The amount commits on blur like the opening amount does, and for the
+ * same reason: halfway through typing 500 it reads 5, and re-simulating
+ * a portfolio funded at $5 a month is work nobody asked for.
+ */
+function Contribution({ contribution, onChange }) {
+  const [draft, setDraft] = useState(null);
+
+  const commit = () => {
+    if (draft !== null) {
+      const parsed = Number(draft.replace(/[^0-9.]/g, ''));
+      if (Number.isFinite(parsed) && parsed > 0) {
+        onChange({ ...contribution, amount: parsed });
+      }
+    }
+    setDraft(null);
+  };
+
+  const selectFrequency = (frequency) => {
+    setDraft(null);
+    if (!frequency) onChange(undefined);
+    else onChange({ amount: contribution?.amount || DEFAULT_CONTRIBUTION, frequency });
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={contribution?.frequency || ''}
+        aria-label="Contribution frequency"
+        onChange={e => selectFrequency(e.target.value)}
+        className={`${FIELD_CLASS} cursor-pointer ${contribution ? 'w-[124px]' : ''}`}
+      >
+        <option value="">None</option>
+        {CONTRIBUTION_FREQUENCIES.map(frequency => (
+          <option key={frequency} value={frequency}>{CONTRIBUTION_LABELS[frequency]}</option>
+        ))}
+      </select>
+      {contribution && (
+        <input
+          value={draft ?? CURRENCY.format(contribution.amount)}
+          aria-label="Contribution amount, USD"
+          inputMode="decimal"
+          onFocus={e => { setDraft(String(contribution.amount)); e.target.select(); }}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur(); }
+          }}
+          className={FIELD_CLASS}
+        />
+      )}
+    </div>
+  );
+}
+
 /** Which window the simulated columns describe, or why they are blank.
  *  The window is the backend's default for now; choosing one is #62. */
 function SimulationStatus({ simulation, loading, error, onRetry, hasWeight }) {
@@ -253,12 +328,17 @@ function SimulationStatus({ simulation, loading, error, onRetry, hasWeight }) {
   );
 }
 
-/** A simulate payload for one line of the comparison. */
-function requestFor(holdings, value, rebalance, windowRequest) {
+/** A simulate payload for one line of the comparison. Each portfolio
+ *  brings its own contribution schedule: comparing one that is paid into
+ *  monthly with one that is not is a comparison somebody may well want,
+ *  and flattening them to the same schedule would answer a question
+ *  nobody asked. */
+function requestFor(holdings, value, rebalance, windowRequest, contribution) {
   return {
     holdings: holdings.filter(h => h.weight > 0).map(h => ({ ticker: h.ticker, weight: h.weight })),
     value,
     rebalance,
+    ...(contribution ? { contribution } : {}),
     ...windowRequest,
   };
 }
@@ -339,19 +419,29 @@ export function PortfolioPanel({
         key: portfolio.id,
         label: portfolio.name,
         kind: 'portfolio',
-        request: requestFor(holdings, portfolio.value, portfolio.rebalance, request),
+        request: requestFor(
+          holdings, portfolio.value, portfolio.rebalance, request, portfolio.contribution
+        ),
       },
       ...compared.map(other => ({
         key: other.id,
         label: other.name,
         kind: 'portfolio',
-        request: requestFor(other.holdings || [], other.value, other.rebalance, request),
+        request: requestFor(
+          other.holdings || [], other.value, other.rebalance, request, other.contribution
+        ),
       })),
       ...comparison.benchmarks.map(symbol => ({
         key: `benchmark:${symbol}`,
         label: symbol,
         kind: 'benchmark',
-        request: requestFor([{ ticker: symbol, weight: 100 }], portfolio.value, 'none', request),
+        // A benchmark takes the open portfolio's own funding, schedule
+        // included: "did this beat SPY" means against the same money
+        // arriving on the same dates, not against a lump sum.
+        request: requestFor(
+          [{ ticker: symbol, weight: 100 }], portfolio.value, 'none', request,
+          portfolio.contribution
+        ),
       })),
     ];
   }, [comparison, portfolio, holdings, compared, request]);
@@ -405,15 +495,32 @@ export function PortfolioPanel({
 
       <Provenance source={portfolio.source} />
 
-      {/* Three columns read-only rather than four: when a portfolio came
-          out of a link there is no created date to show - the copy is
-          created when somebody keeps it. */}
-      <div className={`grid grid-cols-2 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] ${readOnly ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
+      {/* Two rows of four, with the contribution taking two columns
+          because it is two controls. Read-only drops CREATED: a portfolio
+          that came out of a link has no created date to show, since the
+          copy is created when somebody keeps it. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)]">
         <Field label="AMOUNT">
           {readOnly ? (
             <Stated>{CURRENCY.format(portfolio.value)}</Stated>
           ) : (
             <Amount value={portfolio.value} onCommit={value => onUpdate({ value })} />
+          )}
+        </Field>
+        {/* Reads left to right as a sentence: start with this much, add
+            this much this often, run it this way. */}
+        <Field label="ADDS" wide>
+          {readOnly ? (
+            <Stated>
+              {portfolio.contribution
+                ? `${CURRENCY.format(portfolio.contribution.amount)} ${CONTRIBUTION_LABELS[portfolio.contribution.frequency]}`
+                : 'Nothing'}
+            </Stated>
+          ) : (
+            <Contribution
+              contribution={portfolio.contribution}
+              onChange={contribution => onUpdate({ contribution })}
+            />
           )}
         </Field>
         <Field label="METHOD">

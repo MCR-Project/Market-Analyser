@@ -9,6 +9,13 @@
  * money between holdings, a final value says nothing about which holding
  * earned it (see backend/services/portfolio.py).
  *
+ * That column is labelled GAIN rather than by its API name,
+ * `contribution`, because the panel above it now has contributions in the
+ * other sense — money paid in on a schedule (#67). Two columns a few
+ * inches apart called the same word and meaning opposite things is worse
+ * than a label that differs from the field behind it. GAIN also matches
+ * the summary above, where the portfolio's gain is the sum of these.
+ *
  * **Weights are edited, then applied.** Typing into a weight changes
  * nothing but the box it is typed into: it does not save the portfolio,
  * and it does not re-run the simulation. Weights are worked out by
@@ -260,7 +267,13 @@ export const HoldingsTable = memo(function HoldingsTable({
                 <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">WEIGHT</th>
                 <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">VALUE</th>
                 <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">RETURN</th>
-                <th scope="col" className="eyebrow text-right px-3 py-2 font-normal">CONTRIBUTION</th>
+                <th
+                  scope="col"
+                  className="eyebrow text-right px-3 py-2 font-normal"
+                  title="Dollars of the portfolio's gain that came from this holding: what it is worth, less every dollar put into it"
+                >
+                  GAIN
+                </th>
                 {!readOnly && <th scope="col" className="px-3 py-2"><span className="sr-only">Remove</span></th>}
               </tr>
             </thead>
