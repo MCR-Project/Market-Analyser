@@ -968,6 +968,94 @@ def get_dividends(
     return events
 
 
+def _onto_calendar(live: pd.DataFrame, calendar: pd.Index) -> pd.DataFrame:
+    """Put a daily live frame onto an existing frame's calendar.
+
+    `prices` tiers history by age (issue #10): a row older than a year is a
+    weekly OHLC bucket, older than five years a monthly one. A bucket's
+    `close` is the **last** close inside it, but its `date` is the bucket's
+    **anchor** - the Monday of the ISO week, the 1st of the month (see
+    scripts/fetch_daily.py's _resample). Those are not the same day, which
+    is what makes this more than a reindex: asking pandas for the last live
+    value at or before each anchor would take the close from *before* the
+    bucket began, putting a merged column a whole bucket behind the ones it
+    is being merged into.
+
+    So each anchor takes the last live close **inside its own bucket** -
+    from the anchor up to the next one. Daily rows are the same rule with
+    buckets one row wide, so one implementation serves all three tiers.
+
+    Live dates before the first anchor are dropped: there is no bucket for
+    them, and the frame being merged into does not reach back that far.
+    """
+    if live.empty or len(calendar) == 0:
+        return pd.DataFrame(index=calendar, columns=live.columns, dtype=float)
+
+    # Which bucket each live date falls in: the last anchor at or before it.
+    # -1 means "before the first anchor", which has no bucket.
+    position = calendar.searchsorted(live.index, side="right") - 1
+    inside = position >= 0
+    if not inside.any():
+        return pd.DataFrame(index=calendar, columns=live.columns, dtype=float)
+
+    bucketed = live[inside].copy()
+    bucketed["__anchor"] = calendar[position[inside]]
+    # Last row of each bucket, which is the bucket's closing price - the
+    # same choice _resample makes when it writes one.
+    collapsed = bucketed.groupby("__anchor", sort=True).last()
+    return collapsed.reindex(calendar)
+
+
+def _merge_missing_live(
+    closes: pd.DataFrame,
+    missing: list[str],
+    period: str | None,
+    interval: str,
+    start: str | None,
+    end: str | None,
+) -> pd.DataFrame:
+    """Add the columns Supabase could not answer for, fetched live.
+
+    `_closes_db` returns a frame as soon as it has `min_tickers` columns, so
+    a basket mixing tracked stocks with anything untracked - every ETF,
+    since those live in `etfs` and never get `prices` rows - used to come
+    back short and silent. Downstream that is not a missing column, it is a
+    wrong answer: the portfolio simulator read the absence as a holding
+    that had not listed yet and valued it at zero for the whole run.
+
+    The live read is not wrapped in a try. A symbol that does not exist
+    should still 404 and an unreachable upstream should still 503, exactly
+    as they do when the whole basket goes live - the merge is not a reason
+    to start swallowing those. A symbol that exists but has no rows in this
+    window returns nothing and simply stays absent, which is the one case
+    the caller has to interpret rather than this function.
+    """
+    live = _live(
+        f"price history for {', '.join(missing)}",
+        _closes_live, missing, period, interval, start=start, end=end,
+    )
+    if live is None or live.empty:
+        return closes
+
+    live = live.copy()
+    live.index = pd.to_datetime(live.index)
+    if live.index.tz is not None:
+        live.index = live.index.tz_localize(None)
+    live = live.sort_index()
+
+    calendar = pd.to_datetime(closes.index).sort_values()
+    aligned = _onto_calendar(live[[c for c in missing if c in live.columns]], calendar)
+
+    merged = closes.copy()
+    merged.index = calendar
+    for column in aligned.columns:
+        # A column of nothing but NaN is a symbol with no prices in this
+        # window - left out, so "absent" keeps meaning one thing.
+        if aligned[column].notna().any():
+            merged[column] = aligned[column]
+    return merged
+
+
 def get_closes(
     tickers: list[str],
     period: str | None = None,
@@ -1003,6 +1091,18 @@ def get_closes(
         closes = _closes_db(
             tickers, period, start=start, end=end, min_tickers=min_tickers
         )
+        # A partial answer is the dangerous one. `_closes_db` is satisfied
+        # by `min_tickers` columns, so one tracked holding was enough to
+        # keep an ETF out of the frame entirely - and an absent column is
+        # not read downstream as "no data", it is read as a holding that
+        # had not listed yet and valued at zero. The columns it could not
+        # answer for are fetched live and put onto its own calendar.
+        if closes is not None:
+            absent = [ticker for ticker in tickers if ticker not in closes.columns]
+            if absent:
+                closes = _merge_missing_live(
+                    closes, absent, period, interval, start, end
+                )
     if closes is None:
         closes = _live(
             "price history for these holdings",
