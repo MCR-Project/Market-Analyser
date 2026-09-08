@@ -158,7 +158,25 @@ function Title({ portfolio, onRename, readOnly }) {
   );
 }
 
-function Provenance({ source }) {
+/**
+ * Where a copied portfolio came from — and, for a fund, the two ways it
+ * is not that fund.
+ *
+ * **Coverage** is the small one: only constituents weighing at least 1%
+ * are tracked, so a copy of a long-tailed fund is its larger names.
+ *
+ * **The as-of date is the large one.** The constituents are the fund's
+ * *today*, and simulating them over the past assumes they were held all
+ * along. They were not: a fund sells what disappointed it and buys what
+ * did well, so backdating its current book buys the past with the
+ * benefit of hindsight. The gap is not a rounding difference — a copy of
+ * ARKK's holdings run from 2021 returns about +75% where the fund's own
+ * shares returned about −30%. Somebody comparing the two and finding a
+ * 100-point spread will reasonably suspect the simulator before they
+ * suspect the survivorship, so the panel says it outright and points at
+ * the one control that settles it.
+ */
+function Provenance({ source, windowStart }) {
   if (!source) return null;
 
   if (source.kind === 'portfolio') {
@@ -171,16 +189,36 @@ function Provenance({ source }) {
 
   const coverage = Number.isFinite(source.coverage) ? source.coverage : null;
   return (
-    <p className="text-[12.5px] text-[var(--fg-2)] leading-relaxed m-0 mb-5">
-      Copied from{' '}
-      <span className="font-[var(--font-mono)] text-[var(--fg-1)] font-bold">{source.id}</span>
-      {source.name && source.name !== source.id ? ` · ${source.name}` : ''}
-      {coverage === null
-        ? '.'
-        : coverage >= WHOLE_FUND_COVERAGE
-          ? `, whose tracked holdings covered ${coverage.toFixed(1)}% of its published weights, rescaled to 100% here.`
-          : `, whose tracked holdings covered ${coverage.toFixed(1)}% of its published weights — the rest of the fund sits in constituents too small to track, so this is a portfolio of its larger names rather than the fund itself.`}
-    </p>
+    <div className="mb-5">
+      <p className="text-[12.5px] text-[var(--fg-2)] leading-relaxed m-0">
+        Copied from{' '}
+        <span className="font-[var(--font-mono)] text-[var(--fg-1)] font-bold">{source.id}</span>
+        {source.name && source.name !== source.id ? ` · ${source.name}` : ''}
+        {coverage === null
+          ? '.'
+          : coverage >= WHOLE_FUND_COVERAGE
+            ? `, whose tracked holdings covered ${coverage.toFixed(1)}% of its published weights, rescaled to 100% here.`
+            : `, whose tracked holdings covered ${coverage.toFixed(1)}% of its published weights — the rest of the fund sits in constituents too small to track, so this is a portfolio of its larger names rather than the fund itself.`}
+      </p>
+      <p
+        className="flex items-start gap-2.5 text-[12.5px] leading-relaxed m-0 mt-2 p-3 rounded-[var(--radius-md)] border"
+        style={{ background: 'var(--warning-soft)', borderColor: 'var(--warning-ring)', color: 'var(--fg-1)' }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-none mt-0.5" aria-hidden="true">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4" /><path d="M12 17h.01" />
+        </svg>
+        <span>
+          These are the fund's holdings <strong className="font-bold">as they are today</strong>,
+          valued{windowStart ? <> back to <span className="font-[var(--font-mono)]">{windowStart}</span></> : ' over the whole window'}.
+          The fund did not hold them then — it has sold what disappointed it
+          and bought what did well since — so this run buys the past knowing
+          how it turned out, and will usually beat the fund by a wide margin.
+          Add{' '}
+          <span className="font-[var(--font-mono)] text-[var(--fg)] font-bold">{source.id}</span>{' '}
+          as a benchmark to see what the fund itself actually did.
+        </span>
+      </p>
+    </div>
   );
 }
 
@@ -493,7 +531,7 @@ export function PortfolioPanel({
         </div>
       </div>
 
-      <Provenance source={portfolio.source} />
+      <Provenance source={portfolio.source} windowStart={simulation?.start || null} />
 
       {/* Two rows of four, with the contribution taking two columns
           because it is two controls. Read-only drops CREATED: a portfolio
