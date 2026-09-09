@@ -10,6 +10,10 @@ Start it with `preview_start {name: "backend"}` (see `.claude/launch.json`), or:
 python -m uvicorn main:app --port 8000 --reload
 ```
 
+Or, without a local Python setup at all: `docker compose up` from the repo
+root (see the README's "Running it with Docker") — same `--reload` behaviour,
+`backend/` bind-mounted into the container.
+
 Interactive API docs at `http://localhost:8000/docs`, liveness at `/health`.
 
 ## Layout

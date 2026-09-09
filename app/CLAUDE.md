@@ -13,6 +13,11 @@ npm run build
 Talks to `http://localhost:8000/api` unless `VITE_API_BASE` is set (see
 `.env.example`). `app/dist/` is build output and is not tracked.
 
+Alternatively, `docker compose up` from the repo root runs this with HMR in a
+container (`app/` bind-mounted, `node_modules` a separate named volume — see
+the README's "Running it with Docker"); `docker compose run --rm tests lint`
+runs the ESLint check the same way `tests`'s other CLAUDE.md documents.
+
 ## Layout
 
 ```

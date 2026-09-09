@@ -1,0 +1,71 @@
+# `docker compose up` starts backend + app, dev-mode with hot reload, for
+# local development - see README.md "Running it with Docker" for the
+# invocations below and the compose-specific gotchas (why the app calls
+# localhost:8000 rather than http://backend:8000, why node_modules is a
+# named volume, why a missing backend/.env is fine).
+#
+# fetcher and tests are one-shot tools, not long-running services, so they
+# sit behind the `tools` profile and `up` never starts them:
+#   docker compose run --rm fetcher vaneck --tickers SMH --limit 5
+#   docker compose run --rm tests -k portfolio
+#   docker compose run --rm tests lint
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    # Optional: get_client_optional() (services/market_data.py) never raises
+    # on missing Supabase config, so a fresh clone with no backend/.env still
+    # boots - degraded to live yfinance fallbacks and `stale: true` - exactly
+    # as a native run without .env does today (see CLAUDE.md).
+    env_file:
+      - path: ./backend/.env
+        required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build:
+      context: ./app
+      target: dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./app:/app
+      # Shadows the bind mount's node_modules with a container-native one -
+      # the host copy is Windows-built and its esbuild/rollup native
+      # binaries do not run under Linux.
+      - app_node_modules:/app/node_modules
+    environment:
+      # Talks to the backend's *published* host port, not the compose
+      # service name: this runs in the browser on the host, not inside the
+      # compose network, so http://backend:8000 would not resolve for it.
+      # CORS's own default already allows localhost:5173 - see main.py.
+      VITE_API_BASE: http://localhost:8000/api
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  fetcher:
+    build: ./fetcher
+    profiles: ["tools"]
+    volumes:
+      - ./fetcher/output:/output
+
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+    profiles: ["tools"]
+
+volumes:
+  app_node_modules:

@@ -21,8 +21,9 @@ a courtesy.
 | `app/` | React 19 + Vite 8 + Tailwind 4 frontend |
 | `tests/` | Tests for `fetcher/` only (fixture-driven, no network) |
 | `backend/tests/` | Tests for `backend/` (service + scripts + measurements) |
-| `.github/workflows/` | Daily price refresh (cron), manual holdings fetch + DB completion, pytest on push/PR |
+| `.github/workflows/` | Daily price refresh (cron), manual holdings fetch + DB completion, pytest on push/PR, Docker image build check |
 | `.claude/launch.json` | Dev-server definitions for the Browser pane (`backend` on :8000, `app` on :5173) |
+| `docker-compose.yml` | Alternative way to run the stack — see "Running it with Docker" in the README. Not what `preview_start` drives. |
 
 Each of `backend/`, `backend/services/`, `backend/measurements/`,
 `backend/scripts/`, `fetcher/`, `app/`, `app/src/components/portfolio/` and
@@ -55,6 +56,13 @@ an accident: `get_client_optional()` never raises. A local run without
 `backend/.env` therefore works, but returns yfinance's top-~10 ETF holdings
 instead of the full constituent lists and reports `stale: true`.
 
+`docker compose up` runs the same two dev servers in containers instead — see
+"Running it with Docker" in the README for what that gets you and the couple
+of things (the frontend's API base, `node_modules`) that need to work
+differently in a container than natively. It's an alternative, not the
+default: `preview_start` still drives the native processes above, not the
+containers.
+
 ## Tests
 
 ```bash
@@ -77,6 +85,11 @@ service is a bug in the test.
 There are no frontend tests. `npm run lint` (ESLint with react-hooks and
 react-refresh rules) is the only automated check on `app/`.
 
+`docker compose run --rm tests` (with pytest args passed through, or
+`docker compose run --rm tests lint` for the ESLint check) runs the same two
+checks in a container built from the repo root — see `Dockerfile.tests`. It
+exists for parity with CI, not to replace running pytest directly.
+
 ## Environment and secrets
 
 `backend/.env` and `app/.env` are gitignored; the `.env.example` beside each one
@@ -84,7 +97,9 @@ is the documented shape. The only backend credential is `SUPABASE_SERVICE_KEY` �
 the **service role** key, which bypasses row-level security. RLS is enabled on
 `ticker`/`prices` with no public policies, so nothing else can read them. Never
 expose that key to the frontend, never add a frontend-reachable path that lets a
-request choose what it reads, and never commit it.
+request choose what it reads, and never commit it. In `docker-compose.yml`,
+`backend/.env` is loaded only into the `backend` service for the same reason —
+it must never become a shared `env_file` the `app` service also reads.
 
 That single credential is also why there are no user accounts — see "Portfolios
 live in the browser" below.
