@@ -51,6 +51,10 @@ services:
       # compose network, so http://backend:8000 would not resolve for it.
       # CORS's own default already allows localhost:5173 - see main.py.
       VITE_API_BASE: http://localhost:8000/api
+      # Vite's watcher never sees a bind-mounted Windows host path change
+      # (Docker Desktop doesn't forward those fs events into Linux), so HMR
+      # silently stops firing without this - see vite.config.js.
+      CHOKIDAR_USEPOLLING: "true"
     depends_on:
       backend:
         condition: service_healthy
