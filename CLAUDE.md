@@ -24,6 +24,7 @@ a courtesy.
 | `.github/workflows/` | Daily price refresh (cron), manual holdings fetch + DB completion, pytest on push/PR, Docker image build check |
 | `.claude/launch.json` | Dev-server definitions for the Browser pane (`backend` on :8000, `app` on :5173) |
 | `docker-compose.yml` | Alternative way to run the stack — see "Running it with Docker" in the README. Not what `preview_start` drives. |
+| `render.yaml` | Render Blueprint that deploys `backend/Dockerfile`'s `prod` target and `app/`'s static build — see "Deploying on Render" in the README. |
 
 Each of `backend/`, `backend/services/`, `backend/measurements/`,
 `backend/scripts/`, `fetcher/`, `app/`, `app/src/components/portfolio/` and
@@ -63,6 +64,12 @@ differently in a container than natively. It's an alternative, not the
 default: `preview_start` still drives the native processes above, not the
 containers.
 
+The only deployed copy runs on Render, from `render.yaml` — see "Deploying on
+Render" in the README. It builds the same `prod` Docker targets `docker-build.yml`
+already checks on every PR, not the `dev` targets compose runs; the data
+pipeline (this section, and #91's context) stays on GitHub Actions regardless
+of where the API and frontend are hosted.
+
 ## Tests
 
 ```bash
@@ -99,7 +106,9 @@ the **service role** key, which bypasses row-level security. RLS is enabled on
 expose that key to the frontend, never add a frontend-reachable path that lets a
 request choose what it reads, and never commit it. In `docker-compose.yml`,
 `backend/.env` is loaded only into the `backend` service for the same reason —
-it must never become a shared `env_file` the `app` service also reads.
+it must never become a shared `env_file` the `app` service also reads. On
+Render, the same rule means `SUPABASE_SERVICE_KEY` is set on the API service
+only, and never in an environment group also linked to the static site.
 
 That single credential is also why there are no user accounts — see "Portfolios
 live in the browser" below.

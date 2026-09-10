@@ -1,0 +1,77 @@
+# Render Blueprint - deploys the backend as a Docker web service and the
+# frontend as a static site (issue #91). See README.md "Deploying on
+# Render" for the two-pass setup this needs: CORS_ORIGINS and
+# VITE_API_BASE both name the *other* service's URL, which Render only
+# assigns once each service exists, so they start unset (sync: false)
+# and get filled in after the first deploy.
+services:
+  # ── API ──────────────────────────────────────────────────────────────
+  - type: web
+    name: market-analyser-api
+    runtime: docker
+    # Both paths are relative to the repo root regardless of rootDir, so
+    # there is no rootDir here - only dockerfilePath/dockerContext.
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # Builds the `prod` target: Python 3.12 (not Render's own Python
+    # default), no --reload, non-root user. See backend/Dockerfile.
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    # Deploy only once the "Backend tests" GitHub check has passed on
+    # the commit, not on every push.
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - backend/**
+      ignoredPaths:
+        - backend/tests/**
+        - backend/sql/**
+        - "**/CLAUDE.md"
+    envVars:
+      # backend/Dockerfile's prod CMD binds :8000; Render otherwise
+      # routes traffic to $PORT, which defaults to 10000.
+      - key: PORT
+        value: "8000"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      # The frontend's exact deployed origin, no trailing slash. Left
+      # unset until that origin is known - see the README section.
+      - key: CORS_ORIGINS
+        sync: false
+
+  # ── Frontend ─────────────────────────────────────────────────────────
+  - type: web
+    name: market-analyser
+    runtime: static
+    rootDir: app
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - app/**
+      ignoredPaths:
+        - "**/CLAUDE.md"
+    routes:
+      # react-router uses browser history routing (src/main.jsx), so a
+      # deep link like /etf/SMH/matrix has to fall back to index.html
+      # rather than 404. Render only applies this when no real file
+      # exists at the requested path, so /assets/*.js still serves
+      # itself untouched.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Matches app/Dockerfile's node:22-slim so this build behaves the
+      # same as the one already covered by docker-build.yml.
+      - key: NODE_VERSION
+        value: "22"
+      # Vite inlines this into the bundle at build time
+      # (app/src/utils/api.js), so it must include the /api suffix and
+      # changing it needs a rebuild, not just a restart. Left unset
+      # until the API's own URL is known - see the README section.
+      - key: VITE_API_BASE
+        sync: false
