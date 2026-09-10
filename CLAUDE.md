@@ -162,7 +162,7 @@ locally reasonable.
 | --- | --- | --- |
 | 400 | The request cannot be answered as asked | never retried |
 | 404 | The thing asked for does not exist | never retried |
-| 503 | The upstream could not be reached *right now* | retried every 3s |
+| 503 | The upstream could not be reached *right now* | retried on a backoff schedule |
 
 `DataUnavailable` → 503 and `SymbolNotFound` → 404 are mapped in
 `backend/main.py`; `app/src/utils/api.js`'s `isTransientError` and
@@ -170,6 +170,16 @@ locally reasonable.
 typo'd ticker got re-requested forever, and how one cold-start blip wedged the
 dashboard permanently. Do not catch either broadly, and do not answer 500 for
 "the data source is down".
+
+The 503's `Retry-After` is not always the same number (issue #92). A cold
+start or a generic outage sends 3, the frontend's usual starting point; Yahoo
+rate-limiting the backend's own outbound calls sends however many seconds are
+left on the cooldown `services/market_data.py` enters until it's willing to
+call yfinance again — up to 60. `app/src/utils/retrySchedule.js`'s auto-retry
+schedule (3s doubling to a 60s cap, giving up after 8 attempts) never waits
+less than that header says, on either side: retrying a rate limit every 3s is
+exactly the traffic that keeps it in place, and giving up forever would make
+a slow-but-recoverable failure look permanent.
 
 **2. Prices are adjusted, always, and history is tiered by age.** `prices` holds
 split- and dividend-adjusted OHLC (`auto_adjust=True` is passed explicitly on

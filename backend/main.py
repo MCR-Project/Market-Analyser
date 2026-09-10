@@ -64,13 +64,16 @@ def data_unavailable(request: Request, exc: DataUnavailable):
     The status code is the whole point: the frontend's useFetch auto-
     retries 5xx/429 and does not retry a 404, so a Yahoo/Supabase blip
     during startup now heals itself instead of parking the dashboard on
-    an error panel until someone reloads the page. Retry-After documents
-    the same interval useFetch already backs off by.
+    an error panel until someone reloads the page. Retry-After is
+    `exc.retry_after` (3 by default, or the seconds left on a rate-limit
+    cooldown - see market_data._live, issue #92): a lower bound the
+    frontend's own backoff schedule never waits less than, not a fixed
+    interval it copies.
     """
     return JSONResponse(
         status_code=503,
         content={"detail": str(exc)},
-        headers={"Retry-After": "3"},
+        headers={"Retry-After": str(exc.retry_after)},
     )
 
 
@@ -80,8 +83,8 @@ def symbol_not_found(request: Request, exc: SymbolNotFound):
 
     The mirror of the handler above, and the reason the two exceptions are
     kept apart: useFetch retries a 5xx and never retries a 4xx, so this is
-    what stops a typo'd ticker being re-requested every three seconds
-    forever under a panel that claims it is about to work.
+    what stops a typo'd ticker being re-requested on the frontend's backoff
+    schedule forever under a panel that claims it is about to work.
     """
     return JSONResponse(status_code=404, content={"detail": str(exc)})
 

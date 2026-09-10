@@ -11,6 +11,12 @@
  * Sending someone to check a server that's already up is a dead end, and
  * that's exactly what this panel used to do for every failure alike.
  * Returns {} for a network-level error, leaving the defaults in place.
+ *
+ * `error.retriesExhausted` (set by useFetch once its auto-retry budget
+ * runs out, issue #92) picks between two wordings for the same 429/5xx:
+ * while it's still retrying, saying so is accurate; once it has stopped,
+ * saying so would be a promise this panel can no longer keep, and the
+ * Retry button is the only way back.
  */
 export function describeFetchError(error) {
   const status = error?.status;
@@ -24,7 +30,9 @@ export function describeFetchError(error) {
   if (status === 429 || status >= 500) {
     return {
       title: 'Live data temporarily unavailable',
-      message: 'The backend is running, but the market-data source behind it did not answer. Retrying automatically.',
+      message: error?.retriesExhausted
+        ? 'The backend is running, but the market-data source behind it still has not answered after several attempts. Click Retry to try again.'
+        : 'The backend is running, but the market-data source behind it did not answer. Retrying automatically.',
     };
   }
   return {

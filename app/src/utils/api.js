@@ -20,12 +20,19 @@ const inFlight = new Map(); // url -> { promise, controller, refCount, abortTime
  * source warms up, 429 rate limiting) from one that never will (404 - no
  * such ETF). A network-level failure still surfaces as fetch()'s own
  * TypeError, which has no status.
+ *
+ * `retryAfter` (seconds, or null when the response carried none) is the
+ * backend's own Retry-After - a lower bound retrySchedule.js's backoff
+ * never waits less than, since it can be longer than the schedule would
+ * otherwise pick (a rate-limit cooldown, issue #92) and undercutting it
+ * would just re-ask before the backend is willing to try upstream again.
  */
 export class ApiError extends Error {
-  constructor(status, path) {
+  constructor(status, path, retryAfter = null) {
     super(`API ${status}: ${path}`);
     this.name = 'ApiError';
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -130,7 +137,13 @@ async function fetchJson(path, { signal, body } = {}) {
         };
     entry.promise = fetch(`${API_BASE}${path}`, init)
       .then(async (res) => {
-        if (!res.ok) throw new ApiError(res.status, path);
+        if (!res.ok) {
+          const header = res.headers.get('Retry-After');
+          const retryAfter = header !== null && Number.isFinite(Number(header))
+            ? Number(header)
+            : null;
+          throw new ApiError(res.status, path, retryAfter);
+        }
         const data = await res.json();
         cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
         return data;

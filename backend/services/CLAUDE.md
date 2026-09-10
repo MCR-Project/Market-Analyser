@@ -24,6 +24,19 @@ real upstream error. `_live()` is the only wrapper that converts a failure into
 `SymbolNotFound` (upstream said 404) or `DataUnavailable` (anything else); see
 `backend/CLAUDE.md` for why those two must never be collapsed.
 
+An upstream 429 is a third case (issue #92): `_live()` starts
+`_rate_limit_cooldown` (a `_RateLimitCooldown`, module-level singleton like
+`cache` above) and every call answers `DataUnavailable` without touching
+yfinance again until it expires, reporting the real time left as
+`retry_after` rather than the usual 3. Deliberately not part of `cache.py`'s
+TTL dict — it stores no answer, just the one process-wide fact that yfinance
+is throttling this process right now, which is what a *request* can be keyed
+by but a rate limit cannot: it applies to every call, not one. A test that
+triggers this (a 429, or a bare `YFRateLimitError`) must patch
+`services.market_data._rate_limit_cooldown` with a fresh instance — the real
+one is a genuine 60-second timer, and leaving it running leaks into whatever
+test runs next in the same process.
+
 `_upstream_status` walks the exception's `__cause__`/`__context__` chain and
 trusts `response.status_code` over `code`, because curl_cffi sets `code` to 0
 even on a genuine 404.
