@@ -1,0 +1,37 @@
+name: Docker image build check
+
+# Build-only smoke check: catches a broken Dockerfile/compose file at PR
+# time instead of months later. Does not push anywhere and does not change
+# how tests.yml, fetch-daily.yml or fetch-holdings.yml actually run - those
+# still use setup-python + pip, not these images (see issue #89).
+
+on:
+  pull_request:
+    paths:
+      - "backend/Dockerfile"
+      - "backend/.dockerignore"
+      - "app/Dockerfile"
+      - "app/.dockerignore"
+      - "app/nginx.conf"
+      - "fetcher/Dockerfile"
+      - "fetcher/.dockerignore"
+      - "fetcher/entrypoint.sh"
+      - "Dockerfile.tests"
+      - "tests-entrypoint.sh"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - ".github/workflows/docker-build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the compose services (backend, app dev targets; fetcher, tests behind the tools profile)
+        run: docker compose --profile tools build
+
+      - name: Build the production targets (not exercised by compose up)
+        run: |
+          docker build --target prod -t market-analyser-backend:prod backend
+          docker build --target prod -t market-analyser-app:prod app

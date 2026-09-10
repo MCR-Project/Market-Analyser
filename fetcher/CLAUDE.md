@@ -29,6 +29,12 @@ Flags come from `run_fetcher` and are identical everywhere: `--output`,
 `--delay` (default 1.5s between holdings requests), `--limit`, `--tickers`.
 No API keys are required for any provider.
 
+Or, skipping the local Chromium install: `docker compose run --rm fetcher
+vaneck --limit 5` from the repo root — the image bundles Chromium already
+matched to its pinned Playwright version, and writes JSON to `fetcher/output/`
+on the host (see the README). `entrypoint.sh` is what maps the provider name
+onto the right script; the flags above pass through unchanged.
+
 Both stages also run end-to-end through the "Fetch holdings and complete
 database (manual)" GitHub Action, which picks the provider from a dropdown and
 uploads the raw JSON as an artifact *before* touching Supabase, so the scrape

@@ -4,6 +4,11 @@ This directory tests **`fetcher/` only**. The backend has its own suite at
 `backend/tests/`; `pytest.ini` lists both as `testpaths`, so a bare `pytest` from
 the repo root runs everything.
 
+`docker compose run --rm tests` (from the repo root) runs the same `pytest`
+across both trees in a container built by `Dockerfile.tests` — for parity
+with CI on a machine with no local Python/Node setup, not as a replacement
+for running pytest directly. See the README's "Running it with Docker".
+
 ```
 conftest.py            puts fetcher/ on sys.path
 fetcher/test_*.py      one file per provider, plus test_common.py

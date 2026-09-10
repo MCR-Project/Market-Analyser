@@ -1,0 +1,8 @@
+# These get COPY'd into and executed inside Linux containers (see the
+# Dockerfiles under backend/, app/, fetcher/ and Dockerfile.tests). A CRLF
+# checkout - the default core.autocrlf=true behaviour on Windows - breaks a
+# shebang line and any multi-line RUN command that embeds one, so force LF
+# regardless of what the checking-out machine's git config says.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf

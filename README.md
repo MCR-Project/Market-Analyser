@@ -559,3 +559,66 @@ backend at `http://localhost:8000` by default. Set `VITE_API_BASE` in
 
 Start the backend and frontend in separate terminals, in either order, then
 open the frontend URL in your browser.
+
+## Running it with Docker
+
+The commands above stay the primary, documented way to run this locally.
+Docker is an alternative for a one-command start or a clean machine — it
+does not replace them.
+
+```bash
+docker compose up
+```
+
+builds and starts the backend and frontend in dev mode (hot reload on both —
+uvicorn `--reload`, Vite HMR — with each folder's source bind-mounted into
+its container). Backend on http://localhost:8000, frontend on
+http://localhost:5173, same as running them natively.
+
+A few things about this setup are load-bearing and worth knowing before you
+touch it:
+
+- **The frontend calls `http://localhost:8000/api`, not a compose service
+  name.** `VITE_API_BASE` in `docker-compose.yml` is deliberately the host's
+  published port. The app runs in your browser on the host, not inside the
+  compose network, so `http://backend:8000` would resolve for the backend
+  container and for nothing else.
+- **A missing `backend/.env` is fine.** `env_file` is marked optional, so a
+  fresh clone with no Supabase credentials still comes up — degraded to live
+  yfinance fallbacks and `stale: true`, exactly as a native run without
+  `.env` does (see "The data pipeline" above). Add `backend/.env` (from
+  `.env.example`) for the real, full-universe data.
+- **`app`'s `node_modules` is a named volume, not part of the bind mount.**
+  A host-installed `node_modules` carries platform-native esbuild/rollup
+  binaries; overlaying the container's own Linux-built copy with the bind
+  mount would make Vite fail to start.
+
+`fetcher` and `tests` are one-shot tools rather than long-running services,
+so they sit behind the `tools` compose profile and `docker compose up` never
+starts them:
+
+```bash
+# Run one provider's holdings scraper; JSON lands in fetcher/output/
+# (gitignored) on the host. Same --output/--tickers/--limit/--delay flags
+# as running the script directly - see "The data pipeline" above.
+docker compose run --rm fetcher vaneck --tickers SMH GDX --limit 5
+
+# Full test suite (backend/tests + tests/), or pytest args passed through
+docker compose run --rm tests
+docker compose run --rm tests -k portfolio
+
+# The frontend's ESLint, in the same image
+docker compose run --rm tests lint
+```
+
+The fetcher image needs no Supabase credentials — it only writes holdings
+JSON; loading that into Supabase with `scripts/complete_database.py` stays a
+separate, manual step, as it is without Docker. The tests image needs
+neither Supabase nor Chromium: fetcher tests parse checked-in fixtures and
+backend tests patch their network/Supabase seams — no test may touch either,
+in or out of Docker (see `CLAUDE.md`).
+
+Both `backend/Dockerfile` and `app/Dockerfile` also have a `prod` build
+target (nginx serving a static build, for `app`) for building production
+images. Nothing currently deploys them — `docker compose up` always runs the
+`dev` target.

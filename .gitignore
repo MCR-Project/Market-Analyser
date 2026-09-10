@@ -30,3 +30,7 @@ npm-debug.log*
 
 # Test files
 test.py
+
+# Holdings JSON written by `docker compose run --rm fetcher ...`
+# (see docker-compose.yml)
+fetcher/output/

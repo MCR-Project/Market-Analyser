@@ -1,0 +1,22 @@
+# Root build context, used only by Dockerfile.tests (pytest.ini's testpaths
+# span backend/tests and tests/, so that image builds from the repo root).
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.claude/
+
+app/node_modules/
+app/dist/
+app/.vite/
+
+# Holdings JSON written by `docker compose run --rm fetcher ...`
+fetcher/output/
+
+*.env
+*.env.*
+!*.env.example
+
+*.log
