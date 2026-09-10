@@ -620,5 +620,56 @@ in or out of Docker (see `CLAUDE.md`).
 
 Both `backend/Dockerfile` and `app/Dockerfile` also have a `prod` build
 target (nginx serving a static build, for `app`) for building production
-images. Nothing currently deploys them — `docker compose up` always runs the
-`dev` target.
+images. `docker compose up` always runs the `dev` target — see "Deploying on
+Render" below for where the `prod` target actually goes.
+
+## Deploying on Render
+
+`render.yaml` at the repo root is a
+[Render Blueprint](https://render.com/docs/blueprint-spec): it deploys the
+backend's `prod` Docker target as a web service and the frontend as a static
+site, both on the free plan. GitHub Actions keeps fetching and refreshing
+data exactly as it does today (see "Data pipeline" above) — Render only
+serves the API and the app, and does not run a cron job or a fetcher.
+
+To deploy for the first time:
+
+1. In the Render dashboard, **New → Blueprint**, and point it at this repo
+   (a private repo needs the Render GitHub app approved for the org first).
+2. Render prompts for every `sync: false` variable in `render.yaml`: enter
+   `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` from `backend/.env`. Leave
+   `CORS_ORIGINS` and `VITE_API_BASE` blank for now — neither service's URL
+   exists yet.
+3. Once both services have deployed once and you know their URLs (Render
+   may suffix the names in `render.yaml` if they were already taken):
+   - Set `CORS_ORIGINS` on the API to the static site's exact origin
+     (`https://<name>.onrender.com`, no trailing slash) — see
+     [`main.py`](backend/main.py) for what this controls.
+   - Set `VITE_API_BASE` on the static site to
+     `https://<api name>.onrender.com/api`, then use the dashboard's
+     **Save, rebuild, and deploy** — Vite inlines this into the bundle at
+     build time (`app/src/utils/api.js`), so a plain restart will not pick
+     up the change.
+
+A few things are worth checking after that, and worth knowing if something
+looks wrong:
+
+- **A green health check does not mean Supabase is connected.**
+  `get_client_optional()` (see "Environment and secrets" below) never
+  raises on bad credentials — the API boots and quietly serves yfinance's
+  top-~10 holdings with `stale: true` instead. Check
+  `GET /api/etf/SPY` for `"stale": false` to confirm the real thing is
+  wired up.
+- **A wrong `CORS_ORIGINS` or `VITE_API_BASE` looks like a permanently
+  loading dashboard, not an error.** The browser reports a CORS rejection
+  as `fetch`'s own network-level `TypeError`, which `isTransientError`
+  (`app/src/utils/api.js`) treats the same as a backend that has not
+  finished booting — so it retries forever instead of failing loudly. Open
+  the browser console; the real cause is there.
+- **The free plan sleeps the API after 15 minutes idle** and takes about a
+  minute to wake up. The frontend's existing cold-start retry (see
+  "The endpoints" above) already covers that wait with no changes needed.
+- **An ETF's price series is always a live yfinance call** — ETFs live in
+  `etfs`, not `prices`, so they never have DB rows to answer from. That
+  makes `GET /api/series/SPY?period=1mo` a quick way to check whether
+  Yahoo answers requests from Render's IP at all.
