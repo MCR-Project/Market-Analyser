@@ -19,6 +19,15 @@ CACHE_TTL_HOLDINGS = 3600    # 1 hour — ETF holdings, stock metadata
 # 10s means the next request naturally retries the DB almost immediately.
 CACHE_TTL_HOLDINGS_FALLBACK = 10
 
+# How long market_data._live() stops calling yfinance at all once Yahoo has
+# answered a live call with a 429 (issue #92). Not a cache TTL - it is not
+# keyed to any one request, and it never serves a cached answer, only a
+# fresh 503 - but it lives alongside the other durations for the same
+# reason: retrying a rate limit every few seconds is exactly the traffic
+# that keeps it in place, so every request pays the same cooldown instead
+# of each one re-discovering the 429 for itself.
+RATE_LIMIT_COOLDOWN_SECONDS = 60
+
 # Default parameters for correlation computation
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations

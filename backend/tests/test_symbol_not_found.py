@@ -27,7 +27,13 @@ from fastapi.testclient import TestClient
 
 from main import app
 from measurements import ALL_MEASUREMENTS
-from services.market_data import DataUnavailable, SymbolNotFound, _live, _upstream_status
+from services.market_data import (
+    DataUnavailable,
+    SymbolNotFound,
+    _RateLimitCooldown,
+    _live,
+    _upstream_status,
+)
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -104,11 +110,28 @@ class LiveClassificationTests(unittest.TestCase):
             _live("holdings for 'SPY'", boom)
 
     def test_a_rate_limit_stays_an_outage(self):
+        """A 429 is still a DataUnavailable here - the dedicated cooldown
+        mechanics (issue #92) are covered in test_transient_failures.py.
+        Runs against a fresh cooldown, not the real module-level one: a
+        429 legitimately starts it, and the real singleton would leak
+        that 60-second cooldown into every other test in this process."""
         def boom():
             raise UpstreamHTTPError(429)
 
-        with self.assertRaises(DataUnavailable):
-            _live("holdings for 'SPY'", boom)
+        with patch("services.market_data._rate_limit_cooldown", _RateLimitCooldown()):
+            with self.assertRaises(DataUnavailable):
+                _live("holdings for 'SPY'", boom)
+
+    def test_a_rate_limited_outage_reports_the_real_retry_after(self):
+        """The end-to-end version of the same fact: a rate-limited outage
+        answers 503 with the cooldown's own remaining time, not the
+        generic 3s every other DataUnavailable uses."""
+        with patch("api.routes.get_etf_info",
+                   side_effect=DataUnavailable("ETF info for 'SPY' is rate limited", retry_after=60)):
+            resp = client.get("/api/etf/SPY")
+
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.headers.get("Retry-After"), "60")
 
 
 class EndpointTests(unittest.TestCase):

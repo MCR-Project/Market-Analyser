@@ -91,26 +91,43 @@ Three things about it:
   dependency array, which React compares with `Object.is`. Those only agree for
   primitives. Pass `list.join(',')`, not the list. A dev-only `console.warn`
   catches violations.
-- **A transient failure auto-retries every 3s**; a stable one never does.
-  "Transient" is `isTransientError`: a network `TypeError`, or 429/5xx. This is
-  what makes a cold start heal itself — the backend binds its port well before
-  Yahoo or Supabase will answer it, so the requests that lose that race come back
-  503, not as connection failures. A 404 is a stable answer and must not retry.
+- **A transient failure auto-retries on a shared backoff schedule**
+  (`utils/retrySchedule.js`, issue #92); a stable one never does. "Transient"
+  is `isTransientError`: a network `TypeError`, or 429/5xx. This is what makes
+  a cold start heal itself — the backend binds its port well before Yahoo or
+  Supabase will answer it, so the requests that lose that race come back
+  503, not as connection failures. A 404 is a stable answer and must not
+  retry. The schedule starts at 3s and doubles up to a 60s cap — never
+  shorter than the failed response's own `Retry-After` (`ApiError.retryAfter`
+  in `utils/api.js`), which can be longer than 3s when the backend itself is
+  in a rate-limit cooldown rather than merely still booting — and gives up
+  after `MAX_AUTO_RETRIES` (8) consecutive failures, at which point
+  `error.retriesExhausted` is set so the UI can stop claiming to retry.
+  Flat 3s retries were the right fit for a cold start, which clears in
+  seconds, but the wrong one for Yahoo rate-limiting the backend's shared
+  cloud IP, which can take a full minute — retrying every 3s the whole time
+  was exactly the traffic that kept the block in place.
 - `retry(true)` marks that one attempt as forced, recorded against the attempt
   number rather than as a consumable flag — StrictMode invokes the effect twice
-  and a consumed flag left the second (the one the UI shows) unforced.
+  and a consumed flag left the second (the one the UI shows) unforced. Any
+  call to `retry()` — forced or not — also resets the auto-retry budget above,
+  since a deliberate click should always get a fresh attempt.
 
 `useMeasurements` fetches outside `useFetch` (one request per active measurement,
-keyed off a diff) and therefore reimplements the same retry rule by hand. If you
-add another such path, reimplement it too — inheriting no retry is how columns
-stayed permanently blank after a cold start.
+keyed off a diff) and therefore reimplements the same retry rule by hand,
+including the shared schedule and cap — a measurement whose requests keep
+failing stops retrying and renders as failed rather than staying in `loading`
+forever. If you add another such path, reimplement it too — inheriting no
+retry is how columns stayed permanently blank after a cold start.
 
 **Never render stale or invented data on failure.** Gate on `loading`/`error`,
 show `<Loading>` then `<ErrorState {...describeFetchError(error)} onRetry={retry} />`.
 `describeFetchError` distinguishes 404 ("check the symbol, this will not resolve
-on its own") from 5xx ("the backend is running, the source behind it did not
-answer, retrying") — sending someone to check a server that is already up is a
-dead end.
+on its own") from 5xx, and within 5xx, whether it's still auto-retrying
+("the backend is running, the source behind it did not answer, retrying") or
+has given up (`error.retriesExhausted` — points at the Retry button instead of
+promising a recovery the schedule has stopped chasing). Sending someone to
+check a server that is already up is a dead end.
 
 ## Rendering conventions
 

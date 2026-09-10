@@ -22,6 +22,8 @@ yfinance is free but has quirks:
   - Some historical rows contain NaN (holidays, delistings)
 """
 
+import math
+import time
 from datetime import date, timedelta
 
 import yfinance as yf
@@ -37,6 +39,7 @@ from config import (
     CORRELATION_PERIOD,
     CORRELATION_INTERVAL,
     PERIOD_TO_DAYS,
+    RATE_LIMIT_COOLDOWN_SECONDS,
     SECTOR_TAG,
 )
 
@@ -54,7 +57,18 @@ class DataUnavailable(RuntimeError):
     so one Yahoo hiccup while the server was warming up wedged the whole
     dashboard until the page was reloaded by hand. main.py turns this
     into a 503, which useFetch does retry.
+
+    `retry_after` (seconds) becomes the response's Retry-After header
+    (main.py). It defaults to 3 - a cold start clears in seconds - but
+    `_live()` raises with the real cooldown remaining when the failure was
+    Yahoo rate-limiting this process (issue #92), so the frontend's own
+    backoff never has to guess a number smaller than what would actually
+    help.
     """
+
+    def __init__(self, message: str, retry_after: int = 3):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class SymbolNotFound(LookupError):
@@ -93,6 +107,44 @@ def _upstream_status(exc: BaseException) -> int | None:
     return None
 
 
+class _RateLimitCooldown:
+    """Whether yfinance is throttling this process right now (issue #92).
+
+    Entered only by a live call failing with an upstream 429, and cleared
+    by nothing but time - there is no success path that ends it early,
+    because Yahoo answering one request does not mean it has stopped
+    limiting the rest. This is deliberately not `services.cache.TTLCache`:
+    a cache stores an *answer* keyed by request and skips genuinely empty
+    results; this stores no answer at all; it is one process-wide fact
+    ("Yahoo is rate-limiting us until T") that every live call checks
+    before it would otherwise dial out, which is what stops N open tabs
+    each re-discovering the same 429 every few seconds and keeping the
+    block in place.
+    """
+
+    def __init__(self, duration: int = RATE_LIMIT_COOLDOWN_SECONDS):
+        self.duration = duration
+        self._until = 0.0
+
+    def active(self) -> bool:
+        return time.time() < self._until
+
+    def remaining(self) -> int:
+        # Rounded up, never below 1: 0 would tell the frontend not to wait
+        # at all, the opposite of what a still-active cooldown means.
+        return max(1, math.ceil(self._until - time.time()))
+
+    def start(self) -> None:
+        self._until = time.time() + self.duration
+
+
+# Module-level singleton, like services.cache.cache - shared across every
+# caller in this process. Tests that need a clean cooldown patch this name
+# with a fresh instance (see test_transient_failures.py) rather than
+# mutating it, the same way they swap in a fresh TTLCache.
+_rate_limit_cooldown = _RateLimitCooldown()
+
+
 def _live(what: str, fn, *args, **kwargs):
     """Run a live-yfinance fallback, converting the failure into whichever
     of SymbolNotFound / DataUnavailable it actually is.
@@ -100,19 +152,44 @@ def _live(what: str, fn, *args, **kwargs):
     Only the *fallback* path is wrapped: a DB hit never reaches here, and
     the private _..._live helpers stay exception-transparent for the
     scripts that call them directly (scripts/fetch_daily.py wants the real
-    error, not a re-wrapped one).
+    error, not a re-wrapped one) - a script hard-failing on a rate limit is
+    correct, and it must not itself trip or observe this cooldown.
 
-    Neither outcome is cached. A 404 is stable enough to cache in
-    principle, but nothing re-asks for it — the frontend does not retry a
-    4xx — so caching would only add a way to pin a spurious 404 in place.
+    Neither a 404 nor a plain DataUnavailable is cached. A 404 is stable
+    enough to cache in principle, but nothing re-asks for it — the
+    frontend does not retry a 4xx — so caching would only add a way to pin
+    a spurious 404 in place.
+
+    A 429 is different from every other failure this function converts:
+    it means Yahoo is refusing *every* request from this process right
+    now, not just this one, so it starts `_rate_limit_cooldown` (issue
+    #92) before raising. While that cooldown is active, later calls raise
+    DataUnavailable without even attempting `fn` - the point is to stop
+    dialing out, not to fail faster.
     """
+    if _rate_limit_cooldown.active():
+        raise DataUnavailable(
+            f"{what} is temporarily unavailable upstream - rate limited",
+            retry_after=_rate_limit_cooldown.remaining(),
+        )
     try:
         return fn(*args, **kwargs)
     except Exception as exc:
-        if _upstream_status(exc) == 404:
+        status = _upstream_status(exc)
+        if status == 404:
             # `what` already reads "holdings for 'ZZZZ'" — quoting it again
             # would double the quotes in the message the frontend shows.
             raise SymbolNotFound(f"{what}: no such symbol upstream") from exc
+        if status == 429 or isinstance(exc, YFRateLimitError):
+            # yfinance's own YFRateLimitError carries no response/code at
+            # all (it's raised from parsed error text, not an HTTP
+            # exception), so _upstream_status alone would miss it - both
+            # checks are needed to catch every way a 429 actually arrives.
+            _rate_limit_cooldown.start()
+            raise DataUnavailable(
+                f"{what} is temporarily unavailable upstream - rate limited",
+                retry_after=_rate_limit_cooldown.remaining(),
+            ) from exc
         raise DataUnavailable(f"{what} is temporarily unavailable upstream") from exc
 
 

@@ -64,11 +64,13 @@ error panel.
 | --- | --- | --- | --- |
 | `ValueError` | the route (`HTTPException(400, …)`) | 400 | the request cannot be answered as asked |
 | `SymbolNotFound` | `main.py` handler | 404 | upstream answered, and the symbol does not exist |
-| `DataUnavailable` | `main.py` handler | 503 + `Retry-After: 3` | upstream could not be reached right now |
+| `DataUnavailable` | `main.py` handler | 503 + `Retry-After: exc.retry_after` | upstream could not be reached right now |
 
-`useFetch` retries 5xx/429 and never retries a 4xx. So:
+`useFetch` retries 5xx/429 and never retries a 4xx, on a backoff schedule
+(`app/src/utils/retrySchedule.js`) rather than a flat interval — see issue
+#92. So:
 
-- Answering 503 for a typo means retrying it every three seconds forever.
+- Answering 503 for a typo means retrying it forever.
 - Answering 404 for a Yahoo outage means the dashboard stays broken until
   someone reloads the page by hand.
 - Answering 500 for either means both, plus a stack trace in the log that reads
@@ -79,6 +81,17 @@ into one of these, by reading the HTTP status off the exception chain
 (`_upstream_status`). Do not add a blanket `except Exception` between a live call
 and that helper — an early one is what let a cold-start blip be cached as "SPY
 has no holdings".
+
+`DataUnavailable.retry_after` defaults to 3, but it isn't always 3: an
+upstream 429 (or a bare `YFRateLimitError`, which carries no status of its
+own) starts a process-wide cooldown — `_RateLimitCooldown` in
+`market_data.py` — that answers every request without even calling yfinance
+until it expires, and reports the real time left as `retry_after`. This is
+not a cache: a cache stores an answer per request and never one for a
+failure; the cooldown stores no answer at all, only the one fact "yfinance is
+rate-limiting us until T", checked by every live call regardless of what it
+was asking for. Without it, every open tab's own retry became more of the
+traffic that kept Yahoo's rate limit in place.
 
 `measurements/registry.py` re-raises both exceptions untouched rather than
 wrapping them in its generic 500, for the same reason.

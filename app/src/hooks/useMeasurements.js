@@ -15,6 +15,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useFetch } from './useFetch';
 import { api, isTransientError } from '../utils/api';
+import { MAX_AUTO_RETRIES, retryDelayMs } from '../utils/retrySchedule';
 
 export function useMeasurements(etfId) {
   const [activeIds, setActiveIds] = useState(null); // null = not yet initialized
@@ -22,6 +23,11 @@ export function useMeasurements(etfId) {
   const [loading, setLoading] = useState({});
   const abortRefs = useRef({});
   const retryTimersRef = useRef({});
+  // Consecutive auto-retries per measurement id (issue #92) - reset by
+  // clearRetry below, which already runs both when a measurement is
+  // deactivated and right before each fresh run(), so a re-enabled
+  // measurement always starts with a full budget.
+  const retryCountsRef = useRef({});
   const initializedRef = useRef(false);
   // Tracks what was fetched last time the results effect ran, so it can
   // diff against the new activeIds/etfId and only fetch what's actually
@@ -80,14 +86,19 @@ export function useMeasurements(etfId) {
         clearTimeout(retryTimersRef.current[id]);
         delete retryTimersRef.current[id];
       }
+      delete retryCountsRef.current[id];
     };
 
     // Results are fetched here rather than through useFetch (one request
     // per active measurement, keyed off a diff), so they don't inherit its
     // auto-retry and used to stay permanently blank after a cold start
-    // even once the backend recovered. Same rule as useFetch: re-ask on a
-    // transient failure, give up on a stable one. The controller is reused
-    // across retries so a toggle-off or ETF change still cancels the whole
+    // even once the backend recovered. Same rule as useFetch, on the same
+    // shared schedule (retrySchedule.js, issue #92): re-ask on a transient
+    // failure with a backoff that never re-asks a rate limit every 3s
+    // forever, give up on a stable one, and stop auto-retrying after
+    // MAX_AUTO_RETRIES so a column that never comes back reads as failed
+    // rather than loading forever. The controller is reused across
+    // retries so a toggle-off or ETF change still cancels the whole
     // chain, and `loading` deliberately stays true while retrying - it is
     // still loading.
     const run = (id, m, ctrl) => {
@@ -95,17 +106,24 @@ export function useMeasurements(etfId) {
       api.runMeasurement(m.route, { etf_id: etfId }, { signal: ctrl.signal })
         .then(data => {
           if (ctrl.signal.aborted) return;
+          delete retryCountsRef.current[id];
           setResults(prev => ({ ...prev, [id]: data }));
           setLoading(prev => ({ ...prev, [id]: false }));
         })
         .catch(err => {
           if (ctrl.signal.aborted) return;
           if (isTransientError(err)) {
-            retryTimersRef.current[id] = setTimeout(() => {
-              delete retryTimersRef.current[id];
-              if (!ctrl.signal.aborted) run(id, m, ctrl);
-            }, 3000);
-            return;
+            const count = (retryCountsRef.current[id] ?? 0) + 1;
+            if (count <= MAX_AUTO_RETRIES) {
+              retryCountsRef.current[id] = count;
+              const delayMs = retryDelayMs(count, (err.retryAfter ?? 0) * 1000);
+              retryTimersRef.current[id] = setTimeout(() => {
+                delete retryTimersRef.current[id];
+                if (!ctrl.signal.aborted) run(id, m, ctrl);
+              }, delayMs);
+              return;
+            }
+            delete retryCountsRef.current[id];
           }
           setResults(prev => ({ ...prev, [id]: null }));
           setLoading(prev => ({ ...prev, [id]: false }));
