@@ -162,6 +162,7 @@ locally reasonable.
 | --- | --- | --- |
 | 400 | The request cannot be answered as asked | never retried |
 | 404 | The thing asked for does not exist | never retried |
+| 429 | This client is asking faster than its own limit allows | retried on a backoff schedule |
 | 503 | The upstream could not be reached *right now* | retried on a backoff schedule |
 
 `DataUnavailable` → 503 and `SymbolNotFound` → 404 are mapped in
@@ -180,6 +181,13 @@ schedule (3s doubling to a 60s cap, giving up after 8 attempts) never waits
 less than that header says, on either side: retrying a rate limit every 3s is
 exactly the traffic that keeps it in place, and giving up forever would make
 a slow-but-recoverable failure look permanent.
+
+429 is a different upstream from 503, but the same contract: `backend/rate_limit.py`
+answers it, with its own `Retry-After`, when one client (identified by the
+`X-Forwarded-For` Render forwards, not the socket peer) exceeds its own
+per-minute budget on `/api/*` — a general one, and a tighter one just for
+`POST /api/portfolio/simulate` (issue #93). The frontend needs no changes for
+this: `isTransientError` already treats 429 the same as a 5xx.
 
 **2. Prices are adjusted, always, and history is tiered by age.** `prices` holds
 split- and dividend-adjusted OHLC (`auto_adjust=True` is passed explicitly on

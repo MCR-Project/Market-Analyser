@@ -428,6 +428,10 @@ not follow their later changes. The UI says so.
 
 ### The endpoints
 
+There is no account and no API key, so every request is anonymous — see
+"Bounding one anonymous client" below for what that means for how much any
+one caller can ask for.
+
 **`POST /api/portfolio/simulate`** — value a basket over a window. A POST
 with a body rather than a GET because a basket of holdings does not belong
 in a URL, even though it reads nothing and changes nothing. Nothing is
@@ -436,7 +440,7 @@ stored: the portfolio arrives in the request and leaves in the response.
 ```jsonc
 // request
 {
-  "holdings": [                      // 1–100 entries, tickers unique
+  "holdings": [                      // 1–50 entries, tickers unique
     { "ticker": "TXN", "weight": 60 },
     { "ticker": "MSFT", "weight": 40 }
   ],
@@ -503,7 +507,9 @@ Errors follow the convention used everywhere else here: **400** for a
 request that cannot be simulated, **404** for a holding that does not
 exist, **503** when the price source could not be reached. The first two
 are facts about the request and are not worth retrying; the third is a
-fact about right now, and the frontend retries it.
+fact about right now, and the frontend retries it. A caller who simulates
+faster than its own limit allows (below) gets **429** instead, with the
+same retry treatment as a 503.
 
 One edge is worth knowing, because the two are not distinguished as
 cleanly as that suggests. A basket where *some* holdings price and one
@@ -542,6 +548,28 @@ somebody has chosen it. Same shape plus `firstDate`, the earliest date
 there is a price for, which is what lets the UI warn that a holding will
 sit in cash for part of the window. **404** when upstream has no history
 for the symbol — a fact about the symbol, and not one to retry.
+
+### Bounding one anonymous client
+
+There are no accounts here (see "Where portfolios live, and why there is no
+account" above) and never will be, so a public deployment answers every
+request without knowing who sent it. Three independent limits bound what one
+caller can cost:
+
+- **A general rate limit on every `/api/*` request**, and a separate,
+  tighter one on `POST /api/portfolio/simulate` specifically — both per
+  client, both answering **429** with a `Retry-After` when exceeded, and
+  both configurable via `RATE_LIMIT_PER_MINUTE` /
+  `SIMULATE_RATE_LIMIT_PER_MINUTE` (defaults 120 and 20 per minute — see
+  `.env.example`). Ordinary use of the dashboard, including comparing
+  several portfolios, stays well under either.
+- **`?refresh=true` is throttled per ETF**, not per client: it reaches
+  Yahoo at most once every five minutes for a given fund, however many
+  people ask for it in that window. A refresh inside that window is served
+  the normal cached answer rather than refused.
+- **A simulation is capped at 50 holdings.** Comfortably more than any real
+  portfolio built here has needed, and well inside what a single request
+  from an unauthenticated caller should be able to ask for.
 
 ## Frontend
 

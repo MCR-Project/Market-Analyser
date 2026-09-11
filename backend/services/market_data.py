@@ -38,6 +38,7 @@ from config import (
     CACHE_TTL_HOLDINGS_FALLBACK,
     CORRELATION_PERIOD,
     CORRELATION_INTERVAL,
+    FORCE_REFRESH_THROTTLE_SECONDS,
     PERIOD_TO_DAYS,
     RATE_LIMIT_COOLDOWN_SECONDS,
     SECTOR_TAG,
@@ -193,6 +194,40 @@ def _live(what: str, fn, *args, **kwargs):
         raise DataUnavailable(f"{what} is temporarily unavailable upstream") from exc
 
 
+# ── Refresh throttling ──────────────────────────────────────────────────────────
+
+# key -> last time a force_refresh request for it actually bypassed the
+# cache. Deliberately separate from `cache` above: this never holds an
+# answer, only a timestamp, and it is checked before the cache read
+# rather than instead of it.
+_last_force_refresh: dict[str, float] = {}
+
+
+def _throttled_force_refresh(key: str, force_refresh: bool) -> bool:
+    """Whether a force_refresh request for `key` should actually bypass
+    the cache right now (issue #93). False for an ordinary request
+    (force_refresh already false), and also false for a refresh request
+    that arrives within FORCE_REFRESH_THROTTLE_SECONDS of the last one
+    this key was granted - that one falls through to the normal cached
+    read instead of being refused outright, so the caller still gets an
+    answer, just not a freshly-fetched one.
+
+    Per-key, not per-client: `key` is the same string get_etf_info/
+    get_etf_holdings already cache under (e.g. "etf_info:SPY"), so two
+    different visitors refreshing the same ETF seconds apart share one
+    throttle rather than doubling the upstream cost just because they
+    are not the same client.
+    """
+    if not force_refresh:
+        return False
+    now = time.time()
+    last = _last_force_refresh.get(key)
+    if last is not None and now - last < FORCE_REFRESH_THROTTLE_SECONDS:
+        return False
+    _last_force_refresh[key] = now
+    return True
+
+
 # ── Tracked ETF universe ──────────────────────────────────────────────────────
 
 def list_etfs() -> list[str]:
@@ -335,9 +370,15 @@ def get_etf_info(etf_id: str, force_refresh: bool = False) -> dict:
     Raises DataUnavailable if there's no DB row and the live fallback
     can't reach Yahoo - nothing is cached in that case, so the next
     request retries immediately.
+
+    A force_refresh is itself throttled to once per FORCE_REFRESH_THROTTLE_SECONDS
+    for this ETF (issue #93) - anyone can ask for `?refresh=true`, so
+    without this an anonymous client could force an upstream fetch for
+    the same fund as often as it likes. A refresh that arrives inside
+    another one's window is served like a normal (cached) request.
     """
     key = f"etf_info:{etf_id}"
-    if not force_refresh:
+    if not _throttled_force_refresh(key, force_refresh):
         cached = cache.get(key)
         if cached:
             return cached
@@ -444,9 +485,14 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
     Raises DataUnavailable if there are no DB rows and the live fallback
     can't reach Yahoo. Only a real empty answer is cached below; a failure
     deliberately isn't, so the next request retries at once.
+
+    A force_refresh is itself throttled to once per FORCE_REFRESH_THROTTLE_SECONDS
+    for this ETF (issue #93, same mechanism as get_etf_info above) - a
+    refresh that arrives inside another one's window is served like a
+    normal (cached) request rather than refused outright.
     """
     key = f"etf_holdings:{etf_id}"
-    if not force_refresh:
+    if not _throttled_force_refresh(key, force_refresh):
         cached = cache.get(key)
         if cached is not None:
             return cached

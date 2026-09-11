@@ -111,10 +111,19 @@ from services.market_data import (
 )
 from services.tickers import resolve_ticker
 
-# A ceiling on basket size, so one request cannot ask for an unbounded
-# price read. Well clear of what a portfolio copied from a tracked ETF
-# holds (only constituents weighing >=1% of their fund are tracked).
-MAX_HOLDINGS = 100
+# A ceiling on basket size, so one anonymous request cannot ask for an
+# unbounded price read (issue #93). Well clear of what a portfolio copied
+# from a tracked ETF holds (only constituents weighing >=1% of their fund
+# are tracked), and of any real portfolio anyone has actually built here.
+#
+# Not primarily a memory limit: measured in the prod image capped at
+# 512MB (docker run --memory 512m), a window=max simulation over a
+# deliberately old-inception 32-year daily history peaked at 174MB for
+# 100 holdings and 149MB for 50 - a third of the cap either way, with
+# room to spare. The real cost this bounds is latency and CPU for one
+# HTTP request from a caller who has proven nothing about who they are:
+# the same run took 3.52s at 100 holdings and 1.96s at 50.
+MAX_HOLDINGS = 50
 
 # How often the target weights are restored. "none" is buy and hold.
 REBALANCE_FREQUENCIES = ("none", "monthly", "quarterly", "yearly")

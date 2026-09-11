@@ -185,7 +185,11 @@ had not listed yet (→ cash, the normal case), or a holding whose resolved
 `DataUnavailable`, 503, because the read failed). Do not simplify this back into
 two cases.
 
-`MAX_HOLDINGS = 100` bounds the price read one request can ask for. `MONEY_DP`
+`MAX_HOLDINGS = 50` bounds the price read one anonymous request can ask for
+(issue #93) — measured against a real 512MB-capped container, not primarily a
+memory concern (a 32-year, 100-holding run peaked at 174MB), but latency and
+CPU cost per request from a caller who has proven nothing about who they are.
+`MONEY_DP`
 rounds each holding's value and sums the total from those rounded parts, so a
 stacked chart's bands add up to exactly the total line drawn above them —
 computing the total independently would leave them a cent apart.

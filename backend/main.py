@@ -1,10 +1,11 @@
 """
 FastAPI application entry point.
 
-Mounts the /api router, enables CORS for frontend dev servers,
-exposes a /health endpoint for liveness checks, and maps DataUnavailable
-onto 503 so a transient upstream failure reads as retryable rather than
-as a bug (500) or as a missing resource (404).
+Mounts the /api router, enables CORS for frontend dev servers, rate-limits
+/api/* per client (issue #93), exposes a /health endpoint for liveness
+checks, and maps DataUnavailable onto 503 so a transient upstream failure
+reads as retryable rather than as a bug (500) or as a missing resource
+(404).
 
 Start with:  python -m uvicorn main:app --port 8000 --reload
 API docs at: http://localhost:8000/docs
@@ -17,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from api.routes import router
 from measurements.registry import measurement_router
+from rate_limit import RateLimitMiddleware
 from services.market_data import DataUnavailable, SymbolNotFound
 
 try:
@@ -40,6 +42,15 @@ allow_origins = [
     for origin in os.environ.get("CORS_ORIGINS", _default_origins).split(",")
     if origin.strip()
 ]
+
+# Added before CORSMiddleware so CORSMiddleware ends up the outermost
+# layer (Starlette wraps in reverse add-order) and still runs on a
+# request RateLimitMiddleware short-circuits with a 429. Added the other
+# way round, a rate-limited browser request comes back with no
+# Access-Control-Allow-Origin header at all - the browser then discards
+# the response as a CORS failure before the frontend's own code ever
+# sees the 429 or its Retry-After.
+app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -30,7 +30,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 
 from services.cache import TTLCache
-from services.market_data import _closes_live, _correlation_summary, _get_price_series_live, get_etf_holdings
+from services.market_data import (
+    _closes_live,
+    _correlation_summary,
+    _get_price_series_live,
+    _throttled_force_refresh,
+    get_etf_holdings,
+    get_etf_info,
+)
 
 
 class GetPriceSeriesLiveTests(unittest.TestCase):
@@ -213,6 +220,99 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["strongest"], {"a": "A", "b": "B", "value": 1.0})
         self.assertEqual(result["weakest"], {"a": "A", "b": "C", "value": -1.0})
         self.assertEqual(result["averages"], {"A": 0, "B": 0, "C": -1})
+
+
+class ThrottledForceRefreshTests(unittest.TestCase):
+    """_throttled_force_refresh in isolation (issue #93). Every test here
+    patches in a fresh dict - the real _last_force_refresh is a genuine
+    5-minute-per-key store and would otherwise leak between tests the
+    same way _rate_limit_cooldown would without the same care
+    (test_transient_failures.py)."""
+
+    def test_false_when_not_requested(self):
+        with patch("services.market_data._last_force_refresh", {}):
+            self.assertFalse(_throttled_force_refresh("etf_info:SPY", False))
+
+    def test_true_on_first_request_for_a_key(self):
+        with patch("services.market_data._last_force_refresh", {}):
+            self.assertTrue(_throttled_force_refresh("etf_info:SPY", True))
+
+    def test_false_for_a_second_request_inside_the_window(self):
+        with patch("services.market_data._last_force_refresh", {}), \
+             patch("services.market_data.time.time", side_effect=[1_000.0, 1_000.0 + 60]):
+            self.assertTrue(_throttled_force_refresh("etf_info:SPY", True))
+            self.assertFalse(_throttled_force_refresh("etf_info:SPY", True))
+
+    def test_true_again_once_the_window_has_passed(self):
+        with patch("services.market_data._last_force_refresh", {}), \
+             patch("services.market_data.time.time", side_effect=[1_000.0, 1_000.0 + 301]):
+            self.assertTrue(_throttled_force_refresh("etf_info:SPY", True))
+            self.assertTrue(_throttled_force_refresh("etf_info:SPY", True))
+
+    def test_different_keys_do_not_share_a_throttle(self):
+        with patch("services.market_data._last_force_refresh", {}):
+            self.assertTrue(_throttled_force_refresh("etf_info:SPY", True))
+            self.assertTrue(_throttled_force_refresh("etf_info:SMH", True))
+
+
+class ForceRefreshIntegrationTests(unittest.TestCase):
+    """get_etf_info/get_etf_holdings honouring the throttle end to end -
+    the public functions a route actually calls, not just the private
+    helper above."""
+
+    def test_two_refreshes_within_the_window_reach_live_once(self):
+        with patch("services.market_data.cache", TTLCache()), \
+             patch("services.market_data._last_force_refresh", {}), \
+             patch("services.market_data._get_etf_info_db", return_value=None), \
+             patch("services.market_data._get_etf_info_live",
+                   return_value={"id": "SPY", "name": "SPDR S&P 500", "cat": "", "aum": 0, "desc": ""}) as mock_live:
+            first = get_etf_info("SPY", force_refresh=True)
+            second = get_etf_info("SPY", force_refresh=True)
+
+        self.assertEqual(mock_live.call_count, 1)
+        self.assertEqual(first, second)
+
+    def test_a_refresh_outside_the_window_reaches_live_again(self):
+        """The mirror of the test above: throttling a refresh must not
+        become refusing one forever."""
+        import time as time_module
+
+        with patch("services.market_data.cache", TTLCache()), \
+             patch("services.market_data._last_force_refresh",
+                   {"etf_info:SPY": time_module.time() - 301}), \
+             patch("services.market_data._get_etf_info_db", return_value=None), \
+             patch("services.market_data._get_etf_info_live",
+                   return_value={"id": "SPY", "name": "SPDR S&P 500", "cat": "", "aum": 0, "desc": ""}) as mock_live:
+            get_etf_info("SPY", force_refresh=True)
+
+        mock_live.assert_called_once()
+
+    def test_a_plain_request_is_never_throttled(self):
+        """force_refresh=False must always read the cache normally -
+        the throttle only ever governs *bypassing* it."""
+        with patch("services.market_data.cache", TTLCache()), \
+             patch("services.market_data._last_force_refresh", {}), \
+             patch("services.market_data._get_etf_info_db",
+                   return_value={"id": "SPY", "name": "SPDR S&P 500", "cat": "", "aum": 0, "desc": ""}) as mock_db:
+            get_etf_info("SPY")
+            get_etf_info("SPY")
+
+        # The second call is a cache hit either way (10s DB-path TTL),
+        # so this pins the *reason* it wasn't fetched twice is the
+        # ordinary cache, not the refresh throttle never having been
+        # exercised at all.
+        self.assertEqual(mock_db.call_count, 1)
+
+    def test_holdings_refresh_is_throttled_the_same_way(self):
+        with patch("services.market_data.cache", TTLCache()), \
+             patch("services.market_data._last_force_refresh", {}), \
+             patch("services.market_data._get_etf_holdings_db", return_value=None), \
+             patch("services.market_data._get_etf_holdings_live",
+                   return_value=[["NVDA", 8.0]]) as mock_live:
+            get_etf_holdings("SPY", force_refresh=True)
+            get_etf_holdings("SPY", force_refresh=True)
+
+        self.assertEqual(mock_live.call_count, 1)
 
 
 if __name__ == "__main__":

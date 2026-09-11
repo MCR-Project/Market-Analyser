@@ -19,8 +19,9 @@ Interactive API docs at `http://localhost:8000/docs`, liveness at `/health`.
 ## Layout
 
 ```
-main.py                  app object, CORS, exception→status mapping, /health
+main.py                  app object, CORS, rate limiting, exception→status mapping, /health
 config.py                TTLs, period→days table, sector-tag normalisation, doc-example defaults
+rate_limit.py            per-client request limiting on /api/* — see "Errors are the API"
 api/routes.py            every /api endpoint except the measurement ones
 services/                data access and arithmetic — see services/CLAUDE.md
 measurements/            the column plugin system — see measurements/CLAUDE.md
@@ -56,14 +57,17 @@ want the real upstream exception rather than a re-wrapped one.
 
 ## Errors are the API
 
-Three exceptions, three status codes, and the difference between them is the
-whole reason the frontend recovers from a cold start instead of parking on an
-error panel.
+Three exceptions map onto three of these status codes, and the difference
+between them is the whole reason the frontend recovers from a cold start
+instead of parking on an error panel. The fourth, 429, isn't an exception at
+all — `RateLimitMiddleware` (`rate_limit.py`) decides it before a route ever
+runs, the same way `CORSMiddleware` can answer a preflight without one.
 
 | Raised | Mapped in | Status | Meaning |
 | --- | --- | --- | --- |
 | `ValueError` | the route (`HTTPException(400, …)`) | 400 | the request cannot be answered as asked |
 | `SymbolNotFound` | `main.py` handler | 404 | upstream answered, and the symbol does not exist |
+| *(none — `RateLimitMiddleware`)* | `rate_limit.py`, before the route | 429 + `Retry-After` | this client exceeded its own request budget (issue #93) |
 | `DataUnavailable` | `main.py` handler | 503 + `Retry-After: exc.retry_after` | upstream could not be reached right now |
 
 `useFetch` retries 5xx/429 and never retries a 4xx, on a backoff schedule
@@ -95,6 +99,31 @@ traffic that kept Yahoo's rate limit in place.
 
 `measurements/registry.py` re-raises both exceptions untouched rather than
 wrapping them in its generic 500, for the same reason.
+
+## Bounding one anonymous client (issue #93)
+
+The API has no accounts (see "Where portfolios live, and why there is no
+account" in the README), so every request is anonymous. Three independent
+limits, none of them new status codes beyond the 429 above:
+
+- **`rate_limit.py`'s two `FixedWindowLimiter`s** — a general one on every
+  `/api/*` request and a tighter one just for `POST /api/portfolio/simulate`,
+  both per client (`X-Forwarded-For`, Render's convention for the real
+  address — never the socket peer, which on Render is always the proxy).
+  In-process and per-instance by design, like `_rate_limit_cooldown` above;
+  a multi-instance deployment would need a shared store instead. `/health` is
+  never limited, or Render's own health check could take the service down.
+- **`market_data._throttled_force_refresh`** — `GET /api/etf/{id}?refresh=true`
+  reaches upstream at most once per `FORCE_REFRESH_THROTTLE_SECONDS` (5 min)
+  for that ETF. Per-ETF, not per-client: the cost it guards is an upstream
+  call for that fund, whoever asks. A refresh inside another one's window is
+  served like a normal cached request, not refused.
+- **`services/portfolio.py`'s `MAX_HOLDINGS`** (50) bounds one simulation's
+  basket size. Measured against a real 512MB-capped container rather than
+  guessed: a 100-holding, 32-year run peaked at 174MB, so this was never
+  actually close to a memory ceiling — the real thing it bounds is latency
+  and CPU for a request from a caller who has proven nothing about who they
+  are.
 
 Validation that both HTTP callers and internal callers need lives in the service
 (`resolve_window` raises `ValueError` naming the offending parameter); the route
@@ -188,6 +217,14 @@ Conventions:
   different result depending on whether it answered.
 - Supabase is faked with a write-hostile double where the point is that nothing
   is written.
+- **Every `TestClient` reports the same address** (`("testclient", 50000)`), so
+  every `/api/*` call made anywhere in this suite shares one bucket on the real
+  `rate_limit.general_limiter`/`simulate_limiter` (issue #93) — there is real,
+  if generous, headroom (33 such calls across the whole suite today against a
+  120/min default), but a test that needs to actually trip a limit patches in
+  a fresh `FixedWindowLimiter` (`test_rate_limit.py`) rather than looping real
+  requests against the shared singleton, the same way a 429 test patches a
+  fresh `_RateLimitCooldown` instead of touching the real one (issue #92).
 
 ## SQL
 
