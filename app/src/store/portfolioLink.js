@@ -35,7 +35,7 @@
  * couple of hundred bytes on a link nobody types by hand.
  *
  * A 20-holding portfolio comes out around 400 characters and a full
- * hundred-holding one around 1.8 kB — links that survive being pasted
+ * fifty-holding one around 900 bytes — links that survive being pasted
  * into a chat window.
  */
 import { CONTRIBUTION_FREQUENCIES, REBALANCE_FREQUENCIES } from './portfolioStorage';
@@ -60,10 +60,10 @@ const READABLE_VERSIONS = [1, 2];
  *  every shared link. */
 export const SHARE_PARAM = 'p';
 
-/** Mirrors MAX_HOLDINGS in backend/services/portfolio.py: a link that
- *  decoded happily and then failed to simulate would be a link that is
- *  broken twice. */
-export const MAX_LINK_HOLDINGS = 100;
+/** Mirrors MAX_HOLDINGS in backend/services/portfolio.py (issue #93): a
+ *  link that decoded happily and then failed to simulate would be a link
+ *  that is broken twice. */
+export const MAX_LINK_HOLDINGS = 50;
 
 /** Long enough for any name worth reading, short enough that the payload
  *  cannot be padded out with one. */
@@ -71,7 +71,7 @@ const MAX_NAME = 120;
 
 /** The ceiling on the encoded payload, checked before anything is decoded
  *  — the point of a size limit is to refuse work, not to do it first. A
- *  full 100-holding portfolio encodes to roughly 1.8 kB, so this leaves
+ *  full 50-holding portfolio encodes to roughly 900 bytes, so this leaves
  *  room without leaving the door open. */
 const MAX_PAYLOAD = 8192;
 

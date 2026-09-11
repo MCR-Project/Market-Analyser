@@ -28,6 +28,16 @@ CACHE_TTL_HOLDINGS_FALLBACK = 10
 # of each one re-discovering the 429 for itself.
 RATE_LIMIT_COOLDOWN_SECONDS = 60
 
+# How often a `refresh=true` request may actually bypass the cache for one
+# ETF (issue #93). Anyone can trigger GET /api/etf/{id}?refresh=true, so
+# without this, an anonymous client could force an upstream fetch for the
+# same fund as often as it likes. Per-ETF rather than per-client: the cost
+# this guards against is an upstream call for that fund, whoever asks for
+# it. A request that arrives inside the window is served exactly like a
+# normal request rather than refused - it still gets an answer, just not
+# a freshly-fetched one.
+FORCE_REFRESH_THROTTLE_SECONDS = 300
+
 # Default parameters for correlation computation
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations
