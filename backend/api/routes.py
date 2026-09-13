@@ -205,14 +205,19 @@ def get_correlation(
     tickers = [h[0] for h in holdings]
     result = compute_correlation_matrix(tickers, period=period)
 
-    # Count edges above threshold for the network view
+    # Count edges above threshold for the network view. A null pair (not
+    # enough overlapping history to correlate at all - issue #97) is
+    # explicitly not an edge, rather than relying on `.get(b, 0)` to turn a
+    # missing key into 0 - the key is always present now, holding None,
+    # and `None >= threshold` would raise.
     if threshold > 0:
         edge_count = 0
         available = result["tickers"]
         for i, a in enumerate(available):
             for j in range(i + 1, len(available)):
                 b = available[j]
-                if result["matrix"].get(a, {}).get(b, 0) >= threshold:
+                value = result["matrix"].get(a, {}).get(b)
+                if value is not None and value >= threshold:
                     edge_count += 1
         result["edgeCount"] = edge_count
         result["threshold"] = threshold

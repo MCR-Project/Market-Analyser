@@ -50,9 +50,12 @@ export const EtfDashboard = memo(function EtfDashboard() {
   const corrData = useLiveCorrelation(etfId);
   const sectors = useLiveSectors(etfId);
 
+  // null when there's nothing to average — no holdings have a usable
+  // correlation yet, or the fetch itself failed — rather than a
+  // reassuring 0.00 that isn't a real measurement of anything (issue #97).
   const avgCorr = useMemo(() => {
-    const vals = Object.values(corrData.averages || {});
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    const vals = Object.values(corrData.averages || {}).filter(v => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [corrData.averages]);
 
   const { arr, dates, loading } = useLiveSeries(etfId, timeframe);
@@ -110,7 +113,7 @@ export const EtfDashboard = memo(function EtfDashboard() {
             <div className="relative group/stats flex gap-6 flex-wrap pt-3 border-t border-[var(--divider)]">
               <Stat label="NET ASSETS" value={fmtMoney(etf.aum)} danger={stale} />
               <Stat label="HOLDINGS" value={tickers.length} danger={stale} />
-              <Stat label="AVG ρ" value={corrData.loading ? <Loading variant="skeleton" lines={1} style={{ width: 32 }} /> : fmtCorr(avgCorr)} danger={stale} />
+              <Stat label="AVG ρ" value={corrData.loading ? <Loading variant="skeleton" lines={1} style={{ width: 32 }} /> : (avgCorr == null ? '—' : fmtCorr(avgCorr))} danger={stale} />
 
               {stale && (
                 <div className="pointer-events-none absolute left-0 bottom-full mb-2.5 w-64 opacity-0 -translate-y-1 group-hover/stats:opacity-100 group-hover/stats:translate-y-0 transition-all duration-150 z-20">

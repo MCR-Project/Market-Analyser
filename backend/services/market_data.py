@@ -39,6 +39,7 @@ from config import (
     CORRELATION_PERIOD,
     CORRELATION_INTERVAL,
     FORCE_REFRESH_THROTTLE_SECONDS,
+    MIN_OVERLAPPING_RETURNS,
     PERIOD_TO_DAYS,
     RATE_LIMIT_COOLDOWN_SECONDS,
     SECTOR_TAG,
@@ -856,48 +857,78 @@ def _correlation_summary(returns: pd.DataFrame, tickers: list[str]) -> dict:
     stats: per-ticker averages, strongest/weakest pairs, and the "hub"
     ticker (highest average correlation to all peers).
 
+    A pair with fewer than MIN_OVERLAPPING_RETURNS overlapping (jointly
+    non-null) daily returns reports `None`, not 0.0 (issue #97) - absence
+    of enough shared history is not the same claim as "moves
+    independently", and defaulting it to zero let a holding that had just
+    listed pull its own average toward zero and read as the fund's best
+    diversifier. `returns.corr(min_periods=...)` enforces this per pair
+    (pandas' own pairwise-complete-observations rule), which is why the
+    caller must not `dropna()` the frame first - that would collapse every
+    column onto the intersection of dates all of them share, silently
+    shrinking a well-established holding's own history down to whatever a
+    newly-listed one has.
+
+    A ticker's self-correlation is always exactly 1.0 regardless of how
+    little history it has - that's the definition of correlating a series
+    with itself, not a claim `min_periods` should ever be allowed to
+    unset.
+
+    Averages, strongest/weakest, and hub are all computed over the pairs
+    that exist: a null pair contributes to none of them, and a ticker with
+    no usable peer (or fewer than two available tickers overall) reports a
+    null average rather than 0, and cannot become the hub.
+
     Shared by both the DB path and the live yfinance path - the only thing
     that differs between them is how `returns` was derived.
     """
     available = [t for t in tickers if t in returns.columns]
     returns = returns[available]
 
-    corr_matrix = returns.corr()
+    corr_matrix = returns.corr(min_periods=MIN_OVERLAPPING_RETURNS)
 
     matrix = {}
     for t in available:
         matrix[t] = {}
         for t2 in available:
+            if t == t2:
+                matrix[t][t2] = 1.0
+                continue
             val = corr_matrix.loc[t, t2]
-            matrix[t][t2] = round(float(val), 4) if not np.isnan(val) else 0.0
+            matrix[t][t2] = round(float(val), 4) if not np.isnan(val) else None
 
     averages = {}
-    # strongest/weakest/hub start unset (None / no ticker) rather than at
-    # out-of-range sentinels (-1 / 2 / 0) - with fewer than two available
-    # tickers there's no pair to compare, and a hardcoded sentinel used to
-    # leak straight into the response unexamined; with an all-negative
-    # correlation set, a hardcoded avgCorr=0 could out-rank every real
-    # (negative) average and leak too. Tracking "still unset" explicitly
-    # means the first real value seen always wins instead of being
-    # compared against a fake baseline.
+    # strongest/weakest/hub start unset (None) rather than at out-of-range
+    # sentinels (-1 / 2) or a hardcoded avgCorr=0 - with fewer than two
+    # available tickers, or nothing but null pairs, there's no real value
+    # to report, and a hardcoded baseline either leaks a fake answer
+    # straight into the response or gets out-ranked by every genuine
+    # negative average. Tracking "still unset" explicitly means the first
+    # real value seen always wins instead of being compared against a
+    # fake one.
     strongest = None
     weakest = None
-    hub = {"ticker": "", "avgCorr": 0}
+    hub = None
     best_avg = None
 
     for i, a in enumerate(available):
-        # Average correlation of ticker `a` to all other tickers
-        others = [matrix[a].get(b, 0) for b in available if b != a]
-        avg = sum(others) / len(others) if others else 0
-        averages[a] = round(avg, 4)
-        if best_avg is None or avg > best_avg:
+        # Average correlation of ticker `a` to the peers it has a real
+        # (non-null) pair with - skipping null pairs rather than treating
+        # them as 0, and reporting None rather than 0 when there are none.
+        others = [matrix[a][b] for b in available if b != a and matrix[a][b] is not None]
+        avg = round(sum(others) / len(others), 4) if others else None
+        averages[a] = avg
+        if avg is not None and (best_avg is None or avg > best_avg):
             best_avg = avg
-            hub = {"ticker": a, "avgCorr": round(avg, 4)}
+            hub = {"ticker": a, "avgCorr": avg}
 
-        # Check upper triangle for strongest/weakest pair
+        # Check upper triangle for strongest/weakest pair, skipping nulls -
+        # an unknown pair is not a candidate for either title.
         for j in range(i + 1, len(available)):
             b = available[j]
-            v = matrix[a].get(b, 0)
+            v = matrix[a][b]
+            if v is None:
+                continue
             if strongest is None or v > strongest["value"]:
                 strongest = {"a": a, "b": b, "value": v}
             if weakest is None or v < weakest["value"]:
@@ -1271,8 +1302,15 @@ def compute_correlation_matrix(
     if closes is None:
         return {"matrix": {}, "tickers": tickers}
 
-    # Daily returns, drop the first NaN row
-    returns = closes.pct_change().dropna()
+    # Daily returns. Deliberately not `.dropna()`'d here - that would drop
+    # every row where *any* column is still NaN (a holding that hasn't
+    # listed yet), collapsing the whole frame onto the intersection of
+    # dates every requested ticker shares and quietly truncating an
+    # established holding's history down to a newly-listed one's few
+    # weeks. `_correlation_summary` computes each pair over its own
+    # overlap instead (issue #97), via pandas' pairwise-complete-
+    # observations handling of NaN in `.corr()`.
+    returns = closes.pct_change()
     result = _correlation_summary(returns, tickers)
 
     cache.set(key, result, CACHE_TTL_SECONDS)

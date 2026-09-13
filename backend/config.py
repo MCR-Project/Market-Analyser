@@ -42,6 +42,14 @@ FORCE_REFRESH_THROTTLE_SECONDS = 300
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations
 
+# Fewer overlapping daily returns than this and a pair's correlation is
+# unknown, not zero (issue #97) - a Pearson r computed on a handful of rows
+# is mostly noise, and reporting one at all invites reading it as a real
+# measurement. 30 is about six trading weeks: short enough that a holding
+# priced for a full quarter still gets a real number, long enough to
+# exclude a holding that listed only two or three weeks ago.
+MIN_OVERLAPPING_RETURNS = 30
+
 # Which fund/ticker a measurement's documentation computes its worked
 # example against, when neither the measurement class nor its doc's
 # frontmatter names one of its own. A fixed default (rather than whatever

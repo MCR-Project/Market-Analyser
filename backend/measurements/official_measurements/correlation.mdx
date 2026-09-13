@@ -76,9 +76,12 @@ notoriously rise in a sell-off — precisely when the diversification a low
 number seems to promise would matter most.
 </Warning>
 
-- **A pair with no overlapping price history counts as zero**, not as
-  missing. A recently listed holding therefore pulls its own average toward
-  zero and can look more independent than it is.
+- **A pair with fewer than 30 overlapping daily returns — about six trading
+  weeks — is unknown, not zero.** A holding correlated with nothing shows a
+  dash rather than a value, and an unknown pair is excluded from every
+  average, from the strongest/weakest pair, and from the hub — it is never
+  ranked as though it were the most independent holding in the fund just
+  because it is the newest.
 - **Holdings with no price history at all are dropped** before the matrix is
   built, so they get no value rather than a wrong one.
 - The fund is only its *tracked* holdings, not its full constituent list, so

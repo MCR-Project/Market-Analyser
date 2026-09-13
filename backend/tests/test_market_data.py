@@ -12,9 +12,21 @@ _correlation_summary coverage exercises its degenerate-input boundaries:
 with zero or one available ticker there are no pairs to compare, so
 strongest/weakest must come back None rather than an out-of-range sentinel
 (value=-1 / value=2) leaking into the result unexamined - hub, which has no
-pairs requirement, must still reflect the real (possibly zero) average
+pairs requirement, must still reflect the real (possibly negative) average
 rather than a hardcoded avgCorr=0 baseline that an all-negative average set
-could never beat.
+could never beat, and must itself be None rather than 0 when nothing is
+available to average at all (issue #97).
+
+It also covers the overlap-gating rule from issue #97: a pair with fewer
+than MIN_OVERLAPPING_RETURNS jointly non-null returns reports None, not
+0.0 - "we do not know" and "these move independently" are not the same
+claim, and only the first is true of a holding that only just listed.
+Every test below that checks a real (non-null) correlation value patches
+MIN_OVERLAPPING_RETURNS down to 2, since the tiny hand-built samples here
+are far short of the real default and would otherwise report null for
+every pair - that patch is orthogonal to what those tests are actually
+checking (the pre-existing degenerate-case handling), while the dedicated
+overlap tests patch it to exercise the gate itself.
 
 Run with:   pytest   (from the repo root; also runnable standalone via
             python -m unittest discover -s tests, from backend/)
@@ -129,9 +141,9 @@ class CorrelationSummaryTests(unittest.TestCase):
     def test_zero_available_tickers_returns_none_pairs(self):
         """No requested ticker has a returns column at all (e.g. yfinance/DB
         had data for none of them) - available ends up empty, so there's no
-        pair to compare and no ticker to be the hub. strongest/weakest come
-        back None (not a fake pair) and hub stays "" / 0 (there is no
-        ticker), rather than leaking a scan sentinel into the result."""
+        pair to compare and no ticker to be the hub. strongest/weakest/hub
+        all come back None (not a fake pair, not a "" / 0 sentinel), rather
+        than leaking a scan sentinel into the result."""
         returns = pd.DataFrame(index=pd.to_datetime(["2024-06-06", "2024-06-07"]))
 
         result = _correlation_summary(returns, ["AAPL", "MSFT"])
@@ -141,7 +153,7 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["averages"], {})
         self.assertIsNone(result["strongest"])
         self.assertIsNone(result["weakest"])
-        self.assertEqual(result["hub"], {"ticker": "", "avgCorr": 0})
+        self.assertIsNone(result["hub"])
 
     def test_requested_ticker_missing_from_returns_is_dropped_from_available(self):
         """A ticker requested but absent from `returns.columns` (not yet
@@ -157,12 +169,15 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["tickers"], ["AAPL"])
         self.assertNotIn("MSFT", result["matrix"])
 
-    def test_single_ticker_has_no_pairs_and_a_zero_average(self):
+    def test_single_ticker_has_no_pairs_and_a_null_average(self):
         """With exactly one available ticker there's no peer to correlate
-        against - averages/hub read as 0 (not an error, not NaN, and a
-        real computed value here rather than a leftover baseline), while
-        strongest/weakest - which only ever compare pairs - come back None
-        rather than an out-of-range sentinel, matching the 0-ticker case."""
+        against at all - not "insufficient overlap" but no pair to begin
+        with - so the average is None (issue #97), not a defaulted zero,
+        and hub has no ticker to point to. A ticker's self-correlation is
+        still exactly 1.0 regardless of how little history it has: that's
+        the diagonal's definition, not a claim the overlap minimum
+        governs. strongest/weakest - which only ever compare pairs - stay
+        None, matching the 0-ticker case."""
         returns = pd.DataFrame(
             {"AAPL": [0.01, -0.02, 0.03]},
             index=pd.to_datetime(["2024-06-06", "2024-06-07", "2024-06-10"]),
@@ -172,16 +187,20 @@ class CorrelationSummaryTests(unittest.TestCase):
 
         self.assertEqual(result["tickers"], ["AAPL"])
         self.assertEqual(result["matrix"]["AAPL"]["AAPL"], 1.0)
-        self.assertEqual(result["averages"], {"AAPL": 0})
-        self.assertEqual(result["hub"], {"ticker": "AAPL", "avgCorr": 0})
+        self.assertIsNone(result["averages"]["AAPL"])
+        self.assertIsNone(result["hub"])
         self.assertIsNone(result["strongest"])
         self.assertIsNone(result["weakest"])
 
+    @patch("services.market_data.MIN_OVERLAPPING_RETURNS", 2)
     def test_all_negative_averages_hub_reflects_real_value(self):
         """When every ticker's average correlation to its peers is negative,
         a hardcoded avgCorr=0 baseline would never lose to any of them,
         silently reporting a hub that doesn't exist in the data. The hub
-        must reflect the actual best (least negative) average instead."""
+        must reflect the actual best (least negative) average instead.
+        MIN_OVERLAPPING_RETURNS is patched down to 2 because this sample
+        is 4 rows - far short of the real default - and the point of this
+        test is the hub/average logic, not the overlap gate."""
         dates = pd.to_datetime(["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-06"])
         returns = pd.DataFrame(
             {
@@ -197,13 +216,15 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["hub"]["avgCorr"], -1.0)
         self.assertIn(result["hub"]["ticker"], {"A", "B"})
 
+    @patch("services.market_data.MIN_OVERLAPPING_RETURNS", 2)
     def test_three_tickers_picks_strongest_weakest_pair_and_hub(self):
         """Sanity check of the non-degenerate path: A and B move in
         lockstep (correlation 1), C is their exact mirror image
         (correlation -1 with both) - strongest must be the A/B pair,
         weakest either C pair (both are -1; scan order picks A/C first and
         a tie never overwrites it), and each ticker's average correlation
-        to its peers must reflect that shape."""
+        to its peers must reflect that shape. MIN_OVERLAPPING_RETURNS is
+        patched down for the same reason as above."""
         dates = pd.to_datetime(["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-06", "2024-06-07"])
         returns = pd.DataFrame(
             {
@@ -220,6 +241,63 @@ class CorrelationSummaryTests(unittest.TestCase):
         self.assertEqual(result["strongest"], {"a": "A", "b": "B", "value": 1.0})
         self.assertEqual(result["weakest"], {"a": "A", "b": "C", "value": -1.0})
         self.assertEqual(result["averages"], {"A": 0, "B": 0, "C": -1})
+
+    @patch("services.market_data.MIN_OVERLAPPING_RETURNS", 3)
+    def test_pair_below_overlap_minimum_is_null_not_zero(self):
+        """C only shares two non-null returns with A and with B - one short
+        of the (patched) minimum of 3 - simulating a holding that listed
+        partway through the window. Its pairs with A and B must be None,
+        not a correlation computed from too little to mean anything and
+        certainly not the 0.0 this used to default to (issue #97). A and
+        B, which fully overlap, still get a real value; C's diagonal is
+        still 1.0 regardless."""
+        dates = pd.to_datetime(
+            ["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-06", "2024-06-07"]
+        )
+        returns = pd.DataFrame(
+            {
+                "A": [0.01, -0.02, 0.03, -0.01, 0.02],
+                "B": [0.02, -0.01, 0.02, -0.02, 0.01],
+                "C": [None, None, None, 0.01, -0.01],
+            },
+            index=dates,
+        )
+
+        result = _correlation_summary(returns, ["A", "B", "C"])
+
+        self.assertIsNone(result["matrix"]["A"]["C"])
+        self.assertIsNone(result["matrix"]["C"]["A"])
+        self.assertIsNone(result["matrix"]["B"]["C"])
+        self.assertIsNotNone(result["matrix"]["A"]["B"])
+        self.assertEqual(result["matrix"]["C"]["C"], 1.0)
+
+    @patch("services.market_data.MIN_OVERLAPPING_RETURNS", 3)
+    def test_averages_and_hub_exclude_a_ticker_with_no_usable_pair(self):
+        """C's only two potential peers are both null pairs (see above), so
+        its average must be null rather than computed as if the missing
+        pairs were zero, and it must never become the hub or the
+        strongest/weakest pair - those stay confined to the one real (A/B)
+        pair that exists."""
+        dates = pd.to_datetime(
+            ["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-06", "2024-06-07"]
+        )
+        returns = pd.DataFrame(
+            {
+                "A": [0.01, -0.02, 0.03, -0.01, 0.02],
+                "B": [0.02, -0.01, 0.02, -0.02, 0.01],
+                "C": [None, None, None, 0.01, -0.01],
+            },
+            index=dates,
+        )
+
+        result = _correlation_summary(returns, ["A", "B", "C"])
+
+        self.assertIsNone(result["averages"]["C"])
+        self.assertIsNotNone(result["averages"]["A"])
+        self.assertIsNotNone(result["averages"]["B"])
+        self.assertIn(result["hub"]["ticker"], {"A", "B"})
+        self.assertNotIn("C", (result["strongest"]["a"], result["strongest"]["b"]))
+        self.assertNotIn("C", (result["weakest"]["a"], result["weakest"]["b"]))
 
 
 class ThrottledForceRefreshTests(unittest.TestCase):
