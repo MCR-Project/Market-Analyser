@@ -192,9 +192,14 @@ page over a feature the visitor has not opened yet.
 
 ### The conventions
 
-`backend/services/portfolio.py` is the arithmetic and the full statement of
-the model. Every number on screen depends on the decisions below, and none
-of them is guessable from the UI.
+`backend/services/portfolio.py` is the full statement of the model. The
+return and risk arithmetic underneath it - a year, a trading day, what a
+coarse row means, CAGR, volatility, drawdown - lives in
+`backend/services/stats.py` instead, shared with every metric that needs the
+same arithmetic applied to a single holding rather than to a whole portfolio;
+its module docstring is the exact, single statement of those conventions, not
+restated here. Every number on screen depends on the decisions below, and
+none of them is guessable from the UI.
 
 **The model:**
 
@@ -240,11 +245,10 @@ behind it:
   — not over a row count. The same year answered in twelve monthly buckets
   and in 250 daily rows annualises to the same rate.
 - **Volatility is annualised to 252 trading days**, with each return first
-  divided by the root of the trading time it actually covers. For a window
-  of daily rows that is exactly the textbook "daily standard deviation
-  times root 252". The scaling matters the moment a window spans storage
-  tiers: annualising a weekly bucket as though it were a day reported 54%
-  on a real basket whose true figure was 35%.
+  divided by the root of the trading time it actually covers - see
+  `backend/services/stats.py` for exactly how that scaling works and why it
+  is not a refinement: annualising a weekly bucket as though it were a day
+  reported 54% on a real basket whose true figure was 35%.
 - **Drawdown is measured on the total**, the only series a holder
   experiences. A single holding can fall much further without the portfolio
   noticing.

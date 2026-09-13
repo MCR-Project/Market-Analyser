@@ -1,6 +1,6 @@
 # backend/services — data access and arithmetic
 
-Five modules, and the two large ones carry most of the project's load-bearing
+Six modules, and the large ones carry most of the project's load-bearing
 decisions.
 
 | Module | Responsibility |
@@ -9,7 +9,8 @@ decisions.
 | `cache.py` | Process-local TTL dict, one shared singleton |
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
-| `portfolio.py` | The simulation — pure arithmetic over a price frame, no I/O of its own beyond the reads it calls |
+| `stats.py` | Return and risk arithmetic over a plain series — no I/O, shared by `portfolio.py` and every future single-holding metric |
+| `portfolio.py` | The simulation — decides what series to hand `stats.py` and assembles its answers into a portfolio's shape, no I/O of its own beyond the reads it calls |
 
 ## The pattern every `market_data` function follows
 
@@ -140,11 +141,48 @@ both tables reads as the fund it is. A tracked ETF has no `prices` rows of its
 own, so its `firstDate` comes from live history — that is the normal answer, not
 a fault.
 
+## `stats.py` — the shared return and risk arithmetic
+
+Pure arithmetic over a plain series (a list of values and, wherever time
+matters, a list of ISO dates the same length): no I/O, and no imports from
+`market_data`, `supabase_client` or `yfinance` — that is what lets a future
+single-holding measurement call it directly instead of reaching past
+`services/market_data` the way `backend/CLAUDE.md`'s layering table forbids
+(issue #98). `portfolio.py` is its first and, so far, only caller.
+
+The module docstring states the conventions once — **a year is 365.25 days;
+volatility (and anything built from the same scaled returns — downside
+deviation, beta, idiosyncratic volatility) annualises to 252 trading days,
+each return first divided by the root of the trading time its own gap
+covers; a coarse row is a bucket, not a day** — and every other module,
+including this one's own function docstrings, references it rather than
+restating it. That scaling is not a refinement: a real 2019–2026 basket
+spanning all three storage tiers (issue #10) reported 54% volatility
+without it against a true 35%. `granularity_of` names the coarsest gap a
+computation actually saw ('D'/'W'/'M', the same letters a `prices` row's
+own granularity uses), and the functions whose answer depends on it —
+volatility, downside deviation, max drawdown, the underwater/pain-index
+pair, beta, R², idiosyncratic volatility, the capture ratios — carry it
+alongside their value; CAGR does not, because the entire point of counting
+elapsed days instead of rows is that its answer must not depend on how
+finely the window was sampled.
+
+`herfindahl`/`effective_n` (concentration of a set of weights) and
+`risk_contribution` (each holding's share of portfolio variance, an Euler
+decomposition) are the two exceptions to the "returns a value plus its
+granularity" shape: the first two have no time dimension at all, and the
+third already returns one figure per ticker.
+
+A figure a series cannot support is `None` everywhere in this module, never
+0 — a two-row series has a return but no volatility, and reporting 0 would
+claim it was riskless rather than simply short.
+
 ## `portfolio.py` — the model
 
-The module docstring is the full statement of the model and the scoring
-conventions; `README.md`'s "Portfolio simulator" section is the same material for
-readers. **Any change to the arithmetic has to update both.** The invariants:
+The module docstring is the full statement of the model; `README.md`'s
+"Portfolio simulator" section is the same material for readers. **Any change
+to the arithmetic has to update both**, and a change to the return/risk
+arithmetic itself belongs in `stats.py` above, not here. The invariants:
 
 - **Weights are ratios and are normalised.** 30/30/30 and 33.33/33.33/33.33 are
   the same portfolio and must simulate identically. Negative weights are refused
@@ -160,16 +198,13 @@ readers. **Any change to the arithmetic has to update both.** The invariants:
   intersection.** A gap inside a holding's own history is forward-filled; the
   dates before its first close stay empty, which is what keeps it cash.
 - **Time-weighted vs money-weighted is the point.** Total return, CAGR,
-  volatility and drawdown are read off `_unit_values` — the total with deposits
-  taken back out — and describe the portfolio. `moneyWeightedReturn` (IRR by
-  bisection) describes the account. With no contributions `units` *is* `totals`,
-  by identity, which is what makes "off by default" a promise: a run without
-  contributions is not merely close to the old result, it is the same object.
-- **A year is 365.25 days** for both CAGR and IRR discounting; **volatility
-  annualises to 252 trading days** with each return first divided by the root of
-  the trading time it covers. That scaling is not a refinement — a real
-  2019–2026 basket spanning all three storage tiers reported 54% without it
-  against a true 35%.
+  volatility and drawdown are read off `stats.unit_values` — the total with
+  deposits taken back out — and describe the portfolio. `moneyWeightedReturn`
+  (IRR by bisection, still computed here — it is about the account's own cash
+  flows, not shared with a single holding) describes the account. With no
+  contributions `units` *is* `totals`, by identity, which is what makes "off by
+  default" a promise: a run without contributions is not merely close to the
+  old result, it is the same object.
 - **A holding's `contribution` is its final value less every dollar put into
   it.** Once a rebalance moves money between holdings, a final value says nothing
   about which holding earned it. These sum to the portfolio's gain. The UI labels
