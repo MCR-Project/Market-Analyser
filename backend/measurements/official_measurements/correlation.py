@@ -10,7 +10,11 @@ from measurements.inputs.correlation_matrix import get_correlation_matrix
 class CorrelationMeasurement(MeasurementBase):
     id = "correlation"
     name = "Correlation to Fund"
-    description = "Average Pearson correlation of each holding's daily returns to all other holdings"
+    description = (
+        "Average Pearson correlation of each holding's daily returns to all "
+        "other holdings with enough shared price history; unknown, not "
+        "zero, for a holding too new to have any"
+    )
     route = "/measurements/correlation/{etf_id}"
     uses_inputs = ["holdings", "correlation_matrix"]
 
@@ -49,7 +53,7 @@ class CorrelationMeasurement(MeasurementBase):
 
         if not tickers:
             return {"per_ticker": {}, "matrix": {}, "tickers": [], "averages": {},
-                    "strongest": {}, "weakest": {}, "hub": {}}
+                    "strongest": None, "weakest": None, "hub": None}
 
         result = get_correlation_matrix(tickers)
         # per_ticker = average correlation for each ticker (for the table column)
