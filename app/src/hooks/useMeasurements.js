@@ -11,6 +11,9 @@
  *   { [measurementId]: { per_ticker: {NVDA: 7.9, ...}, per_ticker_mdx: {NVDA: "**7.9%**", ...}, ... } }
  * `per_ticker` (raw numbers) drives sorting/filtering; `per_ticker_mdx`
  * (backend-rendered markdown) is what's actually displayed in the table.
+ * `per_ticker_reason` (issue #99) is optional and only ever present
+ * beside a null `per_ticker` value, naming why — a dash a measurement
+ * can explain, rather than one that just says nothing.
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useFetch } from './useFetch';
@@ -205,6 +208,21 @@ export function useMeasurements(etfId) {
     return mdx;
   }, [activeIds, results]);
 
+  // Build a lookup: ticker → { measurementId: reason string | undefined }
+  // (issue #99). Absent for a measurement that never sends
+  // per_ticker_reason at all, or for a ticker it didn't name — MdxCell
+  // treats "no reason" and "an empty one" the same way, a plain dash.
+  const getTickerReason = useCallback((ticker) => {
+    const reasons = {};
+    for (const id of (activeIds || [])) {
+      const data = results[id];
+      if (data?.per_ticker_reason) {
+        reasons[id] = data.per_ticker_reason[ticker];
+      }
+    }
+    return reasons;
+  }, [activeIds, results]);
+
   // Get active measurement manifests in order
   const activeManifests = (activeIds || [])
     .map(id => manifest.find(m => m.id === id))
@@ -220,6 +238,7 @@ export function useMeasurements(etfId) {
     loading,
     getTickerValues,
     getTickerMdx,
+    getTickerReason,
     isActive: (id) => (activeIds || []).includes(id),
   };
 }

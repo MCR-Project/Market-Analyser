@@ -53,10 +53,11 @@ def build_example(measurement, frontmatter: dict | None = None) -> dict:
     result = measurement.run(etf_id=etf_id)
     per_ticker = result.get("per_ticker", {}) or {}
     per_ticker_mdx = result.get("per_ticker_mdx", {}) or {}
+    per_ticker_reason = result.get("per_ticker_reason") or {}
 
-    sample_tickers = _pick_sample_tickers(all_tickers, per_ticker, example_stock)
+    sample_tickers = _pick_sample_tickers(all_tickers, per_ticker, per_ticker_reason, example_stock)
 
-    return {
+    example = {
         "etf_id": etf_id,
         "example_stock": example_stock if example_stock in sample_tickers else None,
         "tickers": sample_tickers,
@@ -66,18 +67,32 @@ def build_example(measurement, frontmatter: dict | None = None) -> dict:
         "truncated": len(per_ticker) > len(sample_tickers),
         "total_tickers": len(per_ticker) or len(all_tickers),
     }
+    # Left out entirely when nothing in the sample has one (issue #99),
+    # the same way run() leaves the key off a measurement that never sets
+    # it — a doc page for a measurement with no reasons to show gets
+    # exactly the payload it always has.
+    if any(t in per_ticker_reason for t in sample_tickers):
+        example["per_ticker_reason"] = {
+            t: per_ticker_reason[t] for t in sample_tickers if t in per_ticker_reason
+        }
+    return example
 
 
-def _pick_sample_tickers(all_tickers, per_ticker, example_stock) -> list[str]:
+def _pick_sample_tickers(all_tickers, per_ticker, per_ticker_reason, example_stock) -> list[str]:
     """Which few holdings to feature.
 
     The measurement's declared example stock leads when the fund actually
     holds it — a doc that says "take NVDA" should show NVDA's row — and
     the rest follow by weight, since `all_tickers` arrives weight-sorted.
-    Tickers with no computed value are skipped: a row of blanks
-    illustrates nothing.
+    Tickers with neither a computed value nor a reason for the lack are
+    skipped: a bare blank illustrates nothing, but a null the measurement
+    can explain (issue #99) is exactly the case a doc page should be able
+    to show, not the case to hide.
     """
-    ranked = [t for t in all_tickers if not per_ticker or per_ticker.get(t) is not None]
+    ranked = [
+        t for t in all_tickers
+        if not per_ticker or per_ticker.get(t) is not None or per_ticker_reason.get(t) is not None
+    ]
     if not ranked:
         ranked = list(per_ticker or all_tickers)
 

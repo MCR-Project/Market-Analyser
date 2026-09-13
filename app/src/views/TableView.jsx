@@ -77,20 +77,22 @@ export const TableView = memo(function TableView({
   }, []);
 
   // Build rows with measurement values — mVals (raw) drives sort/filter,
-  // mMdx (backend-rendered markdown) is what's actually displayed.
+  // mMdx (backend-rendered markdown) is what's actually displayed, mReason
+  // (issue #99) is why a null value is null, when a measurement says.
   const allRows = useMemo(() => {
     return tickers.map(t => {
       const stock = stockMap[t] || { name: t, sector: 'Unknown' };
       const mVals = measurements.getTickerValues(t);
       const mMdx = measurements.getTickerMdx(t);
-      return { ticker: t, name: stock.name, sector: stock.sector, mVals, mMdx };
+      const mReason = measurements.getTickerReason(t);
+      return { ticker: t, name: stock.name, sector: stock.sector, mVals, mMdx, mReason };
     });
-    // Deliberately narrowed to the two functions actually called here,
-    // not the whole `measurements` object — that object's other fields
-    // (e.g. loading) change far more often and would invalidate this memo
-    // for no reason.
+    // Deliberately narrowed to the functions actually called here, not the
+    // whole `measurements` object — that object's other fields (e.g.
+    // loading) change far more often and would invalidate this memo for
+    // no reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickers, stockMap, measurements.getTickerValues, measurements.getTickerMdx]);
+  }, [tickers, stockMap, measurements.getTickerValues, measurements.getTickerMdx, measurements.getTickerReason]);
 
   // Apply filters
   const filtered = useMemo(() => {
@@ -245,7 +247,7 @@ export const TableView = memo(function TableView({
               <div className="flex-1 min-w-0 flex flex-wrap items-center">
                 {activeMeasures.map(m => (
                   <MetricSlot key={m.id} width={m.column_width} className="pl-2 pr-2 border-l border-[var(--divider)]">
-                    <MdxCell mdx={row.mMdx[m.id]} loading={measurements.loading[m.id]} />
+                    <MdxCell mdx={row.mMdx[m.id]} loading={measurements.loading[m.id]} reason={row.mReason[m.id]} />
                   </MetricSlot>
                 ))}
               </div>

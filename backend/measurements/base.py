@@ -17,6 +17,11 @@ Every measurement is a self-describing unit that declares:
     Stat, Badge — see app/src/components/ui/MdxCell.jsx), so the frontend
     never needs format-specific rendering logic; it just compiles and
     displays whatever component tree is returned
+  - Optionally, why a given holding's value is null (compute()'s
+    per_ticker_reason — issue #99), so a dash on a sixty-row table with
+    twenty-five columns says which of "too little history", "not listed
+    yet", "no row in ticker" or the like it is, instead of leaving that to
+    be guessed at
 
 The registry auto-discovers all subclasses (official + addon), registers
 their routes on the FastAPI router, and exposes a manifest so the
@@ -122,6 +127,24 @@ class MeasurementBase(ABC):
           {"per_ticker": {"NVDA": value, "AAPL": value, ...}, ...extra_data}
         Values here are raw (numbers, strings) — used for sorting and
         filtering. Display formatting happens separately, in render_cell.
+
+        May also return "per_ticker_reason" (issue #99), the same shape
+        per_ticker_mdx already has:
+          {"per_ticker_reason": {"NVDA": "fewer than 30 overlapping daily
+                                  returns (12 available)", ...}}
+        One entry per ticker whose per_ticker value is null, naming why —
+        optional, since a measurement with nothing useful to say about its
+        own nulls returns none. run() keeps only the entries that actually
+        line up with a null per_ticker value; a reason beside a real value
+        would be misleading, since the frontend takes a reason's presence
+        as proof the value is absent rather than re-checking per_ticker
+        itself.
+
+        A reason reaches the browser exactly as written and is rendered
+        into the same MDX/JSX path per_ticker_mdx is (see render_cell,
+        and app/src/components/ui/MdxCell.jsx) — build it only from
+        measurement-authored literals and already-computed values, never
+        from fetched or user text.
         """
         ...
 
@@ -146,7 +169,18 @@ class MeasurementBase(ABC):
         ...
 
     def run(self, **params) -> dict:
-        """Full pipeline: fetch inputs → compute → render each cell → return result."""
+        """Full pipeline: fetch inputs → compute → render each cell → return result.
+
+        per_ticker_reason (issue #99) is left out of the result entirely
+        when compute() doesn't set one — every official measurement,
+        today — so a plugin that has nothing to say about its own nulls
+        returns exactly the response it always has. When compute() does
+        set one, it is filtered down to tickers whose per_ticker value is
+        actually null: a reason attached to a ticker that also has a real
+        value would contradict what the frontend is entitled to assume
+        (that a reason means the value beside it is absent), so a
+        measurement author's mistake there is dropped rather than shipped.
+        """
         inputs = self.fetch_inputs(**params)
         result = self.compute(inputs)
         per_ticker = result.get("per_ticker", {})
@@ -154,6 +188,12 @@ class MeasurementBase(ABC):
             ticker: self.render_cell(ticker, value)
             for ticker, value in per_ticker.items()
         }
+        if "per_ticker_reason" in result:
+            result["per_ticker_reason"] = {
+                ticker: reason
+                for ticker, reason in (result["per_ticker_reason"] or {}).items()
+                if per_ticker.get(ticker) is None
+            }
         return result
 
     # ── Documentation ────────────────────────────────────────────────────

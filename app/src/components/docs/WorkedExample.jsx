@@ -10,7 +10,9 @@
  * The cells are rendered with MdxCell — the real table vocabulary, not a
  * doc-local imitation. That is deliberate and is the one place a doc
  * tracks MdxCell: the section's whole claim is "this is what you see in
- * the table", so it has to keep being true when the table changes.
+ * the table", so it has to keep being true when the table changes,
+ * including a null's reason (issue #99) — a doc page showing a dash
+ * ought to explain it the same way the table does.
  *
  * Every number here comes from the backend, which computes over the whole
  * fund and truncates afterwards. When the fetch fails this renders a
@@ -184,7 +186,7 @@ export const WorkedExample = memo(function WorkedExample({ measurementId }) {
   }
 
   const { etf_id, tickers = [], inputs = [], per_ticker = {}, per_ticker_mdx = {},
-          truncated, total_tickers } = data;
+          per_ticker_reason = {}, truncated, total_tickers } = data;
 
   return (
     <section className="my-6">
@@ -241,7 +243,7 @@ export const WorkedExample = memo(function WorkedExample({ measurementId }) {
                     {per_ticker[ticker] ?? '—'}
                   </td>
                   <td className="px-4 py-2 border-b border-[var(--divider)] min-w-[180px]">
-                    <MdxCell mdx={per_ticker_mdx[ticker]} />
+                    <MdxCell mdx={per_ticker_mdx[ticker]} reason={per_ticker_reason[ticker]} />
                   </td>
                 </tr>
               ))}

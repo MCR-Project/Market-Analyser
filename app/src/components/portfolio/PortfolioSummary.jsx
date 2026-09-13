@@ -8,7 +8,11 @@
  *
  * A number the run could not support comes back null rather than zero — a
  * two-day window has no growth rate and no volatility — and shows as a
- * dash. Zero would be a claim, and the wrong one.
+ * dash. Zero would be a claim, and the wrong one. When the backend can say
+ * why (`metrics.reasons`, issue #99 — the same optional sidecar a
+ * measurement column's `per_ticker_reason` is), the dash carries that
+ * reason as a tooltip and as real accessible text, not just a generic
+ * description of what the metric usually means.
  *
  * **Once money keeps arriving there are two questions, and the summary
  * splits into two rows to stop them being read as one** (#67). The top
@@ -48,9 +52,19 @@ function percent(value, { signed = false } = {}) {
   return `${value >= 0 ? '+' : '−'}${text}`;
 }
 
-function Stat({ label, value, tone, title }) {
+/**
+ * `reason` (issue #99) is why *this* run's value is a dash — read off
+ * `metrics.reasons`, the portfolio's own version of a measurement
+ * column's `per_ticker_reason` — and takes over the tooltip from the
+ * generic `title` when the two would otherwise compete: a reader looking
+ * at a dash wants to know why this run has none, not what the metric
+ * means in general. `title` alone is not reliably announced to a screen
+ * reader, so the reason also gets its own `sr-only` text, same rule
+ * MdxCell follows for a measurement cell's dash.
+ */
+function Stat({ label, value, tone, title, reason }) {
   return (
-    <div title={title}>
+    <div title={reason || title}>
       <div className="eyebrow mb-1">{label}</div>
       <div
         className="text-[15px] font-extrabold tabular-nums tracking-tight"
@@ -58,6 +72,7 @@ function Stat({ label, value, tone, title }) {
       >
         {value}
       </div>
+      {reason && <span className="sr-only"> — {reason}</span>}
     </div>
   );
 }
@@ -143,11 +158,13 @@ export const PortfolioSummary = memo(function PortfolioSummary({ metrics, stale 
           label="CAGR"
           value={percent(metrics.cagr, { signed: true })}
           title="Compound annual growth rate over the calendar time the window covers"
+          reason={metrics.reasons?.cagr}
         />
         <Stat
           label="VOLATILITY"
           value={percent(metrics.volatility)}
           title="Annualised standard deviation of the run's returns"
+          reason={metrics.reasons?.volatility}
         />
         <Stat
           label="MAX DRAWDOWN"
@@ -190,6 +207,7 @@ export const PortfolioSummary = memo(function PortfolioSummary({ metrics, stale 
               value={percent(metrics.moneyWeightedReturn, { signed: true })}
               tone={tone(metrics.moneyWeightedReturn)}
               title="Internal rate of return: the annual rate that reconciles every deposit, from the day it arrived, with the final value"
+              reason={metrics.reasons?.moneyWeightedReturn}
             />
           </div>
         </>

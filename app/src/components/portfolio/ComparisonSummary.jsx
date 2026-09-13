@@ -15,6 +15,10 @@
  * the difference the note under the table exists to name. With every line
  * funded by a single lump sum the two are the same number, and a second
  * column of it would invent a distinction.
+ *
+ * A cell whose metric is null carries `metrics.reasons`' explanation
+ * (issue #99) via `ReasonedValue`, the same tooltip-plus-accessible-text
+ * treatment PortfolioSummary gives the same three metrics.
  */
 import { memo } from 'react';
 
@@ -28,6 +32,21 @@ function percent(value, { signed = false } = {}) {
   if (value === null || value === undefined) return '—';
   const text = `${Math.abs(value).toFixed(1)}%`;
   return signed ? `${value >= 0 ? '+' : '−'}${text}` : text;
+}
+
+/**
+ * A cell's value, plus — when the backend named one (`metrics.reasons`,
+ * issue #99) — the same tooltip-and-accessible-text treatment
+ * PortfolioSummary and MdxCell give a dash they can explain.
+ */
+function ReasonedValue({ text, reason }) {
+  if (!reason) return text;
+  return (
+    <span title={reason}>
+      {text}
+      <span className="sr-only"> — {reason}</span>
+    </span>
+  );
 }
 
 function tone(value) {
@@ -78,17 +97,20 @@ export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }
                       {percent(metrics.totalReturn, { signed: true })}
                     </td>
                     <td className="px-3 py-2.5 font-[var(--font-mono)] text-[12.5px] text-right" style={{ color: tone(metrics.cagr) }}>
-                      {percent(metrics.cagr, { signed: true })}
+                      <ReasonedValue text={percent(metrics.cagr, { signed: true })} reason={metrics.reasons?.cagr} />
                     </td>
                     <td className="px-3 py-2.5 font-[var(--font-mono)] text-[12.5px] text-right text-[var(--fg-1)]">
-                      {percent(metrics.volatility)}
+                      <ReasonedValue text={percent(metrics.volatility)} reason={metrics.reasons?.volatility} />
                     </td>
                     <td className="px-3 py-2.5 font-[var(--font-mono)] text-[12.5px] text-right" style={{ color: tone(metrics.maxDrawdown?.value) }}>
                       {percent(metrics.maxDrawdown?.value, { signed: true })}
                     </td>
                     {funded && (
                       <td className="px-3 py-2.5 font-[var(--font-mono)] text-[12.5px] text-right" style={{ color: tone(metrics.moneyWeightedReturn) }}>
-                        {percent(metrics.moneyWeightedReturn, { signed: true })}
+                        <ReasonedValue
+                          text={percent(metrics.moneyWeightedReturn, { signed: true })}
+                          reason={metrics.reasons?.moneyWeightedReturn}
+                        />
                       </td>
                     )}
                   </>

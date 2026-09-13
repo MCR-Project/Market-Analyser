@@ -157,7 +157,14 @@ reviewed like any other code. Never build either from fetched or user text.
   to render, this file owns how it looks, so every measurement looks consistent
   without the frontend branching on a format field. Compiled components are cached
   by source string; a failed compile is evicted so a transient failure does not
-  poison the cache.
+  poison the cache. `MdxCell` also takes an optional `reason` prop (issue #99),
+  a measurement-authored explanation for a `null` value — same trust boundary
+  as the MDX itself, never built from fetched or user text — surfaced as a
+  native `title` tooltip **and** a separate `sr-only` span with real text, not
+  `title` alone: it is not reliably announced to a screen reader. No `reason`
+  is a plain dash with no tooltip at all, not one with nothing in it. Every
+  place that renders a `per_ticker_mdx` cell (`TableView`, `WorkedExample`)
+  should pass the matching `per_ticker_reason` entry alongside it.
 - `components/docs/DocMdx.jsx` — `Note`, `Warning`, `Formula`, `WorkedExample`,
   plus the prose elements MDX produces. **A stable contract**: adding a component
   is fine, changing or removing one breaks every doc already written. Doc MDX

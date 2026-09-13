@@ -211,7 +211,12 @@ arithmetic itself belongs in `stats.py` above, not here. The invariants:
   the column GAIN to avoid colliding with recurring contributions.
 - **Dividend income is reported, never added.** It is already inside every value
   via the adjusted closes.
-- **A figure the run cannot support is `null`, not `0`.**
+- **A figure the run cannot support is `null`, not `0`.** `metrics.reasons`
+  (issue #99) says why, for whichever of `cagr`/`volatility`/
+  `moneyWeightedReturn` actually is — the same optional sidecar shape a
+  measurement column's `per_ticker_reason` is, present only when at least
+  one metric in this particular run is null, so a normal multi-row run
+  gets back exactly the response it always has.
 
 `_verify_absent` is where three identical-looking situations are told apart. An
 absent price column means either a typo (→ `SymbolNotFound`, 404), a holding that
