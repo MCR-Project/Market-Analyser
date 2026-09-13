@@ -367,6 +367,66 @@ class DegenerateRunTests(unittest.TestCase):
         self.assertEqual(metrics["maxDrawdown"]["value"], 0.0)
 
 
+# ── Metric reasons (issue #99) ────────────────────────────────────────────────
+
+class MetricReasonTests(unittest.TestCase):
+    """`metrics["reasons"]` is the same optional sidecar a measurement
+    column's `per_ticker_reason` is, scoped to the portfolio's own named
+    metrics instead of one per ticker."""
+
+    def test_a_healthy_multi_row_run_carries_no_reasons_key_at_all(self):
+        """Nothing is null, so there is nothing to explain - the key is
+        absent, not present-and-empty, the same convention
+        per_ticker_reason follows for a measurement with no nulls."""
+        closes = frame({"A": [100.0, 110.0, 105.0]},
+                       ["2020-01-02", "2020-01-03", "2020-01-06"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertNotIn("reasons", metrics)
+
+    def test_a_single_row_window_explains_cagr_and_money_weighted_return(self):
+        """No elapsed time is the one cause behind both nulls - see
+        test_a_single_row_window_has_no_growth_rate_and_no_volatility for
+        the values themselves."""
+        closes = frame({"A": [100.0]}, ["2020-01-02"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertIn("cagr", metrics["reasons"])
+        self.assertIn("moneyWeightedReturn", metrics["reasons"])
+        self.assertIn("volatility", metrics["reasons"])
+
+    def test_a_two_row_window_explains_volatility_and_may_explain_irr_too(self):
+        """CAGR has real elapsed time to work with here and is never
+        null - only volatility, which needs a second return to compare
+        against, is guaranteed null. The money-weighted return can go
+        either way: a one-day, 10%-return window is short enough that no
+        annual rate, however large, discounts it back to the opening
+        value within the bracket search's reach, so it is null too here -
+        but that is a property of *this* fixture's return, not of every
+        two-row window, so only volatility is asserted unconditionally."""
+        closes = frame({"A": [100.0, 110.0]}, ["2020-01-02", "2020-01-03"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertIn("volatility", metrics["reasons"])
+        self.assertIsNotNone(metrics["cagr"])
+        self.assertNotIn("cagr", metrics["reasons"])
+
+    def test_reason_strings_are_plain_literals_not_built_from_the_run(self):
+        """Invariant 6, extended to this sidecar: a reason must not
+        interpolate anything computed from the request or the price
+        read - the row count is the one exception, and it is a plain
+        int the module already had in hand, not fetched or user text."""
+        closes = frame({"A": [100.0]}, ["2020-01-02"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertIsInstance(metrics["reasons"]["cagr"], str)
+        self.assertNotIn("A", metrics["reasons"]["cagr"])
+
+
 # ── Through the endpoint ─────────────────────────────────────────────────────
 
 class MetricsRouteTests(unittest.TestCase):
@@ -430,7 +490,15 @@ class MetricsRouteTests(unittest.TestCase):
             # What was paid out rather than what the price did (issue #68),
             # likewise present whether or not anything pays.
             "dividendIncome", "dividendYield", "incomeUnknownFor",
+            # This fixture is only two rows, which is enough for a real
+            # CAGR but not for volatility (issue #99) - `reasons` names
+            # why, and is present here for exactly that reason rather than
+            # by coincidence.
+            "reasons",
         })
+        self.assertIsNone(metrics["volatility"])
+        self.assertIn("volatility", metrics["reasons"])
+        self.assertNotIn("cagr", metrics["reasons"])
         # Nothing was paid in beyond the opening amount, so the two
         # families of number agree.
         self.assertEqual(metrics["contributed"], 0.0)

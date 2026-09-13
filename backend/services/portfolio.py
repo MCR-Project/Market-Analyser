@@ -269,6 +269,13 @@ def _metrics(
     unpacked to its bare value here, because this response's `volatility`
     key has always been a plain number and changing that would be a
     change to the simulator's output, not to where its arithmetic lives.
+
+    `reasons` (issue #99) is the same optional sidecar `per_ticker_reason`
+    is for a measurement column, scoped to this dict instead of a
+    per-ticker one: one entry per metric below that is null in this
+    particular run, naming why, present only when at least one actually
+    is - a run with a real value for every metric gets back exactly the
+    response it always has.
     """
     start_value, final_value = totals[0], totals[-1]
     unit_start, unit_end = units[0], units[-1]
@@ -276,12 +283,45 @@ def _metrics(
         round((unit_end / unit_start - 1) * 100, PERCENT_DP) if unit_start > 0 else None
     )
     invested = round(start_value + contributed, MONEY_DP)
-    return {
+    cagr_value = cagr(units, dates)
+    volatility_value = volatility(units, dates)["value"]
+    money_weighted = _money_weighted_return(flows)
+
+    # `value` and `contribution.amount` are validated > 0 before a run ever
+    # starts, so `totalReturn`/`dividendYield`'s own None branches (an
+    # opening value of 0) are unreachable today and get no reason here -
+    # inventing one for a state validation already forecloses would be
+    # explaining something that cannot happen. The three below are real:
+    # a single-row window leaves CAGR with no elapsed time to compound
+    # over, a window under three rows leaves volatility with fewer than
+    # the two returns it needs, and the money-weighted return can fail
+    # either the same way (no elapsed time at all) or for a window so
+    # short relative to its return that no annual rate, however large,
+    # discounts one back into the other - `_money_weighted_return`'s
+    # bracket search gives up rather than guess, so both read as one
+    # honest explanation instead of two, only one of which is exercised
+    # by the tests that reach it.
+    reasons = {}
+    if cagr_value is None:
+        reasons["cagr"] = (
+            "a single trading day has no elapsed time to compound a growth rate over"
+        )
+    if volatility_value is None:
+        reasons["volatility"] = (
+            f"only {len(dates)} row(s) of price history in this window - "
+            "fewer than the two returns needed to measure dispersion"
+        )
+    if money_weighted is None:
+        reasons["moneyWeightedReturn"] = (
+            "this window is too short for an internal rate of return to be found"
+        )
+
+    result = {
         "startValue": start_value,
         "finalValue": final_value,
         "totalReturn": total_return,
-        "cagr": cagr(units, dates),
-        "volatility": volatility(units, dates)["value"],
+        "cagr": cagr_value,
+        "volatility": volatility_value,
         "maxDrawdown": max_drawdown(units, dates),
         # Recurring contributions only: the opening lump sum is
         # `startValue`, and adding the two is what `totalInvested` is for.
@@ -289,7 +329,7 @@ def _metrics(
         "totalInvested": invested,
         # What the portfolio made, as opposed to what was paid into it.
         "gain": round(final_value - invested, MONEY_DP),
-        "moneyWeightedReturn": _money_weighted_return(flows),
+        "moneyWeightedReturn": money_weighted,
         # Income over the window, from the holdings the `dividends` table
         # can speak for. Never added to `finalValue`: the adjusted closes
         # already spent it (issue #13), and adding it would count the same
@@ -308,6 +348,9 @@ def _metrics(
         # than one that says which two.
         "incomeUnknownFor": unknown,
     }
+    if reasons:
+        result["reasons"] = reasons
+    return result
 
 
 def _normalise_holdings(holdings) -> list[tuple[str, float]]:

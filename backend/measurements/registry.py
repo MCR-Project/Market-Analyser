@@ -42,6 +42,12 @@ def _make_handler(measurement):
     forever against a ticker that does not exist: useMeasurements retries a
     5xx, so three columns kept asking about ZZZZ every three seconds long
     after the ETF request itself had correctly given up.
+
+    The handler returns whatever `m.run()` produced with no key filtering
+    of its own, which is what already carries `per_ticker_reason` (issue
+    #99) into the response wherever a measurement's `compute()` set one —
+    there is no allowlist here to fall out of date as `base.run()` grows
+    what it puts in the result.
     """
     param_names = PATH_PARAM_RE.findall(measurement.route)
     m = measurement  # captured in the closure

@@ -205,7 +205,12 @@ vanished while its values still appeared under the cursor.
   `WHOLE_FUND_COVERAGE` (99) is the threshold below which the coverage note
   appears.
 - **`null` is not `0`.** A run that cannot support a figure returns null and the UI
-  shows a dash. Zero would be a claim, and the wrong one.
+  shows a dash. Zero would be a claim, and the wrong one. When the backend can
+  say why (`metrics.reasons`, issue #99), `PortfolioSummary`'s `Stat` and
+  `ComparisonSummary`'s `ReasonedValue` give that dash a tooltip **and** real
+  `sr-only` accessible text — the same convention `MdxCell` follows for a
+  measurement column's dash, since a native `title` alone is not reliably
+  announced to a screen reader.
 
 ## Dialogs
 

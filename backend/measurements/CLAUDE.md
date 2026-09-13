@@ -49,6 +49,20 @@ and why `registry._make_handler` only generates those two signatures.
 and strings — because they are what the frontend sorts and filters on. No
 formatting here.
 
+It may also return `per_ticker_reason` (issue #99): `{"NVDA": "fewer than 30
+overlapping daily returns (12 available)", …}`, one entry per ticker whose
+`per_ticker` value is `null`, naming why. Optional — a measurement with
+nothing useful to say about its own nulls returns none, which is every
+official measurement today; adding one is not "changing what counts as
+null", only explaining a null that already exists. `run()` keeps an entry
+only where it actually lines up with a null `per_ticker` value, so a stray
+reason next to a real value never reaches the response. A reason string
+reaches the browser exactly as written and down the same MDX rendering path
+`render_cell`'s output does (`app/src/components/ui/MdxCell.jsx`) — build it
+only from measurement-authored literals and already-computed values, never
+from fetched or user text, the same rule the root `CLAUDE.md`'s invariant 6
+states for `render_cell` itself.
+
 **`render_cell`** returns a small MDX/JSX string using the shared cell
 vocabulary — `<Bar value={0.35} label=".35" />`, `<Stat text="$61.8B" />`,
 `<Badge text="…" />` (implemented in `app/src/components/ui/MdxCell.jsx`). This is
@@ -60,7 +74,8 @@ That string is executed as real JSX in the browser. Build it only from
 measurement-authored literals and already-computed numbers or strings — never
 interpolate fetched text (a company description, an API field) into it.
 
-`run()` ties the three together and adds `per_ticker_mdx` alongside `per_ticker`.
+`run()` ties the three together and adds `per_ticker_mdx` alongside `per_ticker`
+(and `per_ticker_reason`, filtered down to actual nulls, when `compute` set one).
 
 ## Inputs
 

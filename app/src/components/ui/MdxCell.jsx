@@ -16,6 +16,13 @@
  *
  * Compiled components are cached by source string, since the same
  * ticker's snippet is usually identical across re-renders.
+ *
+ * `reason` (optional; issue #99) is a measurement-authored explanation
+ * for a null value — same trust boundary as `mdx`, never built from
+ * fetched or user text — surfaced as a native tooltip and, separately,
+ * as real accessible text for a screen reader, on the dash a null value
+ * renders as. Ignored once `mdx` is non-null: a reason only ever
+ * accompanies a genuine absence.
  */
 import { useState, useEffect } from 'react';
 import { evaluate } from '@mdx-js/mdx';
@@ -65,7 +72,7 @@ function compileMdx(source) {
   return compileCache.get(source);
 }
 
-export function MdxCell({ mdx, loading }) {
+export function MdxCell({ mdx, loading, reason }) {
   const [Content, setContent] = useState(null);
   const [failed, setFailed] = useState(false);
 
@@ -88,7 +95,25 @@ export function MdxCell({ mdx, loading }) {
   }, [mdx, loading]);
 
   if (loading) return <span className="font-[var(--font-mono)] text-[13px] text-[var(--fg-3)]">…</span>;
-  if (mdx === null || mdx === undefined) return <span className="font-[var(--font-mono)] text-[13px] text-[var(--fg-3)]">—</span>;
+  if (mdx === null || mdx === undefined) {
+    // A reason (issue #99) rides along as both a native tooltip (`title`,
+    // for a mouse) and real accessible text (an `sr-only` span, for a
+    // screen reader — `title` alone is not reliably announced). Without
+    // one, this is the same plain dash as before: no empty tooltip, no
+    // announcement of "no value" with nothing to say why.
+    if (reason) {
+      return (
+        <span
+          className="font-[var(--font-mono)] text-[13px] text-[var(--fg-3)] cursor-help border-b border-dotted border-[var(--fg-3)]"
+          title={reason}
+        >
+          <span aria-hidden="true">—</span>
+          <span className="sr-only">No value — {reason}</span>
+        </span>
+      );
+    }
+    return <span className="font-[var(--font-mono)] text-[13px] text-[var(--fg-3)]">—</span>;
+  }
   if (failed) return <span className="font-[var(--font-mono)] text-[13px] text-[var(--danger)]">err</span>;
   if (!Content) return <span className="font-[var(--font-mono)] text-[13px] text-[var(--fg-3)]">…</span>;
 
