@@ -58,16 +58,15 @@ as much as the convention behind it:
     no contributions the unit value is the total, and the two questions
     have the same answer.
 
-  - **A year is 365.25 days.** CAGR compounds over the calendar time the
-    window actually covers, so the same year answered in twelve monthly
-    buckets or 250 daily rows annualises to the same rate.
-
-  - **Volatility is annualised to 252 trading days**, with each return
-    first divided by the root of the trading time it actually covers. For
-    a window of daily rows that is exactly the textbook "daily standard
-    deviation times root 252"; for the older half of a long window, where
-    `prices` answers in weekly or monthly buckets, it is what stops a
-    week's movement being read as a day's.
+  - **The return and risk arithmetic itself - a year, a trading day, what
+    a coarse row means, CAGR, volatility, max drawdown, the flow-free unit
+    value - lives in `services/stats.py` (issue #98), not here.** That
+    module states the conventions once (a year is 365.25 days; volatility
+    annualises to 252 trading days, each return first divided by the root
+    of the trading time it covers); this module only decides which series
+    to hand it and how to read the result back into a portfolio's shape.
+    Read its module docstring for the full account of why that scaling
+    is not a refinement.
 
   - **Drawdown is measured on the total**, the only series a holder
     experiences. A single holding can fall much further without the
@@ -109,6 +108,14 @@ from services.market_data import (
     get_dividends,
     tracked_tickers,
 )
+from services.stats import (
+    DAYS_PER_YEAR,
+    PERCENT_DP,
+    cagr,
+    max_drawdown,
+    unit_values,
+    volatility,
+)
 from services.tickers import resolve_ticker
 
 # A ceiling on basket size, so one anonymous request cannot ask for an
@@ -138,15 +145,11 @@ CONTRIBUTION_FREQUENCIES = ("monthly", "quarterly", "yearly")
 # above them.
 MONEY_DP = 2
 
-# Percentages keep more precision than they will be shown at, so a caller
-# can round them for display without the rounding having happened twice.
-PERCENT_DP = 4
-
-# Annualisation. Volatility is scaled to a year of trading days; a year is
-# 365.25 calendar days, which is also what CAGR compounds over, so the two
-# agree about how long a year is.
-TRADING_DAYS_PER_YEAR = 252
-DAYS_PER_YEAR = 365.25
+# PERCENT_DP and DAYS_PER_YEAR are imported from services.stats above
+# rather than redefined here - the IRR discounting below (`_npv`) has to
+# agree with `stats.cagr` about how long a year is, and a second copy of
+# either constant is exactly the kind of drift issue #98 moved this
+# arithmetic out to prevent.
 
 
 def _period_key(timestamp: pd.Timestamp, frequency: str):
@@ -157,107 +160,6 @@ def _period_key(timestamp: pd.Timestamp, frequency: str):
     if frequency == "quarterly":
         return timestamp.year, (timestamp.month - 1) // 3
     return timestamp.year
-
-
-def _trading_days(gap_days: int) -> float:
-    """How much trading time one gap between rows covers.
-
-    Consecutive rows of the daily tier are one trading day apart whether
-    or not a weekend sits between them - Friday to Monday is one day of
-    market, not three. A coarser bucket is converted in proportion: a
-    weekly row spans about 4.8 trading days, a monthly one about 21.
-    """
-    if gap_days <= 4:
-        return 1.0
-    return gap_days * TRADING_DAYS_PER_YEAR / DAYS_PER_YEAR
-
-
-def _volatility(totals: list[float], dates: list[str]) -> float | None:
-    """Annualised standard deviation of the run's returns, as a percentage.
-
-    Each return is first divided by the square root of the trading time it
-    covers, which puts a weekly bucket's return and a daily row's return
-    into the same units before either is annualised by the usual 252. For
-    a window answered entirely from the daily tier this is exactly the
-    textbook "standard deviation of daily returns, times root 252"; the
-    scaling only starts to matter when `prices` answers in coarser buckets
-    (issue #10).
-
-    That is not a refinement. A real 2019-2026 basket comes back as 198
-    daily gaps, 207 weekly ones and 27 monthly: annualising every one of
-    them by 252 reads a week's movement as a day's and reported 54%
-    volatility where the same basket's true daily history gives 35% and
-    its weekly 31%. Picking one factor for the whole window instead only
-    moves which half of it is wrong. Scaling each return by its own gap is
-    what makes the number mean one thing across a window spanning tiers.
-
-    None rather than 0 when there are fewer than two returns to compare:
-    a single return has no dispersion to measure, and reporting 0 would
-    claim a portfolio held for two days was riskless.
-    """
-    parsed = [pd.Timestamp(d) for d in dates]
-    scaled = [
-        (totals[i] / totals[i - 1] - 1) / math.sqrt(_trading_days((parsed[i] - parsed[i - 1]).days))
-        for i in range(1, len(totals))
-        if totals[i - 1] > 0
-    ]
-    if len(scaled) < 2:
-        return None
-    mean = sum(scaled) / len(scaled)
-    variance = sum((r - mean) ** 2 for r in scaled) / (len(scaled) - 1)
-    return round(math.sqrt(variance) * math.sqrt(TRADING_DAYS_PER_YEAR) * 100, PERCENT_DP)
-
-
-def _cagr(totals: list[float], dates: list[str]) -> float | None:
-    """Compound annual growth rate, as a percentage, over the calendar
-    time the run actually covers.
-
-    Elapsed calendar days rather than a row count, so a window answered in
-    twelve monthly buckets and one answered in 250 daily rows over the same
-    year annualise to the same rate. None when there is no elapsed time to
-    compound over - a single row, or every row on one date.
-    """
-    if len(totals) < 2 or totals[0] <= 0:
-        return None
-    days = (pd.Timestamp(dates[-1]) - pd.Timestamp(dates[0])).days
-    if days <= 0:
-        return None
-    growth = totals[-1] / totals[0]
-    return round((growth ** (DAYS_PER_YEAR / days) - 1) * 100, PERCENT_DP)
-
-
-def _unit_values(totals: list[float], inflows: list[float]) -> list[float]:
-    """The total with the deposits taken back out of it.
-
-    A contribution is not a gain. Paying $100 into a $1,000 portfolio
-    takes the total to $1,100 on a day the market did nothing, and any
-    metric read straight off the total records that as a 10% day - which
-    then lands in the volatility, in the drawdown, and in the return.
-
-    So each step is measured against the money that was actually working
-    before it: the row's total less whatever arrived that day, over the
-    previous row's total. Chaining those steps gives a series that starts
-    where the portfolio started and only ever moves because prices did -
-    the standard time-weighted construction, in the one place every metric
-    reads from.
-
-    Returned as `totals` itself when nothing was ever paid in, so a run
-    without contributions is not merely close to the old result but the
-    same object.
-    """
-    if not any(inflows):
-        return totals
-
-    units = [totals[0]]
-    for i in range(1, len(totals)):
-        previous = totals[i - 1]
-        # A portfolio worth nothing has no proportion left to grow by, and
-        # dividing by it would invent one. It stays where it is.
-        if previous <= 0:
-            units.append(units[-1])
-            continue
-        units.append(units[-1] * (totals[i] - inflows[i]) / previous)
-    return units
 
 
 def _npv(rate: float, flows: list[tuple[pd.Timestamp, float]]) -> float:
@@ -338,32 +240,6 @@ def _money_weighted_return(flows: list[tuple[pd.Timestamp, float]]) -> float | N
     return round((low + high) / 2 * 100, PERCENT_DP)
 
 
-def _max_drawdown(totals: list[float], dates: list[str]) -> dict:
-    """The deepest peak-to-trough fall in the run, as a negative
-    percentage, with the dates of both ends.
-
-    Measured on the total value, which is the only series a holder
-    experiences - an individual holding can fall much further without the
-    portfolio noticing. A run that never falls reports 0 and no dates:
-    there is no peak and no trough to point at, and naming the first date
-    would invent a drawdown that did not happen.
-    """
-    worst, peak_at, trough_at = 0.0, None, None
-    peak, peak_date = totals[0], dates[0]
-    for date_str, total in zip(dates, totals):
-        if total > peak:
-            peak, peak_date = total, date_str
-        if peak > 0:
-            drawdown = total / peak - 1
-            if drawdown < worst:
-                worst, peak_at, trough_at = drawdown, peak_date, date_str
-    return {
-        "value": round(worst * 100, PERCENT_DP),
-        "peakDate": peak_at,
-        "troughDate": trough_at,
-    }
-
-
 def _metrics(
     totals: list[float],
     dates: list[str],
@@ -387,6 +263,12 @@ def _metrics(
 
     With no contributions `units` is `totals` and the two families agree,
     which is why a run with contributions switched off is unchanged.
+
+    `cagr` and `maxDrawdown` are `services.stats`'s own return shape
+    (see issue #98); `volatility`'s `{"value", "granularity"}` is
+    unpacked to its bare value here, because this response's `volatility`
+    key has always been a plain number and changing that would be a
+    change to the simulator's output, not to where its arithmetic lives.
     """
     start_value, final_value = totals[0], totals[-1]
     unit_start, unit_end = units[0], units[-1]
@@ -398,9 +280,9 @@ def _metrics(
         "startValue": start_value,
         "finalValue": final_value,
         "totalReturn": total_return,
-        "cagr": _cagr(units, dates),
-        "volatility": _volatility(units, dates),
-        "maxDrawdown": _max_drawdown(units, dates),
+        "cagr": cagr(units, dates),
+        "volatility": volatility(units, dates)["value"],
+        "maxDrawdown": max_drawdown(units, dates),
         # Recurring contributions only: the opening lump sum is
         # `startValue`, and adding the two is what `totalInvested` is for.
         "contributed": round(contributed, MONEY_DP),
@@ -640,7 +522,7 @@ def simulate_portfolio(
     paid_in = float(value)
     contributed = 0.0
     # What arrived on each row, which is exactly what has to be taken back
-    # out again before a return is measured (see _unit_values).
+    # out again before a return is measured (see stats.unit_values).
     inflows: list[float] = []
     values: dict[str, list[float]] = {ticker: [] for ticker in tickers}
     first_priced: dict[str, str | None] = {ticker: None for ticker in tickers}
@@ -772,7 +654,7 @@ def simulate_portfolio(
     # two ends of the IRR, with every contribution already in between.
     cash_flows.insert(0, (pd.Timestamp(dates[0]), -float(value)))
     cash_flows.append((pd.Timestamp(dates[-1]), totals[-1]))
-    units = _unit_values(totals, inflows)
+    units = unit_values(totals, inflows)
 
     return {
         "start": dates[0],
