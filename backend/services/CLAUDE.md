@@ -108,6 +108,35 @@ daily rows.
 non-existent symbol should still 404 and an unreachable upstream should still
 503, exactly as when the whole basket goes live.
 
+## Price frames: `get_price_frame` (issue #102)
+
+The JSON-native, volume-widened sibling of `get_closes`, for
+`measurements/inputs/price_frame.py`: one bulk `prices` query selecting
+`volume` and `granularity` alongside `close` (`_price_frame_db`), so a
+volume-based metric never needs a per-ticker call. Deliberately its own
+code path rather than `get_closes` widened in place — `get_closes` has a
+long-established, directly-tested, uncached call shape that
+`services/portfolio.py` and `tests/test_partial_basket.py` depend on, and
+duplicating the small pivot rather than sharing it is what keeps this
+addition from touching that contract at all.
+
+`_price_frame_bundle` is the cached read behind both `get_price_frame`
+and `compute_correlation_matrix` — keyed like `get_price_series`
+(sorted tickers, period, start, end, interval), deliberately **without**
+`min_tickers`, so `price_frame`'s own default (1) and correlation's (2)
+don't stop the two from sharing an entry: whichever caller populates a
+cold cache first settles how eagerly it accepted a partial DB answer, and
+the other just reads what's there. `price_frame`'s own default period is
+`config.CORRELATION_PERIOD` specifically so the two end up asking for the
+same key whenever a doc page or measurement reads both for the same fund.
+
+Volume has **no live fallback**, for the same reason `get_dividends`
+below has none: a number that sometimes comes from a record and
+sometimes from a network call is a number nobody can reconcile. A ticker
+merged in live (every ETF, and anything resolved outside the tracked
+universe) gets real closes but `volume=None` throughout — never `0`,
+which a listed security's own volume is never legitimately reported as.
+
 ## Dividends
 
 `get_dividends` reads the sparse `dividends` event table — one row per ex-date

@@ -172,6 +172,22 @@ and executed as real JSX in the browser, which is safe only because they are
 first-party files reviewed like any other code here — never build one from
 external data.
 
+A measurement never calls the data layer directly — it fetches through
+`backend/measurements/inputs/`, one getter per distinct piece of data, each
+declaring what it quietly defaults so a doc page can say so. Alongside a
+fund's holdings, its own metadata and the correlation matrix, three getters
+reach prices, volume, stock metadata and dividends for a fund's whole basket
+of holdings in bulk (issue #102): `price_frame` (close prices, and volume
+wherever the database has it — `null`, never `0`, for a holding with no
+`prices` rows at all, such as an ETF held inside another ETF), `stock_info`
+(each holding's own name, sector and market cap) and `dividend_events`
+(dividend history alongside whether the holding is tracked at all, the same
+"tracked and paid nothing" versus "no record here" distinction the
+[Dividends](#dividends) section below describes for the simulator).
+`price_frame` defaults to the same window the correlation matrix reads, so
+a doc page or measurement using both shares one cached read rather than
+asking Supabase twice for the same tickers.
+
 ## Portfolio simulator
 
 A portfolio here is **a simulation, not an account**: a basket of tickers,

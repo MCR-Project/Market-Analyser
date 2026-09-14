@@ -1038,6 +1038,70 @@ def _closes_db(
     return closes
 
 
+def _price_frame_db(
+    tickers: list[str],
+    period: str | None,
+    start: str | None = None,
+    end: str | None = None,
+    min_tickers: int = 2,
+) -> dict | None:
+    """Same bulk read as `_closes_db`, widened to one query selecting
+    `volume` and `granularity` alongside `close` (issue #102) - a
+    volume-based metric needs the bulk read widened, not a per-ticker call
+    per holding, and "one query" is exactly what `get_price_frame`
+    promises.
+
+    Kept as its own function rather than folded into `_closes_db` itself:
+    `_closes_db`'s return shape (a bare close DataFrame) is depended on
+    directly by `get_closes` and by tests that patch it with one, and
+    every caller here wants the wider bundle instead - conflating the two
+    would mean picking one shape and quietly breaking the other's
+    contract.
+
+    Returns {"close": DataFrame, "volume": DataFrame, "granularity":
+    DataFrame}, pivoted wide the same way `_closes_db` pivots close alone,
+    or None on the same "too little data to be useful" terms (fewer than
+    `min_tickers` columns, fewer than 2 rows) - judged from the close
+    pivot alone, same as `_closes_db`.
+    """
+    if period is not None and period not in PERIOD_TO_DAYS and period != "max":
+        return None
+    db = get_client_optional()
+    if db is None:
+        return None
+    lower, upper = _window_bounds(period, start, end)
+
+    def build_query():
+        q = (
+            db.table("prices")
+            .select("ticker,date,close,volume,granularity")
+            .in_("ticker", tickers)
+            .order("date")
+            .order("ticker")
+            .order("granularity")
+        )
+        return _window_filtered(q, lower, upper)
+
+    try:
+        rows = paginated_select(build_query)
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    df["close"] = df["close"].astype(float)
+    closes = df.pivot(index="date", columns="ticker", values="close")
+
+    if closes.shape[1] < min_tickers or closes.shape[0] < 2:
+        return None
+
+    df["volume"] = df["volume"].astype(float)
+    volume = df.pivot(index="date", columns="ticker", values="volume")
+    granularity = df.pivot(index="date", columns="ticker", values="granularity")
+    return {"close": closes, "volume": volume, "granularity": granularity}
+
+
 def tracked_tickers(tickers: list[str]) -> set[str]:
     """Which of `tickers` the `ticker` table knows about.
 
@@ -1210,6 +1274,90 @@ def _merge_missing_live(
     return merged
 
 
+def _price_frame_bundle(
+    tickers: list[str],
+    period: str | None,
+    interval: str,
+    start: str | None,
+    end: str | None,
+    min_tickers: int,
+) -> dict:
+    """The cached read behind both `get_price_frame` and
+    `compute_correlation_matrix` (issue #102): close prices, plus volume
+    and granularity wherever the database could answer for them, keyed
+    the same way `get_price_series` keys one ticker's history so the two
+    callers share one cache entry whenever they ask for the same tickers
+    over the same stretch - `get_price_frame`'s own default period is
+    `CORRELATION_PERIOD`, exactly so a doc page or measurement reading
+    both ends up asking for literally the same key.
+
+    `get_closes` deliberately does **not** route through here - it has
+    its own long-established, directly-tested call shape
+    (`_closes_db`/`_closes_live`/`_merge_missing_live`, uncached) that
+    `services/portfolio.py` and a full test file
+    (`tests/test_partial_basket.py`) depend on unchanged; duplicating its
+    logic here rather than sharing it is what keeps this addition from
+    touching that contract at all.
+
+    `min_tickers` is deliberately **not** part of the cache key: it only
+    decides how eagerly a cold cache accepts a partial database answer
+    before merging in what is missing live, not what is actually being
+    asked for, so whichever caller happens to populate the cache first
+    settles that choice and the other reads the same answer rather than
+    re-deciding it.
+
+    Volume has no live fallback (issue #102, the same reasoning
+    `get_dividends` already gives: a number that sometimes comes from a
+    record and sometimes from a network call is a number nobody can
+    reconcile) - a ticker merged in live (every ETF, and anything
+    resolved outside the tracked universe) has real closes but
+    volume=None, granularity=None throughout, in every row.
+    """
+    key = f"closes:{'_'.join(sorted(tickers))}:{period or ''}:{start or ''}:{end or ''}:{interval}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    closes, volume, granularity = None, None, None
+    if interval == "1d":
+        db_result = _price_frame_db(
+            tickers, period, start=start, end=end, min_tickers=min_tickers
+        )
+        if db_result is not None:
+            closes = db_result["close"]
+            volume = db_result["volume"]
+            granularity = db_result["granularity"]
+            absent = [t for t in tickers if t not in closes.columns]
+            if absent:
+                closes = _merge_missing_live(closes, absent, period, interval, start, end)
+    if closes is None:
+        closes = _live(
+            "price history for these holdings",
+            _closes_live, tickers, period, interval, start=start, end=end,
+        )
+
+    bundle = {"close": None, "volume": None, "granularity": None}
+    # Don't cache a failure (no data at all) - the same rule every other
+    # cached read here follows, so the next request retries rather than
+    # being stuck behind this one's miss for the full TTL.
+    if closes is not None:
+        closes = closes.copy()
+        closes.index = pd.to_datetime(closes.index)
+        if closes.index.tz is not None:
+            closes.index = closes.index.tz_localize(None)
+        bundle["close"] = closes.sort_index()
+        if volume is not None:
+            volume = volume.copy()
+            volume.index = pd.to_datetime(volume.index)
+            bundle["volume"] = volume.sort_index()
+        if granularity is not None:
+            granularity = granularity.copy()
+            granularity.index = pd.to_datetime(granularity.index)
+            bundle["granularity"] = granularity.sort_index()
+        cache.set(key, bundle, CACHE_TTL_SECONDS)
+    return bundle
+
+
 def get_closes(
     tickers: list[str],
     period: str | None = None,
@@ -1272,6 +1420,73 @@ def get_closes(
     return closes.sort_index()
 
 
+def get_price_frame(
+    tickers: list[str],
+    period: str | None = None,
+    interval: str = "1d",
+    start: str | None = None,
+    end: str | None = None,
+    min_tickers: int = 1,
+) -> dict[str, dict]:
+    """Close prices, plus volume wherever the database can answer for it,
+    for several tickers in one bulk read (issue #102) - the JSON-native
+    counterpart to `get_closes`' DataFrame, sharing its underlying read
+    (see `_price_frame_bundle`) with `compute_correlation_matrix` whenever
+    the two ask for the same tickers over the same stretch, rather than
+    each issuing its own.
+
+    Returns {ticker: {"closes": [[date, close], ...], "volume":
+    [{"date", "volume", "granularity"}, ...] | None}} for every ticker
+    with any priced history; a ticker with none at all (a typo, one that
+    has never listed) is simply absent from the dict - the same "absence
+    over an empty placeholder" rule `get_dividends` follows.
+
+    `volume` is `None`, not an empty list, for a ticker the database has
+    no `prices` rows for at all - every ETF, and anything resolved outside
+    the tracked universe - never `0`, which a listed security's own volume
+    is never legitimately reported as. There is no live fallback for it
+    (see `_price_frame_bundle`'s docstring for why).
+
+    Where present, `granularity` travels with each volume row because a
+    coarse row's volume is a bucket **sum**, not one day's (~21 trading
+    days for a monthly bucket - `sql/001_optimize_prices_storage.sql`): a
+    caller averaging volume across rows of mixed granularity must divide
+    each one by the trading time it actually covers
+    (`services/stats.py`'s `trading_days`, computed from the gap to the
+    previous row) rather than treat every row as one day's volume.
+    """
+    period, start, end = resolve_window(period, start, end)
+    bundle = _price_frame_bundle(tickers, period, interval, start, end, min_tickers)
+    closes = bundle["close"]
+    if closes is None:
+        return {}
+
+    volume, granularity = bundle["volume"], bundle["granularity"]
+    result: dict[str, dict] = {}
+    for ticker in tickers:
+        if ticker not in closes.columns:
+            continue
+        series = closes[ticker].dropna()
+        entry = {
+            "closes": [[idx.strftime("%Y-%m-%d"), round(float(v), 2)] for idx, v in series.items()],
+            "volume": None,
+        }
+        if volume is not None and ticker in volume.columns:
+            vol_series = volume[ticker].dropna()
+            if not vol_series.empty:
+                gran_series = granularity[ticker] if granularity is not None else None
+                entry["volume"] = [
+                    {
+                        "date": idx.strftime("%Y-%m-%d"),
+                        "volume": int(v),
+                        "granularity": (gran_series.get(idx) if gran_series is not None else None) or "D",
+                    }
+                    for idx, v in vol_series.items()
+                ]
+        result[ticker] = entry
+    return result
+
+
 def compute_correlation_matrix(
     tickers: list[str],
     period: str = CORRELATION_PERIOD,
@@ -1280,11 +1495,12 @@ def compute_correlation_matrix(
     """Compute pairwise Pearson correlation of daily returns for a set of tickers.
 
     Steps:
-      1. Get close prices for all tickers via get_closes - from Supabase
+      1. Get close prices for all tickers via the shared bundle
+         `get_price_frame` also reads through (issue #102) - from Supabase
          (bulk query, pivoted into a wide DataFrame) when interval="1d"
          and there's enough synced data, else a single yf.download() call.
-         Its default min_tickers=2 is what this step needs: a lone synced
-         ticker has no peer to correlate against, so it is a miss
+         min_tickers=2 is what this step needs: a lone synced ticker has
+         no peer to correlate against, so it is a miss
       2. Compute daily percentage returns (pct_change)
       3. Build the NxN Pearson correlation matrix via DataFrame.corr()
       4. Extract summary statistics: per-ticker averages, strongest/weakest
@@ -1297,7 +1513,10 @@ def compute_correlation_matrix(
     if cached:
         return cached
 
-    closes = get_closes(tickers, period=period, interval=interval)
+    resolved_period, resolved_start, resolved_end = resolve_window(period, None, None)
+    closes = _price_frame_bundle(
+        tickers, resolved_period, interval, resolved_start, resolved_end, min_tickers=2
+    )["close"]
 
     if closes is None:
         return {"matrix": {}, "tickers": tickers}

@@ -24,7 +24,14 @@ Adding a new input type:
      in their `uses_inputs`
 """
 
-from measurements.inputs import correlation_matrix, etf_info, holdings
+from measurements.inputs import (
+    correlation_matrix,
+    dividend_events,
+    etf_info,
+    holdings,
+    price_frame,
+    stock_info,
+)
 
 # name → INPUT_SPEC. The keys are what a measurement's `uses_inputs`
 # names; a name with no entry here is a bug, and the test suite fails on
@@ -33,4 +40,7 @@ INPUT_REGISTRY = {
     "holdings": holdings.INPUT_SPEC,
     "etf_info": etf_info.INPUT_SPEC,
     "correlation_matrix": correlation_matrix.INPUT_SPEC,
+    "price_frame": price_frame.INPUT_SPEC,
+    "stock_info": stock_info.INPUT_SPEC,
+    "dividend_events": dividend_events.INPUT_SPEC,
 }
