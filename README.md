@@ -51,8 +51,9 @@ in `.env` — see `.env.example`):
   Idempotent; both stages run end-to-end via the "Fetch holdings and
   complete database (manual)" GitHub Action.
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
-  and ETF holdings for everything tracked. Runs on a cron via the "Daily
-  ticker data fetch" GitHub Action.
+  ETF holdings, and the tracked risk-free rate (`risk_free_rate` table,
+  issue #103 — see "Scoring against a risk-free rate" below) for everything
+  tracked. Runs on a cron via the "Daily ticker data fetch" GitHub Action.
 
 #### How prices are stored
 
@@ -395,6 +396,32 @@ anything resolved live — reports `null` and is named in
 state, in a figure, that SPY pays no dividend. The value and the return
 still include that income; only the income figure cannot see it.
 
+### Scoring against a risk-free rate
+
+Sharpe and Sortino (filed separately) are the first metrics this app needs
+a risk-free rate for, and a single hardcoded figure would be meaningfully
+wrong: the windows this app can already simulate span years over which
+short rates moved several points, and a ratio computed against the wrong
+one is wrong by exactly that gap. So the rate is tracked like everything
+else the pipeline tracks — its own database table
+(`risk_free_rate`, issue #103), refreshed daily alongside prices and
+dividends — never a constant in application code. Not even the upstream
+symbol is hardcoded: it lives in `risk_free_rate_source`, a one-row table
+seeded once by its migration, the same "database decides, not code" rule
+the tracked ETF/stock universe already follows.
+
+The rate is an assumption about how a run is **scored**, not a property of
+the basket being run, which is the same reasoning that puts the simulation
+window in the query string rather than in the portfolio (see "Choosing the
+window" below): `?rf=` overrides the tracked series for one run, surviving
+a reload and travelling in a shared link the same way `?window=` does, via
+`useRiskFreeRate.js`. An unusable value (missing, not a number) falls back
+to the tracked series rather than erroring — a bad link should open the
+app, not a complaint about itself. Whatever rate produces a figure is meant
+to be shown next to it, once a figure depends on one; a run this cannot be
+read for reports a null with a reason for that figure, never a ratio
+computed against an assumed zero.
+
 ### Choosing the window, and comparing
 
 The window belongs to the view rather than to the portfolio — the same
@@ -488,7 +515,11 @@ stored: the portfolio arrives in the request and leaves in the response.
   "contribution": {                  // optional; omit for a single lump sum
     "amount": 100,
     "frequency": "monthly"           // monthly | quarterly | yearly
-  }
+  },
+  "rate": null                       // risk-free rate override, % p.a. (issue
+                                      //   #103); omit for the tracked series.
+                                      //   Accepted, not yet read - the ratios
+                                      //   that use it are their own issue.
 }
 ```
 

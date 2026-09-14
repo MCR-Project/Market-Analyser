@@ -26,10 +26,25 @@ holding is never inserted, and an existing one is **pruned** DB-wide when it is
 below the threshold in *every* ETF that holds it. Stocks held by no ETF at all
 (hand-added watchlist entries) are never pruned.
 
+The risk-free rate's upstream symbol (issue #103) enters the same way an ETF
+does: a row in `risk_free_rate_source`, seeded once by
+`sql/004_track_risk_free_rate.sql` rather than by any script — invariant 4
+("no hardcoded ticker list anywhere") applies to it too, so it is a database
+fact `fetch_daily.py` reads, never a Python constant. Changing which symbol
+is tracked is a database edit; removing the row entirely stops the sync
+rather than falling back to a guess.
+
 ## `fetch_daily.py`
 
-Five phases, in order:
+Six phases, in order:
 
+0. **`sync_risk_free_rate`** (issue #103) — refresh the tracked risk-free rate
+   series (`risk_free_rate`), for whichever symbol `risk_free_rate_source`
+   names (see "How something enters the universe" above): a full backfill
+   the first time the table is empty, a small top-up otherwise. One flat
+   series, not per-ticker, so "does the table have any rows yet" stands in
+   for the per-ticker `last_fetch` column this table has no need of, and
+   it runs even on a day nothing else needs syncing.
 1. **`sync_etfs`** — refresh `etfs` metadata and `etf_holdings` weights for every
    ETF in the DB. The DB rows are the full constituent list and the source of
    truth; yfinance only exposes the top ~10, so the live call refreshes the
@@ -147,6 +162,8 @@ call.
 - They are covered by `backend/tests/test_fetch_daily.py` and
   `test_complete_database.py`, which exercise `bucket_by_age`, `compact_ticker`,
   `_select_tickers_needing_sync`, `normalize_symbol`/`normalize_holdings` and
-  `prune_below_threshold` against fakes. Add a case whenever you touch the
+  `prune_below_threshold` against fakes — and `test_risk_free_rate.py`, which
+  covers `fetch_risk_free_rate_rows`/`sync_risk_free_rate` the same way (issue
+  #103). Add a case whenever you touch the
   bucketing or the escalation rules — they are the parts where a mistake corrupts
   stored data rather than failing loudly.

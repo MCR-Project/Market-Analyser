@@ -43,8 +43,10 @@ import { StorageNotice } from '../components/portfolio/StorageNotice';
 /** The view parameters worth carrying into a shared link: what the sender
  *  was looking at, so the recipient opens the same reading rather than the
  *  default one. `compare` is deliberately absent — it names portfolio ids,
- *  which mean nothing in another browser. */
-const SHARED_VIEW_PARAMS = ['window', 'start', 'end', 'benchmark'];
+ *  which mean nothing in another browser. `rf` (issue #103) travels for
+ *  the same reason `window`/`start`/`end` do: a Sharpe someone sends
+ *  should be the Sharpe they saw, rate included. */
+const SHARED_VIEW_PARAMS = ['window', 'start', 'end', 'benchmark', 'rf'];
 
 /** How to describe the window a share link carries, for the dialog that
  *  is about to hand it over. */

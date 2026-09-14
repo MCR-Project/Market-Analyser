@@ -177,6 +177,47 @@ Two subtleties that have bitten before:
   is the bucket **anchor**. A window opening mid-month therefore begins at the
   next anchor rather than reaching back into the bucket it landed in.
 
+## The risk-free rate (issue #103)
+
+Sharpe and Sortino (filed separately, issue #112) are the first metrics
+needing data this app does not otherwise have. Invariant 4 forbids a
+hardcoded ticker list, and a single fixed rate would be meaningfully wrong
+besides — the windows this app can already simulate span years over which
+short rates moved several points — so the rate is tracked like everything
+else the pipeline tracks: its own table (`risk_free_rate`,
+`sql/004_track_risk_free_rate.sql`), refreshed daily by
+`scripts/fetch_daily.py`'s `sync_risk_free_rate` alongside prices,
+dividends and splits, read back by `services.market_data.get_risk_free_rate`.
+
+Four things distinguish it from a price series:
+
+- **Not even the upstream symbol is hardcoded.** Invariant 4 applies to
+  this series exactly the same way it applies to the tracked ETF/stock
+  universe: which yfinance symbol backs the rate lives in
+  `risk_free_rate_source` (one row, seeded once by the migration itself,
+  changeable as a database edit rather than a deploy), not a Python
+  constant. `scripts.fetch_daily._risk_free_rate_symbol` reads it; an
+  empty table (the seed row deliberately removed) skips the sync rather
+  than falling back to a guess.
+- **It is a yield, not a price.** Stored exactly as read — a percentage
+  per annum — so none of the adjusted-close rules in "How prices are
+  stored" apply to it, and there is nothing to bucket by age: one flat,
+  densely-populated table, not three tiers.
+- **No live fallback**, the same reasoning `get_dividends` already gives:
+  a number that sometimes comes from a record and sometimes from a
+  network call is a number nobody can reconcile. `get_risk_free_rate`
+  returns `None`, not an empty list, when Supabase is unreachable or
+  nothing has been synced for the window asked — a caller scoring a run
+  against it must show a null with a reason, never an assumed zero.
+- **Overridable, not just readable.** `PortfolioIn.rate` (percent per
+  annum) lets a caller — the frontend's `?rf=`, via `useRiskFreeRate.js`,
+  or the future `POST /api/portfolio/risk`, issue #113, sharing the same
+  body shape — replace the tracked series for one run. Accepted on the
+  request today but not yet read by `simulate_portfolio`, since the
+  ratios that would use it are out of scope here; adding them is a matter
+  of reading `portfolio.rate` where #112 needs it; the field is already
+  there so that lands without a request-shape change.
+
 ## Adding an endpoint
 
 1. Put the logic in `services/`, with the validation, the caching and the

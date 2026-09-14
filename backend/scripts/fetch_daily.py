@@ -25,6 +25,11 @@ Daily data-refresh job:
   - Refreshes ETF metadata and holdings for every ETF in Supabase's `etfs`
     table (via market_data.list_etfs) into the etfs / etf_holdings tables,
     since holding weights drift over time.
+  - Refreshes the tracked risk-free rate series (`risk_free_rate`, issue
+    #103): a full backfill the first time the table is empty, a small
+    top-up otherwise. Independent of the ticker loop above - it is one
+    flat series, not per-ticker - so it runs even on a day nothing else
+    needs syncing.
 
 Run manually with:   python scripts/fetch_daily.py
 Runs on a schedule via .github/workflows/fetch-daily.yml.
@@ -146,6 +151,74 @@ def fetch_ticker_rows(ticker_id: str, period: str) -> tuple[list[dict], list[dic
             split_events.append({"ticker": ticker_id, "date": date_str, "splits": split})
 
     return rows, dividend_events, split_events
+
+
+def _risk_free_rate_symbol(client) -> str | None:
+    """Which yfinance symbol backs the tracked risk-free rate - read from
+    `risk_free_rate_source`, never hardcoded here (issue #103): invariant 4
+    ("no hardcoded ticker list anywhere") applies to this series exactly
+    the same way it applies to the ETF/stock universe. None when nothing
+    has been configured yet, the same way an untracked ETF simply has no
+    row in `etfs` - there is nothing to seed a default to here either.
+    """
+    rows = client.table("risk_free_rate_source").select("symbol").limit(1).execute().data
+    return rows[0]["symbol"] if rows else None
+
+
+def fetch_risk_free_rate_rows(symbol: str, period: str) -> list[dict]:
+    """Fetch the tracked risk-free rate for `period`, as upsert-ready
+    {date, rate} rows (issue #103).
+
+    `rate` is yfinance's own Close for `symbol`, already a yield in
+    percent per annum (e.g. 5.25 meaning 5.25%) - a quote, not a price, so
+    unlike fetch_ticker_rows there is no auto_adjust to set and no
+    split/dividend event to separate out.
+    """
+    hist = yf.Ticker(symbol).history(period=period)
+    if hist.empty:
+        return []
+    hist = hist.dropna(subset=["Close"])
+    rows = []
+    for idx, r in hist.iterrows():
+        rate = _safe_float(r["Close"])
+        if rate is not None:
+            rows.append({"date": idx.strftime("%Y-%m-%d"), "rate": rate})
+    return rows
+
+
+def sync_risk_free_rate(client) -> bool:
+    """Refresh `risk_free_rate` (issue #103): a full backfill the first
+    time the table is empty, a small top-up otherwise - the same
+    backfill/top-up split the ticker loop below uses, for one flat series
+    rather than per ticker, so "does the table have any rows yet" stands
+    in for the per-ticker last_fetch column this table has no need of.
+
+    A source symbol that has never been configured is not a failure -
+    `risk_free_rate_source` starts seeded by the migration itself
+    (sql/004_track_risk_free_rate.sql), so this is only reachable if that
+    row was deliberately removed; skipping quietly beats guessing at a
+    default no code here is allowed to hardcode.
+
+    Returns whether the sync succeeded, so main() can fold a failure into
+    its own exit code rather than a bad rate feed going unnoticed.
+    """
+    symbol = _risk_free_rate_symbol(client)
+    if symbol is None:
+        print("  risk-free rate: no source configured (risk_free_rate_source is empty) - skipped")
+        return True
+
+    existing = client.table("risk_free_rate").select("date").limit(1).execute().data
+    period = BACKFILL_PERIOD if not existing else TOPUP_PERIOD
+    try:
+        rows = fetch_risk_free_rate_rows(symbol, period)
+    except Exception as e:
+        print(f"  FAILED  risk-free rate ({symbol}) {e}")
+        return False
+
+    if rows:
+        client.table("risk_free_rate").upsert(rows).execute()
+    print(f"  risk-free rate ({symbol})  {len(rows):5d} rows upserted  ({period})")
+    return True
 
 
 def _week_start(d: date) -> date:
@@ -508,18 +581,21 @@ def _select_tickers_needing_sync(tickers: list[dict]) -> list[dict]:
 def main():
     client = get_client()
 
+    print("Syncing risk-free rate...")
+    rate_synced = sync_risk_free_rate(client)
+
     ticker_rows = paginated_select(
         lambda: client.table("ticker").select("id,last_fetch,active").order("id")
     )
     all_ticker_ids = {row["id"] for row in ticker_rows}
     tickers_needing_sync = _select_tickers_needing_sync(ticker_rows)
 
-    print("Syncing ETFs (market_data.list_etfs)...")
+    print("\nSyncing ETFs (market_data.list_etfs)...")
     etf_failures = sync_etfs(client, all_ticker_ids)
 
     if not tickers_needing_sync:
         print("\nNo tickers to sync - add some with scripts/add_ticker.py first.")
-        if etf_failures:
+        if etf_failures or not rate_synced:
             sys.exit(1)
         return
 
@@ -527,6 +603,8 @@ def main():
     today_date = date.today()
     total_rows = 0
     failed = list(etf_failures)
+    if not rate_synced:
+        failed.append("risk_free_rate")
 
     for ticker in tickers_needing_sync:
         ticker_id = ticker["id"]
