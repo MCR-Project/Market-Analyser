@@ -96,18 +96,26 @@ holding that had not listed yet — valuing an ETF at zero for a whole run
 
 ### Measurements
 
-Every column in the holdings table is a measurement plugin: a self-contained
-class that fetches its own inputs, computes a value per holding, and decides
-how that value is drawn. Official ones live in
+Every column in the holdings table comes from a measurement plugin: a
+self-contained class that fetches its own inputs, computes a value per holding,
+and decides how that value is drawn. Official ones live in
 `backend/measurements/official_measurements/`, plugged-in ones in
 `addon_measurements/`; the registry discovers both and the frontend builds
 its columns from what it finds, so adding a measurement needs no frontend
 change.
 
+A plugin usually provides one column, but may instead declare several from a
+single computation — upside and downside capture, say, rather than running the
+same fetch twice for two halves of one comparison. Either way the picker lists
+columns, not plugins: a multi-column plugin's name and description appear once,
+with each of its columns individually toggleable beneath, and adding a second
+column to an existing plugin still needs no frontend change.
+
 Each measurement documents itself in an `.mdx` file **next to its own
 module** — `correlation.py` → `correlation.mdx` — which the app serves at
-`/docs/<measurement id>`. Keeping the doc beside the plugin is what lets an
-addon ship its own documentation.
+`/docs/<measurement id>` and which every column that plugin provides shares.
+Keeping the doc beside the plugin is what lets an addon ship its own
+documentation.
 
 Copy `backend/measurements/DOC_TEMPLATE.mdx` to start one. The file is YAML
 frontmatter followed by MDX:

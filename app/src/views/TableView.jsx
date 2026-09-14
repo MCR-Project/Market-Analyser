@@ -183,7 +183,7 @@ export const TableView = memo(function TableView({
                     reading about a column must not also re-sort it. */}
                 <div className="flex items-center gap-1.5">
                   <SortHeader label={m.column_label} active={sort.key === m.id} dir={sort.dir} onClick={() => handleSortClick(m.id, defaultDirFor(m))} />
-                  <DocLink measurementId={m.id} measurementName={m.name} />
+                  <DocLink measurementId={m.measurement_id} measurementName={m.name} />
                 </div>
               </MetricSlot>
             ))}

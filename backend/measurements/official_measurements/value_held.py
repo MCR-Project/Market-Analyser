@@ -56,7 +56,7 @@ class ValueHeldMeasurement(MeasurementBase):
             "aum": aum,
         }
 
-    def render_cell(self, ticker: str, value) -> str:
+    def render_cell(self, ticker: str, value, column_key: str) -> str:
         if value is None:
             return "—"
         # Mirrors the frontend's old fmtMoney(): $/B/T thresholds.

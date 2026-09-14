@@ -93,15 +93,63 @@ for m in ALL_MEASUREMENTS:
 
 # ── Manifest endpoint ────────────────────────────────────────────────────────
 
+def _column_manifest_entries(measurement) -> list[dict]:
+    """One manifest row per column this plugin provides (issue #100),
+    so the frontend discovers columns to toggle rather than plugins to
+    think about.
+
+    Built from `measurement.manifest()` (the plugin's own identity -
+    unaffected by this function) plus `measurement.resolved_columns`
+    (one dict per column, whichever way the plugin declared them) - each
+    row is the plugin's manifest with that one column's fields overlaid
+    on top, plus `measurement_id`, which is what tells the frontend which
+    route actually computes this column and lets it group sibling
+    columns under one plugin in the picker.
+
+    A single-column plugin's one row keeps `id` equal to the plugin's own
+    id - already unique, the same way every measurement's `id` always
+    had to be - which is what makes today's three official measurements'
+    manifest rows unaffected by this function beyond the addition of
+    `measurement_id` itself. A multi-column plugin's `id` is namespaced
+    as `f"{measurement.id}.{column['key']}"` so its own columns cannot
+    collide with each other or with an unrelated plugin's.
+    """
+    base = measurement.manifest()
+    columns = measurement.resolved_columns
+    single = len(columns) == 1
+
+    entries = []
+    for column in columns:
+        entry = {**base, "measurement_id": measurement.id}
+        entry["id"] = measurement.id if single else f"{measurement.id}.{column['key']}"
+        entry["column_key"] = column["key"]
+        entry["column_label"] = column["label"]
+        entry["column_width"] = column["width"]
+        entry["default_enabled"] = column["default_enabled"]
+        entry["filterable"] = column["filterable"]
+        entry["filter_type"] = column["filter_type"]
+        entry["filter_options"] = column["filter_options"]
+        entry["filter_min"] = column["filter_min"]
+        entry["filter_max"] = column["filter_max"]
+        entry["filter_step"] = column["filter_step"]
+        entry["sort_type"] = column["sort_type"]
+        entry["sort_order"] = column["sort_order"]
+        entries.append(entry)
+    return entries
+
+
 @measurement_router.get(
     "/measurements",
     summary="List available measurements",
-    description="Returns metadata for every registered measurement plugin.",
+    description="Returns metadata for every column a registered measurement plugin provides.",
     tags=["measurements"],
 )
 def list_measurements():
-    """Returns the manifest of all registered measurement plugins."""
-    return [m.manifest() for m in ALL_MEASUREMENTS]
+    """Returns the manifest, one entry per column (issue #100) rather
+    than one per plugin - a plugin providing several columns from one
+    computation appears as that many independently toggleable rows, each
+    naming the plugin (`measurement_id`) that actually computes it."""
+    return [entry for m in ALL_MEASUREMENTS for entry in _column_manifest_entries(m)]
 
 
 # ── Documentation endpoint ───────────────────────────────────────────────────
