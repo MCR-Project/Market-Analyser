@@ -53,7 +53,7 @@ class EtfWeightMeasurement(MeasurementBase):
             "total_weight": round(sum(h[1] for h in holdings), 2),
         }
 
-    def render_cell(self, ticker: str, value) -> str:
+    def render_cell(self, ticker: str, value, column_key: str) -> str:
         if value is None:
             return "—"
         return f'<Stat text="{value:.1f}%" />'

@@ -61,7 +61,7 @@ class ReasonMeasurement(MeasurementBase):
             },
         }
 
-    def render_cell(self, ticker: str, value) -> str:
+    def render_cell(self, ticker: str, value, column_key: str) -> str:
         return "—" if value is None else f'<Stat text="{value}" />'
 
 
@@ -81,7 +81,7 @@ class NoReasonMeasurement(MeasurementBase):
     def compute(self, inputs: dict) -> dict:
         return {"per_ticker": {"AAPL": 1.0, "MISSING": None}}
 
-    def render_cell(self, ticker: str, value) -> str:
+    def render_cell(self, ticker: str, value, column_key: str) -> str:
         return "—" if value is None else f'<Stat text="{value}" />'
 
 

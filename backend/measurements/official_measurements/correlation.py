@@ -60,7 +60,7 @@ class CorrelationMeasurement(MeasurementBase):
         result["per_ticker"] = result.get("averages", {})
         return result
 
-    def render_cell(self, ticker: str, value) -> str:
+    def render_cell(self, ticker: str, value, column_key: str) -> str:
         """A filled bar + ρ pill, using the frontend's shared <Bar> component.
         `value` clamps to [0, 1] on the frontend, so it's passed through as-is."""
         if value is None:

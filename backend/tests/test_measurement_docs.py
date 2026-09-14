@@ -52,7 +52,7 @@ class FakeMeasurement(MeasurementBase):
     def compute(self, inputs: dict) -> dict:
         return {"per_ticker": {}}
 
-    def render_cell(self, ticker: str, value) -> str:
+    def render_cell(self, ticker: str, value, column_key: str) -> str:
         return "—"
 
 
