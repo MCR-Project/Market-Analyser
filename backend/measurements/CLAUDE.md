@@ -222,6 +222,53 @@ Register it in `inputs/__init__.py`'s `INPUT_REGISTRY`; the keys there are what
 are properties of the whole set — recomputing them over the five sample tickers
 would print numbers contradicting the measurement's own output on the same page.
 
+Three more getters reach prices, volume, stock metadata and dividends
+(issue #102) — `price_frame`, `stock_info` and `dividend_events` all take a
+resolved ticker list rather than an `etf_id`, the same way `correlation_matrix`
+does: a measurement first resolves holdings via `inputs.holdings.get_holdings`,
+then passes the resulting tickers to whichever of these it also needs, rather
+than each getter re-resolving the fund on its own.
+
+- **`price_frame.get_price_frame(tickers, period=DEFAULT_PERIOD,
+  include_volume=False)`** — close prices, and optionally volume, for a
+  whole fund's holdings in one bulk `services.market_data.get_price_frame`
+  read. `DEFAULT_PERIOD` is `config.CORRELATION_PERIOD` — the same window
+  the correlation matrix reads — specifically so the two share a cache
+  entry (`_price_frame_bundle` in `services/market_data.py`) instead of
+  each issuing its own query for the same tickers and window; a plugin
+  wanting a different window (a window-aware column — issue #101) pays
+  for a genuinely separate read, not a redundant one. `volume` is left off
+  the response by default and added only when asked, so a plain
+  price-history metric's worked example isn't cluttered with a field it
+  never reads. Volume has **no live fallback** — the same reasoning
+  `get_dividends` already states applies here too — so it comes back
+  `None`, not `0`, for a holding the database has no `prices` rows for at
+  all: every ETF, and anything resolved outside the tracked universe. A
+  coarse row's volume is a bucket **sum**, not one day's (~21 trading days
+  for a monthly bucket — `sql/001_optimize_prices_storage.sql`), so each
+  volume entry carries its own `granularity` alongside `date`/`volume`; a
+  metric averaging across rows of mixed granularity must divide each by
+  the trading time it actually covers (`services/stats.py`'s
+  `trading_days`) rather than treat every row as one day's volume.
+- **`stock_info.get_stock_info(tickers)`** — each holding's own name,
+  sector, market cap, currency and exchange, one `services.market_data.
+  get_stock_info` call per ticker (already cached per ticker, so this is a
+  loop of cache lookups rather than a query per holding — there is no
+  bulk read to widen here the way `price_frame`'s was).
+- **`dividend_events.get_dividend_events(tickers)`** — wraps
+  `services.market_data.get_dividends` together with `tracked_tickers`
+  rather than exposing either alone: `get_dividends`' own "absent means no
+  events in the window" is ambiguous by itself, since a tracked holding
+  that genuinely paid nothing and an untracked one (every ETF, and
+  anything resolved outside the tracked universe) both come back the same
+  way. Returns `{ticker: {"events": [[date, amount], ...], "tracked":
+  bool}}` so a measurement can tell the two apart without remembering to
+  ask `tracked_tickers` itself — the same distinction
+  `services/portfolio.py`'s own `income`/`incomeUnknownFor` already makes
+  for the simulator. No window: a measurement wanting a fund's whole
+  dividend history reads it in one call rather than one bounded to
+  whatever window a price-based column happens to be showing.
+
 ## Documentation files
 
 A measurement's doc lives beside its module, named after it: `correlation.py` →
