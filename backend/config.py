@@ -58,6 +58,24 @@ MIN_OVERLAPPING_RETURNS = 30
 DOCS_EXAMPLE_ETF = "SPY"
 DOCS_EXAMPLE_STOCK = "AAPL"
 
+# Shared window vocabulary for window-aware measurement columns (issue
+# #101). A plugin opts in to a table-wide window control by setting its own
+# window_options/window_default to these - or occasionally a narrower
+# subset, if a particular metric genuinely cannot answer over the whole
+# range - rather than leaving window_options empty, which is what tells
+# the registry not to generate a window query parameter for it at all.
+# Values are the same vocabulary PERIOD_TO_DAYS already uses, so a plugin
+# can pass one straight through to get_price_series/get_closes as `period`
+# without translating it first.
+MEASUREMENT_WINDOW_OPTIONS = [
+    {"value": "3mo", "label": "3M"},
+    {"value": "6mo", "label": "6M"},
+    {"value": "1y", "label": "1Y"},
+    {"value": "5y", "label": "5Y"},
+    {"value": "max", "label": "Max"},
+]
+MEASUREMENT_WINDOW_DEFAULT = "1y"
+
 # Maps a yfinance-style `period` string to a lookback window in days, used to
 # filter the `prices` table by date when reading price history from Supabase.
 # "max" has no entry - it means no lower bound (select all rows).

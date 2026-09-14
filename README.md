@@ -111,6 +111,14 @@ columns, not plugins: a multi-column plugin's name and description appear once,
 with each of its columns individually toggleable beneath, and adding a second
 column to an existing plugin still needs no frontend change.
 
+A plugin whose number *means* a stretch of history — volatility, a trailing
+return, a rolling correlation — declares support for a shared window instead
+of leaving that unstated: one control above the holdings table, not one per
+column, so two window-aware columns can never claim different periods. Every
+such column names its window in its header and on its own doc page, including
+the worked example; a plugin that declares no window (every official one,
+today) is entirely unaffected and takes none.
+
 Each measurement documents itself in an `.mdx` file **next to its own
 module** — `correlation.py` → `correlation.mdx` — which the app serves at
 `/docs/<measurement id>` and which every column that plugin provides shares.

@@ -67,6 +67,13 @@ def build_example(measurement, frontmatter: dict | None = None) -> dict:
         "truncated": len(per_ticker) > len(sample_tickers),
         "total_tickers": len(per_ticker) or len(all_tickers),
     }
+    # The window this example was actually computed over (issue #101) -
+    # run()'s own default, since a worked example is never wired to the
+    # table's shared control. Left out entirely for a plugin with no
+    # window at all, the same way per_ticker_reason is.
+    if "window" in result:
+        example["window"] = result["window"]
+        example["window_label"] = measurement.window_label(result["window"])
     # Left out entirely when nothing in the sample has one (issue #99),
     # the same way run() leaves the key off a measurement that never sets
     # it — a doc page for a measurement with no reasons to show gets

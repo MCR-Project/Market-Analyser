@@ -11,13 +11,17 @@ For each measurement in ALL_MEASUREMENTS:
   - Exposes GET /api/measurement-docs/{id}/example with the real inputs
     and computed values behind that doc (see measurements/examples.py)
 
-Measurements take no query parameters — they fetch their own inputs (via
-measurements/inputs/*) using internal defaults, so the frontend never
-needs to know what a measurement needs beyond which ETF to compute for.
+Most measurements take no query parameters at all — they fetch their own
+inputs (via measurements/inputs/*) using internal defaults, so the frontend
+never needs to know what a measurement needs beyond which ETF to compute
+for. A plugin declaring `window_options` (issue #101) is the one exception:
+its route additionally takes `window`, one shared value the whole table
+sends to every window-aware column at once, generated here only for a
+plugin that actually declared support for it.
 """
 
 import re
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from measurements import ALL_MEASUREMENTS
 from measurements.docs import DocError, load_doc
 from measurements.examples import build_example
@@ -33,7 +37,10 @@ def _make_handler(measurement):
 
     FastAPI needs concrete parameter names in the function signature to bind
     path params. Every measurement route is scoped by etf_id alone (or takes
-    no params at all), so there are only two shapes to generate.
+    no params at all), crossed with whether the plugin declares a window
+    (issue #101) - four shapes in total, generated explicitly rather than
+    built through some more general signature-construction trick, since
+    that is exactly the four FastAPI itself needs to see.
 
     A measurement failing because the data behind it is missing or briefly
     unreachable is not a bug in the measurement, so DataUnavailable and
@@ -45,32 +52,39 @@ def _make_handler(measurement):
 
     The handler returns whatever `m.run()` produced with no key filtering
     of its own, which is what already carries `per_ticker_reason` (issue
-    #99) into the response wherever a measurement's `compute()` set one —
-    there is no allowlist here to fall out of date as `base.run()` grows
-    what it puts in the result.
+    #99) and `window` (issue #101) into the response wherever a
+    measurement sets either — there is no allowlist here to fall out of
+    date as `base.run()` grows what it puts in the result.
     """
     param_names = PATH_PARAM_RE.findall(measurement.route)
     m = measurement  # captured in the closure
+    accepts_window = bool(m.window_options)
 
-    def fail(exc):
-        raise HTTPException(500, f"Measurement '{m.id}' failed: {exc}")
+    def call(**kwargs):
+        try:
+            return m.run(**kwargs)
+        except (DataUnavailable, SymbolNotFound):
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"Measurement '{m.id}' failed: {e}")
 
-    if param_names == ["etf_id"]:
+    # `run()` itself resolves an unrecognised or missing window down to
+    # `window_default` (issue #101), so the query default here only has to
+    # be *a* valid value, not necessarily the one that ends up used - it
+    # exists so a request naming no window at all still reaches `run()`
+    # with something to validate rather than None.
+    if param_names == ["etf_id"] and accepts_window:
+        def handler(etf_id: str, window: str = Query(m.window_default)):
+            return call(etf_id=etf_id, window=window)
+    elif param_names == ["etf_id"]:
         def handler(etf_id: str):
-            try:
-                return m.run(etf_id=etf_id)
-            except (DataUnavailable, SymbolNotFound):
-                raise
-            except Exception as e:
-                fail(e)
+            return call(etf_id=etf_id)
+    elif accepts_window:
+        def handler(window: str = Query(m.window_default)):
+            return call(window=window)
     else:
         def handler():
-            try:
-                return m.run()
-            except (DataUnavailable, SymbolNotFound):
-                raise
-            except Exception as e:
-                fail(e)
+            return call()
 
     handler.__name__ = f"measure_{m.id}"
     handler.__doc__ = m.description
@@ -113,6 +127,11 @@ def _column_manifest_entries(measurement) -> list[dict]:
     `measurement_id` itself. A multi-column plugin's `id` is namespaced
     as `f"{measurement.id}.{column['key']}"` so its own columns cannot
     collide with each other or with an unrelated plugin's.
+
+    `window_options`/`window_default` (issue #101) need no explicit
+    overlay here, unlike the per-column fields above: they are a plugin-
+    level declaration, not a per-column one, so `{**base}` alone already
+    carries them onto every column a window-aware plugin provides.
     """
     base = measurement.manifest()
     columns = measurement.resolved_columns
