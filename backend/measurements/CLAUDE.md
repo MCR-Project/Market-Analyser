@@ -34,7 +34,9 @@ DOC_TEMPLATE.mdx              copy this to start a doc
 2. Subclass `MeasurementBase`. Fill in the identity (`id`, `name`, `description`,
    `route`), the column config (`column_key`, `column_label`, `column_width`,
    `default_enabled`), the filter and sort config, and the schemas — or, for more
-   than one column, `columns` instead (see below).
+   than one column, `columns` instead (see below). If the number means a stretch
+   of history, also set `window_options`/`window_default` (see "Choosing a
+   window" below) — most plugins leave these empty and take none.
 3. Implement `fetch_inputs(etf_id, **_)`, `compute(inputs)` and
    `render_cell(ticker, value, column_key)`.
 4. Name every `inputs/` getter it draws on in `uses_inputs`. Imports cannot be
@@ -48,11 +50,15 @@ DOC_TEMPLATE.mdx              copy this to start a doc
 ## The three methods
 
 **`fetch_inputs`** must go through `measurements/inputs/*`, never
-`services.market_data` directly. `etf_id` is the **only** thing a caller ever
-supplies; any other knob (a lookback period, a threshold) is the measurement's
-own fixed choice, not a query parameter the frontend has to know about. That is
-why every measurement route is `/{something}/{etf_id}` or takes no params at all,
-and why `registry._make_handler` only generates those two signatures.
+`services.market_data` directly. `etf_id` is the thing every caller supplies;
+any other knob (a threshold, an interval) is the measurement's own fixed
+choice, not a query parameter the frontend has to know about — with one
+exception. A plugin whose number *means* a stretch of history declares
+`window_options` (issue #101) and additionally receives `window`, already
+validated by `run()` before `fetch_inputs` ever sees it. That is why every
+measurement route is `/{something}/{etf_id}`, optionally plus `window`, or
+takes no path params at all, and why `registry._make_handler` generates
+exactly those four signatures. See "Choosing a window" below.
 
 **`compute`** returns a dict with at least `per_ticker`:
 `{"per_ticker": {"NVDA": 0.72, …}, …extra}`. These values are **raw** — numbers
@@ -143,6 +149,59 @@ individually while still fetching each plugin exactly once
 (`app/src/hooks/useMeasurements.js` groups active columns back into the set of
 plugins that actually need fetching before it issues a single request per one).
 
+## Choosing a window (issue #101)
+
+Nothing in the UI used to say the CORRELATION column was a year of daily
+returns — `inputs/correlation_matrix.py` itself notes as much. That is fine
+for one column; it stops being fine the moment there are columns for
+volatility, a trailing return and momentum, where the window *is* the
+meaning of the number. "Volatility 31%" over an unstated period is not a
+fact anyone can use.
+
+A plugin opts in by setting `window_options` and `window_default` — normally
+straight from `config.MEASUREMENT_WINDOW_OPTIONS` /
+`MEASUREMENT_WINDOW_DEFAULT`, so it shares the one vocabulary the frontend's
+single table-wide control offers, though a metric that genuinely cannot
+answer over part of that range may declare a narrower subset instead:
+
+```python
+from config import MEASUREMENT_WINDOW_DEFAULT, MEASUREMENT_WINDOW_OPTIONS
+
+class VolatilityMeasurement(MeasurementBase):
+    window_options = MEASUREMENT_WINDOW_OPTIONS
+    window_default = MEASUREMENT_WINDOW_DEFAULT
+```
+
+**One shared control for the whole table, not one per column.** Two
+window-aware columns must never describe different periods — a "1Y"
+volatility beside a "5Y" one would be two different claims wearing the same
+kind of header. `app/src/hooks/useMeasurementWindow.js` holds the one value
+every window-aware column is sent; a column with no `window_options` at all
+(every official measurement, today) never receives it and behaves exactly as
+it always has.
+
+**`run()` validates the window once, before `fetch_inputs` ever sees it.**
+Missing, unrecognised, or simply absent because the caller never passed one
+(a test, `examples.py`'s worked example, the HTTP route for a plugin with no
+window at all) — all of it resolves to `window_default` rather than raising.
+A plugin's own `fetch_inputs` can therefore trust `window` is always one of
+its own `window_options`, and **must fold it into whatever cache key its own
+reads use** — `services/market_data.py`'s own functions already key on
+`period`, so passing `window` straight through as `period` is usually enough,
+but a plugin that caches anything itself has to include it explicitly, or two
+different windows will silently share one answer. The resolved value comes
+back as the response's own `"window"` key, present only for a window-aware
+plugin — which is what lets the table's column header and a doc page's
+worked example both state which window actually produced the numbers they
+show, via `window_label(value)`.
+
+`registry._make_handler` generates the query parameter (`window: str =
+Query(measurement.window_default)`) only for a plugin whose `window_options`
+is non-empty; `_column_manifest_entries` carries `window_options`/
+`window_default` onto the manifest unchanged (a plugin-level declaration, not
+a per-column one, so no per-column overlay is needed the way `column_key` and
+friends get).
+
 ## Inputs
 
 `inputs/` exists so a measurement can fetch everything from an `etf_id` while its
@@ -217,11 +276,19 @@ Two properties are load-bearing:
 Nothing here fetches anything the dashboard does not already fetch, so a doc page
 view rides the same caches and costs no extra upstream requests.
 
+For a window-aware plugin (issue #101), `build_example` calls `run()` with no
+`window` at all, which resolves to `window_default` — a doc page is never wired
+to the table's own control — and copies the resolved `"window"` and its
+`window_label(...)` onto the payload, so `WorkedExample.jsx` can say which
+window actually produced the numbers on the page rather than leaving the
+reader to assume it matches whatever the table happens to be showing.
+
 ## Registry and routing
 
 `registry.py` parses each `route` for path params, generates a handler with the
-right signature, and mounts it — one route per **plugin**, regardless of how
-many columns it provides. It also serves:
+right signature — including a `window` query parameter for a plugin that
+declares one (issue #101) — and mounts it: one route per **plugin**,
+regardless of how many columns it provides. It also serves:
 
 - `GET /api/measurements` — the manifest, one entry per **column**
   (`_column_manifest_entries`, issue #100), not per plugin.

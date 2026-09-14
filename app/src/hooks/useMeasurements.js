@@ -19,7 +19,11 @@
  * default_enabled. On ETF change: refetches every plugin behind an
  * active column (their data is tied to the ETF). On toggle: fetches only
  * the newly-needed plugin(s) and clears state for the newly-unneeded
- * one(s) — existing columns are left untouched.
+ * one(s) — existing columns are left untouched. On a `window` change
+ * (issue #101, see useMeasurementWindow): refetches only the plugins
+ * behind an *active* window-aware column — a plugin with no window at
+ * all (every official one, today) is not touched, and neither is a
+ * window-aware plugin none of whose columns happen to be on.
  *
  * `results` is keyed by `measurement_id` (the plugin), not by column,
  * and holds that plugin's whole response — flat
@@ -39,7 +43,7 @@ import { useFetch } from './useFetch';
 import { api, isTransientError } from '../utils/api';
 import { MAX_AUTO_RETRIES, retryDelayMs } from '../utils/retrySchedule';
 
-export function useMeasurements(etfId) {
+export function useMeasurements(etfId, window) {
   const [activeIds, setActiveIds] = useState(null); // null = not yet initialized; column ids
   const [results, setResults] = useState({}); // keyed by measurement_id (plugin)
   const [loading, setLoading] = useState({}); // keyed by column id
@@ -57,6 +61,7 @@ export function useMeasurements(etfId) {
   // toggle.
   const prevActiveMeasurementIdsRef = useRef([]);
   const prevEtfIdRef = useRef(etfId);
+  const prevWindowRef = useRef(window);
 
   // Fetch the manifest via useFetch so a failed attempt (e.g. the page
   // loaded before the backend was up) can be re-run through retryManifest
@@ -110,26 +115,36 @@ export function useMeasurements(etfId) {
     return [...ids];
   }, [activeIds, manifest]);
 
-  // Fetch results for active plugins when etfId or the active plugin set
-  // changes. Diffs against what was active last run: an ETF change
-  // invalidates every currently-active plugin (all refetch), but a plain
-  // toggle only fetches the newly-needed plugin(s) and clears the
-  // newly-unneeded one(s) — enabling a fourth column shouldn't abort and
-  // re-run the three already loaded.
+  // Fetch results for active plugins when etfId, the active plugin set,
+  // or the shared window changes. Diffs against what was active last
+  // run: an ETF change invalidates every currently-active plugin (all
+  // refetch), but a plain toggle only fetches the newly-needed plugin(s)
+  // and clears the newly-unneeded one(s) — enabling a fourth column
+  // shouldn't abort and re-run the three already loaded. A window change
+  // (issue #101) is a third, narrower case: it refetches only the
+  // plugins whose *active* columns actually declare a window
+  // (isWindowAware below) — the acceptance criterion is that changing
+  // the control must not so much as touch a non-window-aware column.
   useEffect(() => {
     const ids = activeMeasurementIds;
     const prevIds = prevActiveMeasurementIdsRef.current;
     const etfChanged = prevEtfIdRef.current !== etfId;
+    const windowChanged = prevWindowRef.current !== window;
 
-    const idsToFetch = etfChanged ? ids : ids.filter(id => !prevIds.includes(id));
+    const columnIdsFor = (measurementId) =>
+      (columnsByMeasurement[measurementId] || []).map(c => c.id);
+
+    const isWindowAware = (measurementId) =>
+      (columnsByMeasurement[measurementId] || []).some(c => (c.window_options || []).length > 0);
+
+    const idsToFetch = etfChanged
+      ? ids
+      : ids.filter(id => !prevIds.includes(id) || (windowChanged && isWindowAware(id)));
     const idsToAbort = etfChanged ? prevIds : prevIds.filter(id => !ids.includes(id));
     // Only clear state for ids that are truly gone, not ones being
     // refetched under a new etfId (those get fresh state from the fetch
     // below instead of a delete-then-set race).
     const idsToClear = idsToAbort.filter(id => !idsToFetch.includes(id));
-
-    const columnIdsFor = (measurementId) =>
-      (columnsByMeasurement[measurementId] || []).map(c => c.id);
 
     const setLoadingFor = (measurementId, value) => {
       const columnIds = columnIdsFor(measurementId);
@@ -161,8 +176,15 @@ export function useMeasurements(etfId) {
     // chain, and `loading` deliberately stays true while retrying - it is
     // still loading.
     const run = (id, m, ctrl) => {
+      const params = { etf_id: etfId };
+      // Sent only for a plugin that actually declared window_options
+      // (issue #101) - a non-window-aware plugin's route generates no
+      // such query parameter at all, so sending one would be inert at
+      // best; omitting it is what keeps that plugin's request identical
+      // to what it always was.
+      if ((m.window_options || []).length > 0) params.window = window;
       setLoadingFor(id, true);
-      api.runMeasurement(m.route, { etf_id: etfId }, { signal: ctrl.signal })
+      api.runMeasurement(m.route, params, { signal: ctrl.signal })
         .then(data => {
           if (ctrl.signal.aborted) return;
           delete retryCountsRef.current[id];
@@ -199,6 +221,11 @@ export function useMeasurements(etfId) {
       const m = (columnsByMeasurement[id] || [])[0];
       if (!m) continue;
 
+      // A window change can refetch a plugin that is *not* leaving the
+      // active set (so it was never in idsToAbort above) - abort its
+      // still-in-flight request for the old window first, or a slow old
+      // response landing after the new one would silently overwrite it.
+      abortRefs.current[id]?.abort();
       clearRetry(id);
       const ctrl = new AbortController();
       abortRefs.current[id] = ctrl;
@@ -225,11 +252,12 @@ export function useMeasurements(etfId) {
 
     prevActiveMeasurementIdsRef.current = ids;
     prevEtfIdRef.current = etfId;
+    prevWindowRef.current = window;
     // columnsByMeasurement is derived from manifest on every render but
     // only actually changes when manifest does, so it is intentionally
     // left out here - including it would refetch on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMeasurementIds, etfId]);
+  }, [activeMeasurementIds, etfId, window]);
 
   // Abort any still in-flight measurement requests on unmount, and drop
   // any retry that hasn't fired yet.

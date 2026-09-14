@@ -3,10 +3,11 @@ Base class for all measurement plugins.
 
 Every measurement is a self-describing unit that declares:
   - What it computes (id, name, description)
-  - How to reach it (route) — always scoped by etf_id alone; a
-    measurement fetches its own inputs (via measurements/inputs/*) using
-    whatever internal defaults it wants, never parameters the frontend
-    has to know to supply
+  - How to reach it (route) — scoped by etf_id alone, plus a window for a
+    plugin that declares one (window_options — issue #101); a measurement
+    fetches its own inputs (via measurements/inputs/*) using whatever
+    internal defaults it wants otherwise, never parameters the frontend
+    has to know to supply beyond those two
   - How it appears in the table — one column (column_key, column_label,
     ...) or several (columns — issue #100); resolved_columns normalises
     either into the same list every other method reads from
@@ -36,6 +37,21 @@ first. See `columns`/`resolved_columns` and `run()` below for the exact
 shape either way — a single-column plugin's own code is unaffected by
 any of this (issue #100): it declares `column_key` and returns a flat
 `per_ticker` exactly as it always has.
+
+A plugin whose number *means* a stretch of history (volatility, a
+trailing return, a rolling correlation) declares `window_options` and
+`window_default` instead of leaving `window_options` empty (issue #101).
+`etf_id` is no longer the only parameter a caller supplies to such a
+plugin — the registry generates a `window` query parameter for it, one
+shared value the whole table sends to every window-aware column at once,
+never a per-plugin one. `run()` validates whatever `window` it is handed
+(falling back to `window_default` rather than erroring) before it ever
+reaches `fetch_inputs`, so a plugin's own code can trust the value is
+always one of its own `window_options` — and must fold it into whatever
+cache key its own inputs read through, or two different windows will
+silently share one cached answer. A plugin that declares no window (every
+official one, today) is entirely unaffected: no query parameter is
+generated for it, and `fetch_inputs` never receives one.
 
 The registry auto-discovers all subclasses (official + addon), registers
 one route per plugin on the FastAPI router, and exposes a manifest with
@@ -124,6 +140,27 @@ class MeasurementBase(ABC):
     # e.g. ["LOW", "MED", "HIGH"]. Ascending sort is the reverse of this list.
     sort_order: list = []
 
+    # ── Window config (issue #101) ──────────────────────────────────────
+    # Empty by default: `etf_id` is the only thing this plugin needs, and
+    # the registry generates no `window` query parameter for it. A plugin
+    # whose number means a stretch of history opts in by setting both to
+    # real values — typically `config.MEASUREMENT_WINDOW_OPTIONS` /
+    # `MEASUREMENT_WINDOW_DEFAULT` outright, so it shares the one
+    # vocabulary the frontend's single table-wide control offers, though a
+    # metric that genuinely cannot answer over part of that range may
+    # declare a narrower subset instead. Same shape as `filter_options`:
+    # [{"value": "1y", "label": "1Y"}, ...].
+    window_options: list[dict] = []
+    window_default: str = ""
+
+    def window_label(self, window: str) -> str:
+        """The display label for one of this plugin's `window_options`
+        values, or the raw value itself if it names none of them — a
+        caller handed something outside `window_options` has already
+        strayed from the contract `run()` otherwise guarantees, and
+        showing it verbatim beats hiding the mismatch."""
+        return next((o["label"] for o in self.window_options if o["value"] == window), window)
+
     # ── Schemas ──────────────────────────────────────────────────────────
     # input_schema is now always just {"etf_id": ...} in practice — kept
     # for API introspection (shown in the frontend's measurement picker).
@@ -171,10 +208,15 @@ class MeasurementBase(ABC):
 
         Must use this measurement's own measurements/inputs/* getters
         (holdings, etf_info, correlation_matrix, ...) rather than calling
-        services.market_data directly. `etf_id` is the only thing ever
-        supplied by the caller — any other knobs (lookback period,
-        thresholds, etc.) are this measurement's own fixed choice, not
-        something the frontend passes in.
+        services.market_data directly. `etf_id` is the only thing every
+        caller supplies; a plugin that declares `window_options` (issue
+        #101) additionally receives `window` — already validated against
+        those options by `run()`, so this can trust it rather than
+        re-checking — and must include it in whatever cache key its own
+        reads use, or two different windows will answer from one shared
+        cache entry. Anything else (a threshold, an interval) is this
+        measurement's own fixed choice, not something the frontend passes
+        in.
         """
         ...
 
@@ -268,9 +310,30 @@ class MeasurementBase(ABC):
         value would contradict what the frontend is entitled to assume
         (that a reason means the value beside it is absent), so a
         measurement author's mistake there is dropped rather than shipped.
+
+        For a plugin declaring `window_options` (issue #101): whatever
+        `window` this was called with is validated here, once, before
+        `fetch_inputs` ever sees it - missing, unrecognised, or simply
+        absent because the caller (examples.py, a test, the HTTP route
+        for a plugin with no window at all) never passed one, all resolve
+        to `window_default` rather than raising. That is the fallback the
+        acceptance criteria ask for, and centralising it here means
+        `fetch_inputs` can treat `params["window"]` as already trustworthy
+        instead of re-validating it. The resolved value is echoed back as
+        the top-level "window" key, which is what lets a caller (the
+        table, a doc page's worked example) state which window actually
+        produced the numbers it is showing. A plugin with no window
+        options is untouched: no "window" key in, none out.
         """
+        if self.window_options:
+            allowed = {option["value"] for option in self.window_options}
+            window = params.get("window")
+            params = {**params, "window": window if window in allowed else self.window_default}
+
         inputs = self.fetch_inputs(**params)
         result = self.compute(inputs)
+        if self.window_options:
+            result["window"] = params["window"]
         per_ticker = result.get("per_ticker", {})
         columns = self.resolved_columns
 
@@ -349,6 +412,8 @@ class MeasurementBase(ABC):
             "filter_step": self.filter_step,
             "sort_type": self.sort_type,
             "sort_order": self.sort_order,
+            "window_options": self.window_options,
+            "window_default": self.window_default,
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
         }

@@ -186,7 +186,7 @@ export const WorkedExample = memo(function WorkedExample({ measurementId }) {
   }
 
   const { etf_id, tickers = [], inputs = [], per_ticker = {}, per_ticker_mdx = {},
-          per_ticker_reason = {}, truncated, total_tickers } = data;
+          per_ticker_reason = {}, truncated, total_tickers, window_label } = data;
 
   return (
     <section className="my-6">
@@ -196,6 +196,13 @@ export const WorkedExample = memo(function WorkedExample({ measurementId }) {
         {truncated && total_tickers
           ? <> — showing {tickers.length} of its {total_tickers} holdings.</>
           : '.'}
+        {/* window_label is absent for a plugin with no window at all
+            (issue #101) - present only for the ones where the number
+            actually depends on it. */}
+        {window_label && (
+          <> Over the <strong className="text-[var(--fg)] font-semibold">{window_label}</strong> window
+          — the table's own default; change it there and this page keeps showing that one.</>
+        )}
       </p>
 
       {/* ── The inputs it started from ── */}

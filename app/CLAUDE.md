@@ -49,8 +49,9 @@ link lives in the URL, and there is only ever one copy of the answer:
 | `/docs/:measurementId` | `DocsPage` |
 | `/portfolio/:portfolioId` | `PortfolioPage` |
 | `/portfolio/shared?p=…` | `portfolioLink.decodePortfolio` |
-| `?window=` / `?start=&end=` | `useSimulationWindow` |
+| `?window=` / `?start=&end=` (on `/portfolio/...`) | `useSimulationWindow` |
 | `?compare=` / `?benchmark=` | `useComparison` |
+| `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
 
 `useEtfStore` used to be a zustand store; moving it into the route param removed
 the sync problem entirely — any component, however deep, calls `useEtfStore()`
@@ -119,6 +120,17 @@ including the shared schedule and cap — a measurement whose requests keep
 failing stops retrying and renders as failed rather than staying in `loading`
 forever. If you add another such path, reimplement it too — inheriting no
 retry is how columns stayed permanently blank after a cold start.
+
+`useMeasurementWindow` (issue #101) holds the one window every window-aware
+column shares, and `useMeasurements(etfId, window)` is what actually decides,
+per column, whether to send it — `App.jsx` wires the two together. Changing
+the window is a third kind of refetch trigger alongside a toggle and an ETF
+change, and the narrowest one: only the plugins behind an *active*
+window-aware column refetch, found via `columnsByMeasurement` the same way
+the response-shape lookup already is. `TableView`'s `MeasurementWindowControl`
+only renders once some active column actually has a window to control —
+before any window-aware plugin ships, it renders nothing, which is correct:
+a control that changes nothing today is clutter, not a feature.
 
 **Never render stale or invented data on failure.** Gate on `loading`/`error`,
 show `<Loading>` then `<ErrorState {...describeFetchError(error)} onRetry={retry} />`.

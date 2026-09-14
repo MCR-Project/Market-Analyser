@@ -18,9 +18,14 @@
  * overflowing or losing alignment between columns.
  *
  * Sections (top to bottom):
- *  1. Toolbar row: Measurements button + search bar
+ *  1. Toolbar row: Measurements button + search bar + shared window
+ *     control (issue #101), shown only once some active column actually
+ *     has a window to control
  *  2. Column headers: STOCK + one header per active measurement, each
- *     clickable to sort (ascending/descending toggle on repeat click)
+ *     clickable to sort (ascending/descending toggle on repeat click) —
+ *     a window-aware column's header also names its window, so two
+ *     columns on screen never leave a reader guessing whether they
+ *     describe the same stretch of history
  *  3. Filter row: sector dropdown + per-measurement filters
  *  4. Scrollable rows: one row per holding, sorted per the active sort key
  */
@@ -30,13 +35,31 @@ import { Logo } from '../components/ui/Logo';
 import { Loading } from '../components/ui/Loading';
 import { MdxCell } from '../components/ui/MdxCell';
 import { DocLink } from '../components/ui/DocLink';
+import { WINDOW_OPTIONS } from '../hooks/useMeasurementWindow';
 
 const NAME_COL_WIDTH = 230;
 const NAME_SORT_KEY = '__name__';
 
+/** Whether any manifest row in `list` declares support for a window. */
+function hasWindowAware(list) {
+  return list.some(m => (m.window_options || []).length > 0);
+}
+
+/** A column's own window label for the currently active window — falls
+ *  back to the column's own default's label if the shared value isn't
+ *  among its (possibly narrower) options, matching how the backend
+ *  itself degrades (base.run()'s fallback-to-default). */
+function columnWindowLabel(m, window) {
+  const options = m.window_options || [];
+  const match = options.find(o => o.value === window);
+  if (match) return match.label;
+  return options.find(o => o.value === m.window_default)?.label ?? window;
+}
+
 export const TableView = memo(function TableView({
   tickers, onSelectStock,
   measurements, onOpenMeasurePicker,
+  measurementWindow, onMeasurementWindowChange,
 }) {
   const [query, setQuery] = useState('');
   const [filterSector, setFilterSector] = useState('');
@@ -55,6 +78,10 @@ export const TableView = memo(function TableView({
   }, []);
 
   const activeMeasures = measurements.activeManifests;
+  // Shown only once some active column actually has a window to
+  // control (issue #101) — a control that changes nothing today,
+  // before any window-aware column exists, would just be clutter.
+  const showWindowControl = hasWindowAware(activeMeasures);
 
   // If the measurement currently used for sorting gets deactivated, fall
   // back to unsorted rather than silently sorting by a stale/missing column.
@@ -160,6 +187,10 @@ export const TableView = memo(function TableView({
           <input value={query} onInput={e => setQuery(e.target.value)} placeholder="Search a holding — ticker, name, sector…" className="flex-1 border-none outline-none bg-transparent text-[var(--fg)] font-[var(--font-body)] text-sm" />
           <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)] flex-none">{sortedRows.length}/{tickers.length}</span>
         </div>
+
+        {showWindowControl && (
+          <MeasurementWindowControl window={measurementWindow} onChange={onMeasurementWindowChange} />
+        )}
       </div>
 
       {/* ── Table ── */}
@@ -177,16 +208,22 @@ export const TableView = memo(function TableView({
             <SortHeader label="STOCK" active={sort.key === NAME_SORT_KEY} dir={sort.dir} onClick={() => handleSortClick(NAME_SORT_KEY, 'asc')} />
           </MetricSlot>
           <div className="flex-1 min-w-0 flex flex-wrap items-start">
-            {activeMeasures.map(m => (
-              <MetricSlot key={m.id} width={m.column_width} className="pl-2 border-l border-transparent">
-                {/* The "?" is a sibling of the sort button, not inside it:
-                    reading about a column must not also re-sort it. */}
-                <div className="flex items-center gap-1.5">
-                  <SortHeader label={m.column_label} active={sort.key === m.id} dir={sort.dir} onClick={() => handleSortClick(m.id, defaultDirFor(m))} />
-                  <DocLink measurementId={m.measurement_id} measurementName={m.name} />
-                </div>
-              </MetricSlot>
-            ))}
+            {activeMeasures.map(m => {
+              const windowAware = (m.window_options || []).length > 0;
+              const label = windowAware
+                ? `${m.column_label} · ${columnWindowLabel(m, measurementWindow)}`
+                : m.column_label;
+              return (
+                <MetricSlot key={m.id} width={m.column_width} className="pl-2 border-l border-transparent">
+                  {/* The "?" is a sibling of the sort button, not inside it:
+                      reading about a column must not also re-sort it. */}
+                  <div className="flex items-center gap-1.5">
+                    <SortHeader label={label} active={sort.key === m.id} dir={sort.dir} onClick={() => handleSortClick(m.id, defaultDirFor(m))} />
+                    <DocLink measurementId={m.measurement_id} measurementName={m.name} />
+                  </div>
+                </MetricSlot>
+              );
+            })}
             {activeMeasures.length === 0 && (
               <div className="pl-4 font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] italic">
                 No metrics selected — click "Metrics" to add columns
@@ -334,6 +371,43 @@ function compareRows(a, b, sortKey, dir, manifest) {
     return (rankA - rankB) * (dir === 'asc' ? -1 : 1);
   }
   return (aVal - bVal) * mult;
+}
+
+
+/**
+ * MeasurementWindowControl — the one shared window every window-aware
+ * column is computed over (issue #101). A segmented control rather than
+ * a dropdown, matching WindowControls.jsx's own preset picker in the
+ * portfolio simulator — the same idea, just without the two date boxes,
+ * since a measurement window is always one of a fixed set of periods.
+ */
+function MeasurementWindowControl({ window, onChange }) {
+  return (
+    <div className="flex-none flex items-center gap-2">
+      <span className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] uppercase tracking-wide">Window</span>
+      <div className="inline-flex p-[3px] bg-[var(--bg-3)] rounded-[var(--radius-md)] gap-[1px]">
+        {WINDOW_OPTIONS.map(option => {
+          const active = window === option.value;
+          return (
+            <button
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              aria-pressed={active}
+              className="px-2.5 py-[5px] border-none rounded-[7px] cursor-pointer font-[var(--font-mono)] text-xs transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              style={{
+                fontWeight: active ? 700 : 500,
+                background: active ? 'var(--bg-1)' : 'transparent',
+                color: active ? 'var(--fg)' : 'var(--fg-2)',
+                boxShadow: active ? 'var(--shadow-xs)' : 'none',
+              }}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 

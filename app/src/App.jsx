@@ -27,6 +27,7 @@ import { Navigate, useNavigate, useParams } from 'react-router';
 import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
 import { useMeasurements } from './hooks/useMeasurements';
+import { useMeasurementWindow } from './hooks/useMeasurementWindow';
 import { usePublishLiveStatus } from './hooks/useLiveStatus';
 import { EtfDashboard } from './components/etf/EtfDashboard';
 import { StockPopup } from './components/stock/StockPopup';
@@ -58,7 +59,8 @@ export default function App() {
   // only used for the Header's live badge and StockPopup's peer
   // correlations, neither of which cares about edge filtering.
   const corrData = useLiveCorrelation(etfId);
-  const measurements = useMeasurements(etfId);
+  const { window: measurementWindow, setWindow: setMeasurementWindow } = useMeasurementWindow();
+  const measurements = useMeasurements(etfId, measurementWindow);
 
   // The shared Header shows the connectivity badge, but this is the page
   // that knows whether anything actually loaded.
@@ -112,6 +114,8 @@ export default function App() {
         onSelectStock={setStockPopup}
         measurements={measurements}
         onOpenMeasurePicker={openMeasurePicker}
+        measurementWindow={measurementWindow}
+        onMeasurementWindowChange={setMeasurementWindow}
       />
     ),
     Matrix: <MatrixView selected={selected} onSelect={setSelected} />,

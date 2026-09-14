@@ -70,6 +70,7 @@ const ReferencePanels = memo(function ReferencePanels({ manifest }) {
             ['Shown by default', manifest.default_enabled ? 'Yes' : 'No — enable it in Metrics'],
             ['Sorting', describeSort(manifest)],
             ['Filtering', describeFilter(manifest)],
+            ['Window', describeWindow(manifest)],
           ]}
         />
       </Panel>
@@ -117,6 +118,16 @@ function describeSort(m) {
   }
   if (m.sort_type === 'alphabetical') return 'Alphabetical, on the raw value';
   return 'Numeric, on the raw value — not the rendered cell';
+}
+
+/** Null for a plugin with no window at all (issue #101) — Rows drops a
+ *  null value, so this column simply gets no "Window" row rather than
+ *  one saying "N/A". */
+function describeWindow(m) {
+  if (!m.window_options?.length) return null;
+  const options = m.window_options.map(o => o.label).join(', ');
+  const defaultLabel = m.window_options.find(o => o.value === m.window_default)?.label ?? m.window_default;
+  return `Shared table control, one of ${options} — ${defaultLabel} by default. This page's worked example below uses the default.`;
 }
 
 function describeFilter(m) {
