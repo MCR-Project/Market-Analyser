@@ -51,6 +51,7 @@ link lives in the URL, and there is only ever one copy of the answer:
 | `/portfolio/shared?p=…` | `portfolioLink.decodePortfolio` |
 | `?window=` / `?start=&end=` (on `/portfolio/...`) | `useSimulationWindow` |
 | `?compare=` / `?benchmark=` | `useComparison` |
+| `?rf=` (on `/portfolio/...`) | `useRiskFreeRate` — an override for the risk-free rate a run is scored against (issue #103); absent or unusable falls back to the tracked series |
 | `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
 
 `useEtfStore` used to be a zustand store; moving it into the route param removed
@@ -131,6 +132,16 @@ the response-shape lookup already is. `TableView`'s `MeasurementWindowControl`
 only renders once some active column actually has a window to control —
 before any window-aware plugin ships, it renders nothing, which is correct:
 a control that changes nothing today is clutter, not a feature.
+
+`useRiskFreeRate` (issue #103) is the same idea for the portfolio simulator's
+`?rf=` override: `PortfolioPanel` merges its `request` alongside
+`useSimulationWindow`'s own before calling `usePortfolioSimulation`, so a
+`?rf=` already reaches the backend and travels in a share link (`PortfolioPage`'s
+`SHARED_VIEW_PARAMS`) — but there is no visible control reading it yet. No
+figure on screen depends on the rate today (Sharpe/Sortino are their own,
+later issue), so a control here would be exactly the clutter
+`MeasurementWindowControl`'s own gating avoids; it arrives once a metric
+tile actually has a rate to show next to its own figure.
 
 **Never render stale or invented data on failure.** Gate on `loading`/`error`,
 show `<Loading>` then `<ErrorState {...describeFetchError(error)} onRetry={retry} />`.

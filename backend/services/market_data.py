@@ -1186,6 +1186,42 @@ def get_dividends(
     return events
 
 
+def get_risk_free_rate(start: str | None = None, end: str | None = None) -> list[dict] | None:
+    """The tracked risk-free rate series over [start, end], oldest first
+    (issue #103).
+
+    `risk_free_rate` is a flat, densely-populated table - one row per
+    trading day scripts/fetch_daily.py could read a yield for - unlike
+    `prices`: there is no OHLCV to bucket by age here, so nothing is
+    tiered and nothing needs compacting. `rate` is a percentage per annum,
+    stored exactly as read; none of `prices`' adjusted-close rules apply
+    to it.
+
+    There is no live fallback, the same reasoning get_dividends already
+    gives: a number that sometimes comes from a record and sometimes from
+    a network call is a number nobody can reconcile. Returns None, not an
+    empty list, when Supabase is unreachable or nothing has been synced
+    for this window - a caller scoring a run against this must show a
+    null with a reason rather than assume a rate of zero.
+    """
+    db = get_client_optional()
+    if db is None:
+        return None
+
+    def build_query():
+        query = db.table("risk_free_rate").select("date,rate").order("date")
+        return _window_filtered(query, start, end)
+
+    try:
+        rows = paginated_select(build_query)
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    return [{"date": row["date"], "rate": round(float(row["rate"]), 4)} for row in rows]
+
+
 def _onto_calendar(live: pd.DataFrame, calendar: pd.Index) -> pd.DataFrame:
     """Put a daily live frame onto an existing frame's calendar.
 

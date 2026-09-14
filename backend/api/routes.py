@@ -321,6 +321,17 @@ class PortfolioIn(BaseModel):
     contribution: ContributionIn | None = Field(
         None, description="Optional recurring contribution; omit for a single lump sum"
     )
+    rate: float | None = Field(
+        None,
+        description=(
+            "Risk-free rate override, percent per annum (e.g. 4.2), for the "
+            "ratios that need one (issue #103). Omit to use the tracked "
+            "series for the run's own window. Accepted here but not yet "
+            "read by simulate_portfolio - the ratios themselves are filed "
+            "separately - so the shared request body simulate and the "
+            "future risk endpoint (#113) both take is ready for them."
+        ),
+    )
 
 
 @router.post("/portfolio/simulate")

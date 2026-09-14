@@ -39,6 +39,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { useComparisonRuns } from '../../hooks/useComparisonRuns';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
 import { useSimulationWindow } from '../../hooks/useSimulationWindow';
+import { useRiskFreeRate } from '../../hooks/useRiskFreeRate';
 import {
   CONTRIBUTION_FREQUENCIES,
   DEFAULT_CONTRIBUTION,
@@ -399,7 +400,13 @@ export function PortfolioPanel({
   // for a portfolio with no holdings would re-simulate every render.
   const holdings = useMemo(() => portfolio.holdings || [], [portfolio.holdings]);
   const [groupBy, setGroupBy] = useState('holding');
-  const { preset, request, start, end, selectPreset, setWindow } = useSimulationWindow();
+  const { preset, request: windowRequest, start, end, selectPreset, setWindow } = useSimulationWindow();
+  // No visible control reads this yet - see useRiskFreeRate.js's own
+  // docstring for why - but merging it in here means a `?rf=` already
+  // travels to the backend with every run and every comparison line,
+  // ready for issue #112's tiles once they exist.
+  const { request: rateRequest } = useRiskFreeRate();
+  const request = useMemo(() => ({ ...windowRequest, ...rateRequest }), [windowRequest, rateRequest]);
 
   // What the window was before a drag replaced it. A drag is easy to do
   // by accident and fiddly to undo by hand; choosing the window any other

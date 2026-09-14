@@ -152,6 +152,22 @@ means. `tracked_tickers()` is how it decides — a ticker with a row in `ticker`
 that paid nothing genuinely reports `0`; one with no row at all (every ETF, and
 anything resolved live) reports `null`.
 
+## The risk-free rate (issue #103)
+
+`get_risk_free_rate(start, end)` reads `risk_free_rate` — a flat, densely
+populated table, one row per trading day `scripts/fetch_daily.py` could read
+a yield for, refreshed the same way `risk_free_rate` in that script is. Unlike
+`prices` there is no OHLCV to tier by age here, so nothing is bucketed and
+nothing needs compacting; `rate` is a percentage per annum, stored exactly as
+read, not a price to adjust.
+
+Same **no live fallback** reasoning as `get_dividends` above, for the same
+reason: `None`, not an empty list, when Supabase is unreachable or the window
+has never been synced, so a caller scoring a ratio against this must show a
+null with a reason rather than assume a rate of zero. `PortfolioIn.rate`
+(`api/routes.py`) is the override — a caller supplying its own rate skips this
+reader entirely for that run.
+
 ## `tickers.py` — two questions, two paths
 
 - **"What can I pick?"** → `search_tickers`, answered entirely from a cached
