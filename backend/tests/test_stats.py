@@ -452,5 +452,68 @@ class RiskContributionTests(unittest.TestCase):
         self.assertIsNone(result["B"])
 
 
+# ── Diversification ratio (issue #105) ─────────────────────────────────────────
+
+class DiversificationRatioTests(unittest.TestCase):
+    def test_equal_variance_uncorrelated_holdings_give_sqrt_2(self):
+        """Same A/B construction as RiskContributionTests above: equal
+        variance, exactly zero sample covariance. For two equally
+        weighted, equal-variance, uncorrelated holdings the ratio has a
+        closed form - portfolio variance is half of either holding's own
+        variance, so sigma_fund = sigma / sqrt(2) while the weighted
+        average of the two holdings' own sigma is just sigma itself,
+        giving a ratio of exactly sqrt(2)."""
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07", "2020-01-08"]
+        a_values = [100.0, 102.0, 104.04, 101.9592, 99.920016]
+        b_values = [100.0, 102.0, 99.96, 101.9592, 99.920016]
+
+        ratio = stats.diversification_ratio({"A": a_values, "B": b_values}, dates, {"A": 0.5, "B": 0.5})
+
+        self.assertAlmostEqual(ratio, 2 ** 0.5, places=3)
+
+    def test_identical_holdings_move_in_lockstep_and_never_diversify(self):
+        """Two holdings with identical returns have identical variance
+        and covariance, so the ratio collapses to exactly 1 regardless of
+        weights - the Cauchy-Schwarz lower bound, met with equality."""
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07"]
+        values = [100.0, 103.0, 101.0, 105.0]
+
+        ratio = stats.diversification_ratio(
+            {"A": values, "B": list(values)}, dates, {"A": 0.5, "B": 0.5}
+        )
+
+        self.assertAlmostEqual(ratio, 1.0, places=6)
+
+    def test_scaling_every_weight_by_the_same_factor_does_not_move_the_ratio(self):
+        """Both the numerator and the denominator scale by the same
+        factor under a uniform weight rescaling, so a basket whose
+        tracked weights sum to less than 100 (issue #105's own coverage
+        gap) reads the same ratio as if they had been renormalised to
+        sum to 1 first."""
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07", "2020-01-08"]
+        a_values = [100.0, 102.0, 104.04, 101.9592, 99.920016]
+        b_values = [100.0, 102.0, 99.96, 101.9592, 99.920016]
+        values_by_ticker = {"A": a_values, "B": b_values}
+
+        normalised = stats.diversification_ratio(values_by_ticker, dates, {"A": 0.5, "B": 0.5})
+        raw_weights = stats.diversification_ratio(values_by_ticker, dates, {"A": 35.0, "B": 35.0})
+
+        self.assertAlmostEqual(normalised, raw_weights, places=6)
+
+    def test_a_flat_basket_has_no_variance_to_divide_by(self):
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06"]
+        flat = [100.0, 100.0, 100.0]
+
+        ratio = stats.diversification_ratio({"A": flat, "B": flat}, dates, {"A": 0.5, "B": 0.5})
+
+        self.assertIsNone(ratio)
+
+    def test_fewer_than_two_aligned_returns_is_null(self):
+        ratio = stats.diversification_ratio(
+            {"A": [100.0], "B": [100.0]}, ["2020-01-02"], {"A": 0.5, "B": 0.5}
+        )
+        self.assertIsNone(ratio)
+
+
 if __name__ == "__main__":
     unittest.main()

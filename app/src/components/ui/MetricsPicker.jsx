@@ -1,22 +1,34 @@
 /**
- * MetricsPicker — dialog to toggle which portfolio metric tiles are
- * shown on the summary (issue #104).
+ * MetricsPicker — dialog to toggle which metric tiles are shown
+ * (issue #104; generalised for the fund metrics card in issue #105).
  *
- * Mirrors app/src/components/ui/MeasurementPicker.jsx, simplified: a
- * portfolio metric never groups several tiles under one plugin the way a
- * multi-column measurement does, so every row is a plain toggle — name,
- * one-line description, a doc link. Grouped here by family (portfolio /
- * account), with the group's own label and note read off the manifest's
+ * Mirrors MeasurementPicker.jsx in this same directory, simplified: a
+ * portfolio or fund metric never groups several tiles under one plugin
+ * the way a multi-column measurement does, so every row is a plain
+ * toggle — name, one-line description, a doc link. Grouped here by
+ * family, with the group's own label and note read off the manifest's
  * `families` rather than hardcoded, the same "declared data, not layout"
  * decision PortfolioSummary.jsx's own row headers follow.
  *
- * dividendIncome/dividendYield/incomeUnknownFor never appear here at all
- * — `usePortfolioMetrics` already filters to tile-eligible entries, since
- * there is nothing to toggle about a note that is always shown.
+ * `eyebrow`/`subtitle`/`ariaLabel` default to the portfolio summary's own
+ * copy; the fund metrics card (`components/etf/FundMetricsCard.jsx`)
+ * passes its own so the dialog reads correctly for whichever registry it
+ * is toggling — both are the same `backend/portfolio_metrics/` registry
+ * underneath, filtered to a different `computed_from` before this
+ * component ever sees the list, so nothing here needs to know which one
+ * it is. Living in `components/ui/` rather than `components/portfolio/`
+ * (where it started, issue #104) is that shared-ness made visible: the
+ * portfolio summary and the ETF dashboard are unrelated features that
+ * both need this dialog.
+ *
+ * Non-tile entries (dividendIncome/dividendYield/incomeUnknownFor) never
+ * appear here at all — the caller's own hook (usePortfolioMetrics,
+ * useFundMetrics) already filters to tile-eligible entries, since there
+ * is nothing to toggle about a note that is always shown.
  */
 import { memo, useMemo } from 'react';
-import { Overlay } from '../ui/Overlay';
-import { DocLink } from '../ui/DocLink';
+import { Overlay } from './Overlay';
+import { DocLink } from './DocLink';
 
 function ToggleIndicator({ active }) {
   return (
@@ -63,7 +75,13 @@ function MetricRow({ metric, active, onToggle }) {
   );
 }
 
-export const MetricsPicker = memo(function MetricsPicker({ tileMetrics, families, activeIds, onToggle, onClose }) {
+export const MetricsPicker = memo(function MetricsPicker({
+  tileMetrics, families, activeIds, onToggle, onClose,
+  eyebrow = 'METRICS',
+  subtitle = 'Select which tiles to show on the summary',
+  ariaLabel = 'Portfolio metrics',
+  emptyText = 'No portfolio metrics available — is the backend running?',
+}) {
   // Grouped by family, manifest order preserved within each — a family
   // with nothing active still lists every one of its metrics, since the
   // dialog's job is to offer every choice, not just the current one.
@@ -79,15 +97,15 @@ export const MetricsPicker = memo(function MetricsPicker({ tileMetrics, families
   return (
     <Overlay
       onClose={onClose}
-      ariaLabel="Portfolio metrics"
+      ariaLabel={ariaLabel}
       className="fixed inset-0 z-80 flex items-start justify-center pt-[12vh] px-5 pb-5"
       style={{ background: 'color-mix(in oklab, var(--bg-inset) 70%, transparent)', backdropFilter: 'blur(3px)' }}
       contentClassName="w-full max-w-[560px] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]"
     >
       <div className="flex items-center justify-between p-5 border-b border-[var(--divider)]">
         <div>
-          <div className="eyebrow mb-1">METRICS</div>
-          <p className="text-sm text-[var(--fg-2)] m-0">Select which tiles to show on the summary</p>
+          <div className="eyebrow mb-1">{eyebrow}</div>
+          <p className="text-sm text-[var(--fg-2)] m-0">{subtitle}</p>
         </div>
         <button onClick={onClose} className="flex-none w-8 h-8 grid place-items-center bg-transparent border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--fg-2)] cursor-pointer">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
@@ -113,7 +131,7 @@ export const MetricsPicker = memo(function MetricsPicker({ tileMetrics, families
 
         {tileMetrics.length === 0 && (
           <div className="p-8 text-center text-sm text-[var(--fg-3)]">
-            No portfolio metrics available — is the backend running?
+            {emptyText}
           </div>
         )}
       </div>

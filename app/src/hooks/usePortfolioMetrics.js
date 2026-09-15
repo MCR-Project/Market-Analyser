@@ -19,6 +19,12 @@
  * the same "canonicalise rather than error" rule every other URL-held
  * selection here follows: a bad link should open the app, not a
  * complaint about itself.
+ *
+ * The same /api/portfolio-metrics manifest also carries the three
+ * computed_from="etf_id" fund metrics (issue #105) — filtered out here,
+ * since this hook's `metrics[metric.id]` read only ever makes sense
+ * against a run's own response. useFundMetrics.js is their own,
+ * independent consumer of this manifest.
  */
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
@@ -43,8 +49,14 @@ export function usePortfolioMetrics() {
   // dividendIncome/dividendYield/incomeUnknownFor (tile: false) are never
   // toggleable — the dividend note stays prose (issue #68) — so they are
   // filtered out here, once, rather than by every caller that wants the
-  // tile set.
-  const tileMetrics = useMemo(() => metrics.filter(m => m.tile), [metrics]);
+  // tile set. computed_from="etf_id" entries (issue #105) are filtered
+  // out for the same reason: they have no value in a run's response at
+  // all, so offering them here would toggle on a tile that can only ever
+  // show a dash.
+  const tileMetrics = useMemo(
+    () => metrics.filter(m => m.tile && m.computed_from === 'run'),
+    [metrics]
+  );
 
   const activeIds = useMemo(() => {
     const known = new Set(tileMetrics.map(m => m.id));

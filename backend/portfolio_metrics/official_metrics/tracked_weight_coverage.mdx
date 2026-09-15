@@ -1,0 +1,42 @@
+---
+title: Tracked Weight Coverage
+summary: How much of the fund's weight its tracked holdings actually cover — the caveat every copied portfolio carries, as a number instead of a sentence.
+---
+
+## What it measures
+
+Only constituents weighing at least 1% of their fund are tracked
+constituent-by-constituent by this app. This figure is the sum of those
+tracked holdings' own weights — how much of the fund's total weight they
+account for between them. The rest of the fund is real weight, spread
+across smaller holdings, that this dashboard has no per-constituent
+figures for at all.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{coverage} = \sum_i w_i \quad \text{for every tracked holding } i`} />
+
+The same total a fund's % of ETF column already sums to
+(`measurements/official_measurements/etf_weight.py`'s own
+`total_weight`) — this metric only gives that number its own tile and
+doc page rather than leaving it inside a column's own computation.
+
+<WorkedExample />
+
+## How it reads
+
+Close to 100% means the fund's tracked holdings describe almost the
+whole fund — every other fund-level figure here (Diversification Ratio,
+Top 5 Variance Share) is describing something close to the real thing.
+Well below 100% means a meaningful share of the fund sits in
+constituents below the 1% threshold, and figures computed only from the
+tracked ones are describing a narrower slice of the fund than their own
+numbers might suggest.
+
+## Caveats
+
+Never null: a fund with no tracked holdings at all genuinely covers 0%
+of itself, and that is the honest answer, not a missing one. This is a
+coverage figure, not a completeness score for the *dashboard* — a fund
+sitting at 60% coverage is not wrong or broken, it is simply a fund whose
+weight is more spread out below the tracking threshold than most.

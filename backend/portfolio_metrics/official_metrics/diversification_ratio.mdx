@@ -1,0 +1,50 @@
+---
+title: Diversification Ratio
+summary: How much a fund's own swings shrank once its holdings' correlations are counted, instead of just added up.
+---
+
+## What it measures
+
+If a fund's holdings each moved completely independently of one another,
+the fund's own volatility would be smaller than any single holding's —
+some swings up would cancel out swings down elsewhere in the basket.
+This ratio asks how much smaller: the weighted average of each holding's
+own volatility, over the volatility the fund actually has once the real
+correlations between its holdings are counted in.
+
+A ratio of 1.0 means the holdings move in lockstep — owning all of them
+together bought nothing beyond owning one. The further above 1 it
+climbs, the more the fund's own ups and downs are cushioned by holdings
+that do not all move the same way at the same time. It can never fall
+below 1.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{ratio} = \frac{\sum_i w_i \sigma_i}{\sigma_{\text{fund}}}`} />
+
+`σᵢ` is each tracked holding's own annualised volatility and `σ_fund` is
+the fund's, both read off the same joint covariance matrix
+`services.stats.risk_contribution` builds from the fund's tracked
+holdings, priced over the same window the correlation matrix and the
+% of ETF column already use. A holding that hasn't traded for the whole
+window is left out of this figure rather than narrowing the window to
+fit it — see `services/fund_metrics.py`'s own docstring for why.
+
+<WorkedExample />
+
+## How it reads
+
+A low ratio (close to 1) says the fund's diversification is mostly
+nominal — many names, but they tend to rise and fall together, often
+because they share a sector or a macro exposure. A higher ratio says the
+fund's breadth is actually doing work: its own swings are meaningfully
+gentler than its individual holdings' swings would suggest on their own.
+
+## Caveats
+
+This is a property of the fund's **tracked** holdings only — those
+weighing at least 1% of the fund (see Tracked Weight Coverage). A fund
+whose weight sits mostly outside that threshold is describing less of
+itself than the ratio implies. It also says nothing about which holdings
+are driving the fund's risk — Top 5 Variance Share is the figure for
+that.

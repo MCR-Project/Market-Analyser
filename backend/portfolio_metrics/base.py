@@ -26,13 +26,17 @@ Every entry declares what it is computed from (issue #104's own words):
     Every metric shipped today is this kind; `value()`'s default
     implementation reads `data["metrics"][self.id]`, which is correct for
     all twelve without an override.
-  - `computed_from = "etf_id"` - a fund, not a run. No metric here uses
-    this yet - the fund-level card (#105) is what will - but the manifest,
-    the registry and the docs/examples machinery must already support it
-    without changing, which is what proves the mechanism rather than just
-    asserting it (see tests/test_portfolio_metrics.py's stand-in entry).
-    Such an entry must override `value()`; the base implementation only
-    knows how to read a run.
+  - `computed_from = "etf_id"` - a fund, not a run (issue #105's own
+    three metrics: diversificationRatio, top5VarianceShare,
+    trackedWeightCoverage). `value()` is called with the etf_id string
+    itself and does its own computation - typically a thin read of
+    `services.fund_metrics.compute_fund_metrics(etf_id)`'s own key, the
+    fund-level mirror of `RunMetric.value()` reading a key out of a
+    completed run. Such an entry must override `value()`; the base
+    implementation only knows how to read a run. It may also override
+    `reason()` (below) to explain a null value - there is no shared
+    "reasons" response to read from the way a run's own
+    `metrics["reasons"]` supplies one.
 """
 
 import inspect
@@ -56,6 +60,16 @@ FAMILIES = {
     "dividend": {
         "label": "Dividends",
         "note": "Already inside every value above — reported, never added",
+    },
+    # The two computed_from="etf_id" families (issue #105) - properties of
+    # a fund's whole basket, not of any one holding or any one run.
+    "diversification": {
+        "label": "Diversification",
+        "note": "How independently the fund's holdings actually move",
+    },
+    "coverage": {
+        "label": "Coverage",
+        "note": "What the 1% tracking threshold leaves out of these figures",
     },
 }
 
@@ -85,7 +99,8 @@ class MetricBase(ABC):
     # "currency_signed" (+$1,234 / −$1,234, tone-coloured), "percent"
     # (12.3%), "percent_signed" (+12.3% / −12.3%, tone-coloured),
     # "drawdown" (a {value, peakDate, troughDate} object), "list"
-    # (incomeUnknownFor's ticker list, joined for display). Adding a
+    # (incomeUnknownFor's ticker list, joined for display), "ratio"
+    # (1.42×, issue #105's diversificationRatio). Adding a
     # metric whose shape already fits one of these needs no frontend
     # change at all - not just to appear in the dialog, but to render
     # correctly as a tile too.
@@ -132,6 +147,19 @@ class MetricBase(ABC):
         stays abstract so a future etf_id-based entry cannot forget to.
         """
         ...
+
+    def reason(self, data) -> str | None:
+        """Why this metric's value came back null for `data`, if this
+        entry knows - the computed_from="etf_id" counterpart to a run's
+        own `metrics["reasons"]` entry (issue #99), used only by
+        `examples.py`'s worked example for that branch. A `computed_from
+        ="run"` entry never needs to override this: its reason travels
+        inside the run itself, which `examples.py`'s "run" branch already
+        reads directly. `None` by default - a metric with nothing to say
+        about its own null returns none, the same "optional, not every
+        metric needs one" rule `per_ticker_reason` follows.
+        """
+        return None
 
     # ── Documentation ────────────────────────────────────────────────────
 

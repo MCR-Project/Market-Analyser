@@ -586,6 +586,48 @@ def effective_n(weights: list[float]) -> float | None:
     return round(1 / hhi, PERCENT_DP)
 
 
+def _aligned_covariance(values_by_ticker: dict[str, list[float]], dates: list[str]):
+    """Trimmed, aligned scaled-return covariance for a set of tickers -
+    the shared alignment step behind every basket statistic that needs
+    one joint covariance matrix over the same window: `risk_contribution`
+    and `diversification_ratio` (issue #105). Splitting this out is what
+    keeps the two reading the exact same matrix rather than each aligning
+    the basket its own way and happening to agree.
+
+    Alignment is the caller's job, same as `risk_contribution` always
+    documented: `values_by_ticker[t]` and `dates` must already be the
+    same length and on the same calendar for every ticker (services/
+    portfolio.py has every holding's value on one calendar already;
+    services/fund_metrics.py restricts itself to holdings with no gap in
+    the window for the same reason - see that module's own docstring for
+    why it does not lean on pandas' pairwise-complete-observations trick
+    the correlation matrix uses instead).
+
+    Returns `(tickers, n, covariance)`, where `covariance(a, b)` is the
+    sample covariance of `a` and `b`'s own trimmed scaled returns, or
+    `(tickers, 0, None)` when there are fewer than two aligned returns to
+    build one from - trimmed to the same length **from the end**, so a
+    ragged alignment (a holding whose first row produced no return
+    because it started at or below zero) still lines up pointwise with
+    the others.
+    """
+    tickers = list(values_by_ticker)
+    returns = {t: scaled_returns(values_by_ticker[t], dates) for t in tickers}
+    n = min((len(r) for r in returns.values()), default=0)
+    if n < 2:
+        return tickers, 0, None
+
+    trimmed = {t: r[-n:] for t, r in returns.items()}
+    means = {t: sum(r) / n for t, r in trimmed.items()}
+
+    def covariance(a: str, b: str) -> float:
+        return sum(
+            (trimmed[a][i] - means[a]) * (trimmed[b][i] - means[b]) for i in range(n)
+        ) / (n - 1)
+
+    return tickers, n, covariance
+
+
 def risk_contribution(
     values_by_ticker: dict[str, list[float]], dates: list[str], weights: dict[str, float]
 ) -> dict[str, float | None]:
@@ -600,31 +642,19 @@ def risk_contribution(
     basket can contribute less than zero.
 
     Built from the same scaled returns every other dispersion figure in
-    this module is, aligned across holdings on the shared `dates` -
-    alignment is the caller's job (services/portfolio.py already has
-    every holding's value on the same calendar; this function does not
-    merge, forward-fill or resample anything).
+    this module is, aligned across holdings on the shared `dates` via
+    `_aligned_covariance` - the same covariance matrix
+    `diversification_ratio` below reads, so a fund's risk shares and its
+    diversification ratio always describe the same window rather than two
+    that happen to look similar.
 
     Every holding reports `None` when the portfolio has no variance to
     apportion at all - every holding flat, or fewer than two usable
     returns once alignment is accounted for.
     """
-    tickers = list(values_by_ticker)
-    returns = {t: scaled_returns(values_by_ticker[t], dates) for t in tickers}
-    n = min((len(r) for r in returns.values()), default=0)
-    if n < 2:
+    tickers, n, covariance = _aligned_covariance(values_by_ticker, dates)
+    if covariance is None:
         return {t: None for t in tickers}
-
-    # Trimmed to the same length from the end, so a ragged alignment (a
-    # holding whose first row produced no return because it started at or
-    # below zero) still lines up pointwise with the others.
-    trimmed = {t: r[-n:] for t, r in returns.items()}
-    means = {t: sum(r) / n for t, r in trimmed.items()}
-
-    def covariance(a: str, b: str) -> float:
-        return sum(
-            (trimmed[a][i] - means[a]) * (trimmed[b][i] - means[b]) for i in range(n)
-        ) / (n - 1)
 
     portfolio_variance = sum(
         weights[a] * weights[b] * covariance(a, b) for a in tickers for b in tickers
@@ -637,3 +667,42 @@ def risk_contribution(
         marginal = sum(weights[b] * covariance(a, b) for b in tickers)
         contributions[a] = round(weights[a] * marginal / portfolio_variance * 100, PERCENT_DP)
     return contributions
+
+
+def diversification_ratio(
+    values_by_ticker: dict[str, list[float]], dates: list[str], weights: dict[str, float]
+) -> float | None:
+    """How many genuinely independent bets a basket's holdings behave
+    like: the weighted average of each holding's own volatility, over the
+    basket's actual volatility once their correlations are counted in -
+    `Σ wᵢσᵢ ÷ σ_fund` (issue #105). 1.0 means the holdings move in
+    lockstep and diversifying across them bought nothing; the further
+    above 1 it climbs, the more the basket's own swings are smaller than
+    the sum of its parts.
+
+    Shares `_aligned_covariance` with `risk_contribution` above, so this
+    is always read off the exact same matrix a fund's risk-contribution
+    shares are - and every σᵢ here is `sqrt` of that same matrix's own
+    diagonal (`covariance(t, t)`), not each holding's volatility computed
+    over whatever window it happens to have on its own. That is what
+    keeps the ratio mathematically guaranteed to be at least 1 (Cauchy-
+    Schwarz) rather than occasionally dipping under it from a σᵢ measured
+    over a different stretch than the covariance it is being divided
+    against.
+
+    `None` under the same two conditions `risk_contribution` itself
+    reports `None` for: fewer than two aligned returns across the basket,
+    or a basket with no variance at all to divide by.
+    """
+    tickers, n, covariance = _aligned_covariance(values_by_ticker, dates)
+    if covariance is None:
+        return None
+
+    portfolio_variance = sum(
+        weights[a] * weights[b] * covariance(a, b) for a in tickers for b in tickers
+    )
+    if portfolio_variance <= 0:
+        return None
+
+    weighted_vol = sum(weights[t] * math.sqrt(max(covariance(t, t), 0.0)) for t in tickers)
+    return round(weighted_vol / math.sqrt(portfolio_variance), PERCENT_DP)

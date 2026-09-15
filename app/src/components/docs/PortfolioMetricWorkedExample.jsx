@@ -68,16 +68,31 @@ export const PortfolioMetricWorkedExample = memo(function PortfolioMetricWorkedE
     );
   }
 
-  // A computed_from="etf_id" entry (issue #105) has no run to show; none
-  // shipped today actually reaches this branch.
+  // A computed_from="etf_id" entry (issue #105) has no run to show —
+  // it's computed live against the documented example fund instead.
   if (!data.portfolio) {
     return (
       <section className="my-6">
         <SectionHeading>Worked example</SectionHeading>
-        <p className="text-[13px] text-[var(--fg-2)] m-0">
-          This metric is computed from a fund rather than a simulated
-          portfolio; its worked example ships with the metric that uses it.
+        <p className="text-[13px] text-[var(--fg-2)] mt-0 mb-4">
+          Computed live for{' '}
+          <strong className="text-[var(--fg)] font-semibold">{data.etf_id}</strong>,
+          the fund this documentation defaults to.
         </p>
+
+        <div className="border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden">
+          <div className="px-4 py-2.5 bg-[var(--bg-2)] border-b border-[var(--border)]">
+            <span className="font-[var(--font-mono)] text-[12px] font-bold text-[var(--fg)]">result</span>
+          </div>
+          <div className="px-4 py-3.5">
+            <div className="font-[var(--font-mono)] text-[22px] font-bold text-[var(--fg)] tabular-nums">
+              {formatValue(data.value)}
+            </div>
+            {data.reason && (
+              <p className="text-[12px] text-[var(--fg-2)] mt-1.5 mb-0">{data.reason}</p>
+            )}
+          </div>
+        </div>
       </section>
     );
   }

@@ -30,9 +30,9 @@ src/store/                   useEtfStore (URL-backed), portfolioStorage, portfol
 src/views/                   one file per route or tab panel
 src/components/
   layout/    AppLayout, Header
-  ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, MdxCell, MeasurementPicker, DocLink, Logo
+  ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, MdxCell, MeasurementPicker, MetricsPicker, DocLink, Logo
   charts/    AreaChart, BrushOverlay, ChartTooltip
-  etf/       EtfDashboard, EtfPicker, SectorZone
+  etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard
   stock/     StockPopup
   docs/      DocsSidebar, MeasurementDoc, DocMdx, WorkedExample
   portfolio/ the portfolio simulator UI — see its own CLAUDE.md
@@ -53,6 +53,7 @@ link lives in the URL, and there is only ever one copy of the answer:
 | `?compare=` / `?benchmark=` | `useComparison` |
 | `?rf=` (on `/portfolio/...`) | `useRiskFreeRate` — an override for the risk-free rate a run is scored against (issue #103); absent or unusable falls back to the tracked series |
 | `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
+| `?fundMetrics=` (on `/etf/...`) | `useFundMetrics` — which fund metrics card tiles are on (issue #105); its own key so it cannot collide with `/portfolio/...`'s `?metrics=` |
 
 `useEtfStore` used to be a zustand store; moving it into the route param removed
 the sync problem entirely — any component, however deep, calls `useEtfStore()`

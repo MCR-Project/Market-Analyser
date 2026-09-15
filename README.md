@@ -650,20 +650,66 @@ way `?window=` and `?rf=` are — it survives a reload and travels in a
 share link. An unusable value (a stale id from an old link, or none at
 all) falls back to the registry's own default set.
 
-**A metric can be computed from a simulation run or from a fund.** Every
-metric shipped today is the first kind; the second exists so the
-fund-level metrics card (issue #105) can add its own entries to this same
-registry without reworking it — this issue only makes sure the mechanism
-can hold one, proven with a stand-in in the test suite rather than a real
-metric that needs one yet.
+**A metric can be computed from a simulation run or from a fund.** Twelve
+metrics read `run["metrics"][id]`; three (issue #105 — see "Fund metrics"
+below) read `services/fund_metrics.py` instead, keyed by `etf_id` rather
+than by a completed run.
 
 Each metric documents itself the same way a measurement does: an `.mdx`
 file next to its module (`cagr.py` → `cagr.mdx`), served at
 `/docs/<metric id>` under its own "Portfolio metrics" sidebar group, with
-a worked example computed live against `DOCS_EXAMPLE_PORTFOLIO`
-(`backend/config.py`) — a funded basket, so both families' tiles have a
-real, non-null number to show. Copy
+a worked example computed live — against `DOCS_EXAMPLE_PORTFOLIO`
+(`backend/config.py`) for a run-based metric, a funded basket so both
+families' tiles have a real, non-null number to show; against
+`DOCS_EXAMPLE_ETF` for a fund-based one. Copy
 `backend/portfolio_metrics/DOC_TEMPLATE.mdx` to start one.
+
+### Fund metrics
+
+A second, smaller registry entry reuses the exact same mechanism for
+figures that describe a whole fund's basket rather than any one holding
+or any one simulated run: **diversification ratio** (how much smaller
+the fund's own volatility is than the weighted average of its holdings'
+individual volatilities, once their correlations are counted in),
+**variance share of the top five** (how much of the fund's own variance
+its five largest *risk contributors* — not necessarily its five largest
+*positions* — account for), and **tracked weight coverage** (how much of
+the fund's weight its tracked, ≥1%-weighted holdings add up to — the
+caveat every copied portfolio already carries in prose, `etf_weight`'s
+own `total_weight`, given its own tile).
+
+These three are `computed_from: "etf_id"` entries in the same
+`backend/portfolio_metrics/` registry the twelve run-based tiles above
+live in — "different metrics, one mechanism" was issue #105's own
+decision, so they share its manifest, its family declarations
+(`diversification`, `coverage`), and its doc/worked-example machinery
+rather than standing up a second registry. What differs is where the
+value comes from: `GET /api/portfolio-metrics/{etf_id}` runs
+`services/fund_metrics.compute_fund_metrics`, which reads the fund's
+tracked holdings and prices them over the same window the correlation
+matrix uses, then hands the aligned series to `services/stats.py`'s
+`diversification_ratio` and `risk_contribution` — the same Euler
+variance decomposition a future per-holding risk-contribution column
+would share, per that function's own docstring.
+
+**A holding missing any close in the window is excluded from the ratio
+and the variance share, but still counts toward coverage.** The
+correlation matrix can lean on pandas' own pairwise-complete-observations
+trick and let a newly listed holding keep its own shorter history,
+because it computes one pair at a time; a basket's variance decomposition
+needs one joint covariance matrix built from every holding's returns
+aligned to the *same* stretch of dates at once, so narrowing the fund's
+whole window to whatever its newest holding has traded would be the wrong
+trade. Both figures come back null, with a reason, when fewer than two of
+the fund's tracked holdings have a complete history over the window, or
+when the basket they do share has no measurable variance at all.
+
+On screen, this is its own card under `EtfDashboard` — deliberately not
+squeezed into the identity card's `NET ASSETS / HOLDINGS / AVG ρ` row,
+which is already tight — with its own enable/disable dialog and its own
+query-string key, `?fundMetrics=`, so it can never collide with the
+portfolio page's `?metrics=` even though both are comma-separated id
+lists read through the same `withParams`/`readList` helpers.
 
 ### Bounding one anonymous client
 
