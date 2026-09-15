@@ -23,10 +23,27 @@
  * as real accessible text for a screen reader, on the dash a null value
  * renders as. Ignored once `mdx` is non-null: a reason only ever
  * accompanies a genuine absence.
+ *
+ * This vocabulary is explicitly *not* a stable contract, unlike the
+ * documentation one in `components/docs/DocMdx.jsx` — see that file's
+ * own comment for the contrast. `Spark` (issue #106) is this file's own
+ * proof of that: a fourth component, added because `Bar`/`Stat`/`Badge`
+ * can each only draw one number, and some of the metrics landing in this
+ * table are paths rather than levels — a rolling correlation that
+ * climbed toward the fund all year and one that fell away from it
+ * average to the same ρ and are opposite findings.
  */
 import { useState, useEffect } from 'react';
 import { evaluate } from '@mdx-js/mdx';
 import * as runtime from 'react/jsx-runtime';
+
+// Spark's internal coordinate space — arbitrary since preserveAspectRatio
+// "none" stretches it to whatever width the cell gives it (see Spark's
+// own comment below); H is the one dimension that actually matters,
+// since it is never stretched.
+const SPARK_W = 120;
+const SPARK_H = 28;
+const SPARK_PAD = 3;
 
 /** Shared visual vocabulary available to every measurement's MDX. */
 const MDX_COMPONENTS = {
@@ -55,6 +72,82 @@ const MDX_COMPONENTS = {
   Badge: ({ text, color = 'var(--fg-2)' }) => (
     <span className="text-xs rounded-full px-2.5 py-0.5" style={{ color, background: 'color-mix(in oklab, ' + color + ' 14%, transparent)' }}>{text}</span>
   ),
+  /** A short series drawn as a line — a column showing a *path* rather
+   * than a level (issue #106). Two holdings can average the same number
+   * while one climbed steadily and the other spiked once and sat flat;
+   * Bar (a single magnitude) cannot tell them apart, and a series is
+   * exactly what it can't express.
+   *
+   * `values` is the series itself, in order — never what sorting or
+   * filtering reads. Those always compare the column's own `per_ticker`
+   * scalar (unaffected by this component entirely), so a measurement
+   * rendering `<Spark>` still names a scalar to sort/filter by, the same
+   * as `<Bar>`/`<Stat>`/`<Badge>` always have (see backend/measurements/
+   * CLAUDE.md's "Spark: a path, not a level" section).
+   *
+   * `baseline` (default 0) is always included in the drawn vertical
+   * range, not just the series' own min/max — a series that never
+   * crosses it still shows *how far* it stayed away, rather than being
+   * rescaled to fill the cell and losing that distance entirely. The
+   * line's color follows the same accent/negative split `<Bar>` uses,
+   * decided by the series' last point relative to `baseline` unless
+   * `color` overrides it.
+   *
+   * `label` is a plugin-authored sentence describing the path in words
+   * ("up all year, mostly in Q3") — there is nothing legible to put
+   * inside a `preserveAspectRatio="none"` SVG this narrow, so it never
+   * renders as a glyph inside one. It travels the same way a null cell's
+   * `reason` already does elsewhere in this file: a native tooltip via
+   * `title` for a mouse, and a real `sr-only` text node for a screen
+   * reader, since `title` alone is not reliably announced.
+   *
+   * A series too short to draw (fewer than two usable points) renders
+   * the same plain dash a measurement returns for a null value — the
+   * ordinary "nothing to show" case is deciding not to render `<Spark>`
+   * at all (see its own doc comment above), this is only the defensive
+   * fallback for a malformed one. */
+  Spark: ({ values = [], label, baseline = 0, color }) => {
+    const usable = values.filter(v => typeof v === 'number' && Number.isFinite(v));
+    if (usable.length < 2) {
+      return <span className="font-[var(--font-mono)] text-[13px] text-[var(--fg-3)]">—</span>;
+    }
+
+    const last = usable[usable.length - 1];
+    const resolvedColor = color ?? (last < baseline ? 'var(--negative)' : 'var(--accent)');
+
+    const min = Math.min(...usable, baseline);
+    const max = Math.max(...usable, baseline);
+    const span = (max - min) || 1;
+    const toY = (v) => SPARK_H - SPARK_PAD - ((v - min) / span) * (SPARK_H - 2 * SPARK_PAD);
+
+    const points = usable.map((v, i) => [
+      SPARK_PAD + (i / (usable.length - 1)) * (SPARK_W - 2 * SPARK_PAD),
+      toY(v),
+    ]);
+    const line = points.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    const baselineY = toY(baseline);
+    const lastPoint = points[points.length - 1];
+
+    return (
+      <div className="w-full" title={label}>
+        <svg
+          viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+          preserveAspectRatio="none"
+          width="100%"
+          className="block overflow-visible"
+          style={{ height: SPARK_H }}
+        >
+          <line
+            x1={SPARK_PAD} y1={baselineY} x2={SPARK_W - SPARK_PAD} y2={baselineY}
+            stroke="var(--border)" strokeWidth={1} strokeDasharray="2 2" vectorEffect="non-scaling-stroke"
+          />
+          <path d={line} fill="none" stroke={resolvedColor} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <circle cx={lastPoint[0]} cy={lastPoint[1]} r={2.5} fill={resolvedColor} />
+        </svg>
+        {label && <span className="sr-only">{label}</span>}
+      </div>
+    );
+  },
 };
 
 const compileCache = new Map();

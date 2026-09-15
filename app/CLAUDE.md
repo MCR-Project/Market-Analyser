@@ -176,19 +176,38 @@ Both compile backend-authored source into real React components at runtime, whic
 is safe **only** because measurement code and doc files are first-party and
 reviewed like any other code. Never build either from fetched or user text.
 
-- `components/ui/MdxCell.jsx` — `Bar`, `Stat`, `Badge`. Designed for a ~110px
-  table cell; expected to keep changing with the table. The backend picks *what*
-  to render, this file owns how it looks, so every measurement looks consistent
-  without the frontend branching on a format field. Compiled components are cached
-  by source string; a failed compile is evicted so a transient failure does not
-  poison the cache. `MdxCell` also takes an optional `reason` prop (issue #99),
-  a measurement-authored explanation for a `null` value — same trust boundary
-  as the MDX itself, never built from fetched or user text — surfaced as a
-  native `title` tooltip **and** a separate `sr-only` span with real text, not
-  `title` alone: it is not reliably announced to a screen reader. No `reason`
-  is a plain dash with no tooltip at all, not one with nothing in it. Every
-  place that renders a `per_ticker_mdx` cell (`TableView`, `WorkedExample`)
-  should pass the matching `per_ticker_reason` entry alongside it.
+- `components/ui/MdxCell.jsx` — `Bar`, `Stat`, `Badge`, `Spark` (issue #106).
+  Designed for a ~110px table cell; expected to keep changing with the table —
+  unlike the doc vocabulary below, adding a component here is a normal, low-risk
+  change. The backend picks *what* to render, this file owns how it looks, so
+  every measurement looks consistent without the frontend branching on a format
+  field. Compiled components are cached by source string; a failed compile is
+  evicted so a transient failure does not poison the cache. `MdxCell` also takes
+  an optional `reason` prop (issue #99), a measurement-authored explanation for
+  a `null` value — same trust boundary as the MDX itself, never built from
+  fetched or user text — surfaced as a native `title` tooltip **and** a separate
+  `sr-only` span with real text, not `title` alone: it is not reliably announced
+  to a screen reader. No `reason` is a plain dash with no tooltip at all, not one
+  with nothing in it. Every place that renders a `per_ticker_mdx` cell
+  (`TableView`, `WorkedExample`) should pass the matching `per_ticker_reason`
+  entry alongside it.
+  - **`Spark` draws a series, not a single value** — a column showing a *path*
+    (issue #106): two holdings can average the same return while one climbed
+    steadily and the other spiked once, and `Bar` (one magnitude) can't tell
+    them apart. `values` is the series in drawing order; `baseline` (default 0)
+    is always included in the drawn vertical range, so a series that never
+    crosses it still shows how far it stayed away rather than being rescaled to
+    fill the cell. **A `<Spark>` column still needs a plain number to sort and
+    filter by** — `TableView`'s sort/filter logic reads only `per_ticker`, never
+    `per_ticker_mdx`, so a plugin rendering `<Spark>` names a scalar for that the
+    same way every other column already does (`backend/measurements/CLAUDE.md`'s
+    own "Spark: a path, not a level" section states the same rule from the
+    backend side). `label` is a plugin-authored sentence describing the path in
+    words; there is nothing legible to put inside the stretched SVG, so it
+    surfaces as a tooltip and `sr-only` text, the same convention `reason` above
+    follows, never as a glyph inside the `<svg>`. An unavailable series is an
+    ordinary null: `render_cell` returns `"—"` rather than a `<Spark>` with
+    nothing to draw, so there is no separate empty-series case to handle here.
 - `components/docs/DocMdx.jsx` — `Note`, `Warning`, `Formula`, `WorkedExample`,
   plus the prose elements MDX produces. **A stable contract**: adding a component
   is fine, changing or removing one breaks every doc already written. Doc MDX
