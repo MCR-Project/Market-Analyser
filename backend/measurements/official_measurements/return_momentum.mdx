@@ -1,0 +1,63 @@
+---
+title: 1Y Return & Momentum
+summary: A holding's own total return over the window, and that same return with the final month skipped.
+---
+
+## What it measures
+
+**Return** is the plainest number in the whole table: what the holding
+actually did over the window, start to end, on adjusted closes — so any
+dividends paid along the way are already inside it. Two columns share this
+plugin because they answer such closely related questions that computing
+them apart would mean fetching the same price history twice.
+
+**Momentum** is the same return with the most recent month cut off — from
+the start of the window to one month before its end, not all the way to the
+end itself. That skip is deliberate, not an oversight: the most recent
+month is the one a price is most likely to give back (short-term reversal
+is a well-documented effect), so leaving it out is what turns "what just
+happened" into "what has been happening" — and it is what keeps this column
+from simply restating Return. For the default 1-year window, this is the
+standard "12-minus-1-month" momentum factor.
+
+## Where the numbers come from
+
+`holdings` for the fund's constituents, `price_frame` for each holding's own
+closes over the table's shared window. No fund-level data.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{return} = \frac{P_{\text{end}}}{P_{\text{start}}} - 1`} />
+
+<Formula tex={String.raw`\text{momentum} = \frac{P_{\text{end} - 1\text{mo}}}{P_{\text{start}}} - 1`} />
+
+`services.stats.total_return` reads the two endpoints directly; `services.
+stats.momentum` finds whichever row falls one calendar month before the
+window's last one and reads the same ratio up to there instead. Both start
+from the window's own first row, so the two numbers are always directly
+comparable — the only thing that differs between them is where they stop.
+
+<WorkedExample />
+
+## How it reads
+
+Momentum well above Return means most of the window's gain happened before
+the final month — a holding that was already trending before its most
+recent move. Momentum well below Return means the final month did most of
+the work — a number Return already credits it for, but momentum
+deliberately does not.
+
+## Caveats
+
+Both are null with a reason, not zero, for a holding with fewer than two
+priced dates over the window. Momentum has a second null case Return does
+not: a holding priced for less than a month has no row that falls "one
+month before the end" to measure to at all.
+
+<Warning>
+Momentum's precision depends on how coarsely the window is bucketed (issue
+#10). For a window answered in weekly or monthly rows, "one month before
+the end" can only land on the nearest bucket, not the exact date — a wider
+window (5Y, Max) is more likely to have spent part of its own history in
+one of those coarser tiers than a shorter one.
+</Warning>

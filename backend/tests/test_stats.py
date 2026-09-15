@@ -257,6 +257,70 @@ class CagrTests(unittest.TestCase):
         )
 
 
+# ── Total return and momentum (issue #108) ─────────────────────────────────────
+
+class TotalReturnTests(unittest.TestCase):
+    def test_last_over_first_minus_one(self):
+        self.assertAlmostEqual(stats.total_return([100.0, 142.0]), 42.0, places=4)
+
+    def test_a_loss_is_negative(self):
+        self.assertAlmostEqual(stats.total_return([100.0, 80.0]), -20.0, places=4)
+
+    def test_unaffected_by_what_happens_in_between(self):
+        """Only the two endpoints matter - a wild path between them
+        changes nothing about the return, unlike volatility or drawdown."""
+        calm = [100.0, 105.0, 110.0, 120.0]
+        wild = [100.0, 40.0, 300.0, 120.0]
+        self.assertAlmostEqual(stats.total_return(calm), stats.total_return(wild), places=6)
+
+    def test_a_single_row_has_no_return(self):
+        self.assertIsNone(stats.total_return([100.0]))
+
+    def test_an_opening_value_at_or_below_zero_is_null(self):
+        self.assertIsNone(stats.total_return([0.0, 10.0]))
+
+
+class MomentumTests(unittest.TestCase):
+    def test_skips_the_final_calendar_month(self):
+        # Daily rows, a bit over a year. The cutoff is 2021-01-01 - one
+        # month before the last row (2021-02-01) - so momentum reads off
+        # 2021-01-01's own value, not the final one.
+        dates = ["2020-01-01", "2020-06-01", "2021-01-01", "2021-01-15", "2021-02-01"]
+        values = [100.0, 110.0, 150.0, 160.0, 200.0]
+
+        result = stats.momentum(values, dates)
+
+        self.assertAlmostEqual(result["value"], 50.0, places=4)  # 150/100 - 1
+
+    def test_differs_from_total_return_by_exactly_the_skipped_month(self):
+        dates = ["2020-01-01", "2021-01-01", "2021-02-01"]
+        values = [100.0, 150.0, 200.0]
+
+        momentum_value = stats.momentum(values, dates)["value"]
+        return_value = stats.total_return(values)
+
+        self.assertAlmostEqual(momentum_value, 50.0, places=4)
+        self.assertAlmostEqual(return_value, 100.0, places=4)
+        self.assertNotAlmostEqual(momentum_value, return_value, places=1)
+
+    def test_a_window_shorter_than_a_month_is_null(self):
+        dates = ["2021-01-25", "2021-02-01"]
+        values = [100.0, 105.0]
+
+        result = stats.momentum(values, dates)
+
+        self.assertIsNone(result["value"])
+
+    def test_a_single_row_has_no_momentum(self):
+        result = stats.momentum([100.0], ["2020-01-02"])
+        self.assertIsNone(result["value"])
+
+    def test_carries_granularity_unlike_total_return(self):
+        dates = ["2020-01-01", "2021-01-01", "2021-02-01"]
+        values = [100.0, 150.0, 200.0]
+        self.assertIn("granularity", stats.momentum(values, dates))
+
+
 # ── Max drawdown and underwater stretches ─────────────────────────────────────
 
 class MaxDrawdownTests(unittest.TestCase):

@@ -236,6 +236,42 @@ wherever the database has it — `null`, never `0`, for a holding with no
 a doc page or measurement using both shares one cached read rather than
 asking Supabase twice for the same tickers.
 
+### A holding's own price history
+
+Every column described so far says something about a holding's place
+inside its fund — its weight, its correlation, its relation to the fund's
+own risk. None of them describe the holding on its own terms. Four more
+columns (issue #108), across two official measurement plugins, read
+nothing but a holding's own price history:
+
+- **Volatility** — annualised standard deviation of the holding's own
+  returns over the window, through `services.stats.volatility` — the same
+  function the portfolio simulator's own Volatility metric applies to a
+  portfolio's series, applied here to one holding's.
+- **Max Drawdown** — the deepest peak-to-trough fall in the holding's own
+  price over the window, negative or zero, never positive.
+- **1Y Return & Momentum** — one plugin, two columns. Return is the
+  window's own total return on adjusted closes, so income is already
+  inside it. Momentum is that same return with the most recent month
+  skipped — from the window's start to one month before its end rather
+  than all the way to the end — which for the default 1-year window is the
+  standard "12-minus-1-month" factor. The skip is deliberate: a very
+  recent month is the one most prone to reversing itself, and leaving it
+  out is what keeps Momentum from simply restating Return.
+
+All four go through `services/stats.py` — no local reimplementation of
+annualisation or drawdown — and are window-aware, sharing the same
+table-wide control every other window-aware column already does (issue
+#101). A holding with fewer than two priced dates over the window reports
+null with a reason on every one of these, not zero: `total_return` and
+`momentum` are new `stats.py` functions added alongside this issue,
+`total_return` a plain `last / first - 1` with no time dimension (the same
+reason `cagr` carries no `granularity`), `momentum` finding whichever row
+falls one calendar month before the window's last one and reading the same
+ratio up to there — which *does* carry a `granularity`, since which row
+counts as "one month before the end" depends on how coarsely that stretch
+of the window happens to be bucketed (issue #10).
+
 ## Portfolio simulator
 
 A portfolio here is **a simulation, not an account**: a basket of tickers,

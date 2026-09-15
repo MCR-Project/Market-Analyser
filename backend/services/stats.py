@@ -268,6 +268,59 @@ def cagr(values: list[float], dates: list[str]) -> float | None:
     return round((growth ** (DAYS_PER_YEAR / days) - 1) * 100, PERCENT_DP)
 
 
+def total_return(values: list[float]) -> float | None:
+    """Total return over the series, first row to last, as a percentage -
+    `last / first - 1`, on whatever values are passed in (issue #108
+    expects already-adjusted closes, so income is already inside it, the
+    same rule every other price-derived figure in this app follows).
+
+    No `dates` argument and no `granularity`, unlike most of this module:
+    a return between two endpoints is exactly that ratio regardless of how
+    many rows sit between them or how coarsely they are bucketed - nothing
+    about the path between first and last changes the answer, the same
+    reasoning `cagr` above states for why it carries no granularity either.
+
+    `None` when there are fewer than two rows, or the series opens at or
+    below zero - a return needs a real opening value to be a fraction of.
+    """
+    if len(values) < 2 or values[0] <= 0:
+        return None
+    return round((values[-1] / values[0] - 1) * 100, PERCENT_DP)
+
+
+def momentum(values: list[float], dates: list[str]) -> dict:
+    """The window's own return with the most recent month skipped - from
+    the window's first row to whichever row falls one calendar month
+    before its last (issue #108). For the default 1-year window this is
+    the standard "12-minus-1-month" momentum factor; skipping the most
+    recent month is the point, not an oversight - it is what keeps this
+    column from simply restating `total_return`, since the most recent
+    month is the one most prone to reversing itself.
+
+    Unlike `total_return`, this carries a `granularity`: which row counts
+    as "one month before the end" depends on how coarsely the window is
+    bucketed (issue #10) - a monthly-bucketed tail can only place that cut
+    to the nearest whole bucket, not the nearest day, so the answer's own
+    precision is a property of the window's granularity the way
+    `volatility`'s or `max_drawdown`'s already are.
+
+    `None` when there are fewer than two rows, the series opens at or
+    below zero, or the window itself spans less than a month - a holding
+    priced for only a few weeks has no "one month before the end" row to
+    measure to.
+    """
+    granularity = granularity_of(dates)
+    if len(values) < 2 or values[0] <= 0:
+        return {"value": None, "granularity": granularity}
+    parsed = [pd.Timestamp(d) for d in dates]
+    cutoff = parsed[-1] - pd.DateOffset(months=1)
+    idx = next((i for i in range(len(parsed) - 1, -1, -1) if parsed[i] <= cutoff), None)
+    if idx is None:
+        return {"value": None, "granularity": granularity}
+    value = round((values[idx] / values[0] - 1) * 100, PERCENT_DP)
+    return {"value": value, "granularity": granularity}
+
+
 def max_drawdown(values: list[float], dates: list[str]) -> dict:
     """The deepest peak-to-trough fall in the series, as a negative
     percentage, with the dates of both ends.

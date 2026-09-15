@@ -1,0 +1,45 @@
+---
+title: Volatility
+summary: How much a holding's own price has swung over the window, annualised.
+---
+
+## What it measures
+
+Every other column in this table describes a holding's place inside its
+fund — its weight, its correlation, how much of the fund's risk it drives.
+This one describes the holding by itself: how much its own price has moved
+around, with no reference to the fund at all. A high number means large
+swings, up and down; it says nothing about direction.
+
+## Where the numbers come from
+
+`holdings` for the fund's constituents, `price_frame` for each holding's own
+closes over the table's shared window (issue #101) — nothing else. No
+fund-level data is read at all.
+
+## How it is computed
+
+<Formula tex={String.raw`\sigma = \mathrm{stdev}(\text{scaled returns}) \times \sqrt{252}`} />
+
+`services.stats.volatility` computes this — each return first divided by the
+square root of the trading time its own gap covers, so a window spanning
+storage tiers (daily, then weekly, then monthly, issue #10) is not
+misreported. The same function the portfolio simulator's own Volatility
+metric uses on a portfolio's own series; this measurement calls it directly
+on one holding's series instead.
+
+<WorkedExample />
+
+## How it reads
+
+There is no universal "good" or "bad" volatility — a low number suits a
+reader wanting stability, a high one suits a reader deliberately seeking
+larger swings. It is most useful compared across holdings in the same fund,
+or against the fund's own volatility (the identity card's own figure).
+
+## Caveats
+
+Null with a reason, not zero, for a holding with fewer than two priced
+dates over the window — a two-day-old listing has a return but no
+dispersion to measure, and 0% would claim it was riskless rather than
+simply short.
