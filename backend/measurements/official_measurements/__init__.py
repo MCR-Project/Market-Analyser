@@ -2,8 +2,8 @@
 official_measurement — the built-in, first-party measurement plugins
 shipped with the app (correlation, % of ETF, value held, the
 fund-relation family added by issue #107, the holding's-own-price-
-history family added by issue #108, and the metadata/income family
-added by issue #109).
+history family added by issue #108, the metadata/income family added by
+issue #109, and the rolling correlation column added by issue #110).
 
 measurements/__init__.py combines OFFICIAL_MEASUREMENTS with
 addon_measurements.ADDON_MEASUREMENTS to build the full ALL_MEASUREMENTS
@@ -20,6 +20,7 @@ from measurements.official_measurements.market_cap import MarketCapMeasurement
 from measurements.official_measurements.max_drawdown import MaxDrawdownMeasurement
 from measurements.official_measurements.return_momentum import ReturnMomentumMeasurement
 from measurements.official_measurements.risk_contribution import RiskContributionMeasurement
+from measurements.official_measurements.rolling_correlation import RollingCorrelationMeasurement
 from measurements.official_measurements.tail_correlation import TailCorrelationMeasurement
 from measurements.official_measurements.value_held import ValueHeldMeasurement
 from measurements.official_measurements.volatility import VolatilityMeasurement
@@ -43,4 +44,7 @@ OFFICIAL_MEASUREMENTS = [
     MarketCapMeasurement(),
     CapWeightTiltMeasurement(),
     DividendIncomeMeasurement(),
+    # The path a holding's correlation to its fund took, not just its
+    # average over the window (issue #110).
+    RollingCorrelationMeasurement(),
 ]

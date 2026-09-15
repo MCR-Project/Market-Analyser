@@ -133,6 +133,30 @@ Spark-specific null case to implement.
 `run()` ties the three together and adds `per_ticker_mdx` alongside `per_ticker`
 (and `per_ticker_reason`, filtered down to actual nulls, when `compute` set one).
 
+**When the scalar genuinely isn't enough to draw the path** (issue #110's
+Rolling Correlation, the first official measurement to actually hit this):
+`run()`'s generic dispatch calls `render_cell(ticker, value, column_key)`
+with *only* `per_ticker[ticker]` — there is no second channel for a series
+`compute()` may have worked out along the way. A plugin needing one
+returns it as an extra, undocumented key in `compute()`'s own result dict
+(`rolling_correlation.py`'s `"_rolling_series"`) — `run()` never touches or
+strips keys it doesn't know about, so it survives untouched — and overrides
+`run()` itself to call `super().run(**params)` first (reusing its window
+resolution and reason-filtering exactly as every other plugin gets it for
+free), then pops that private key and rebuilds `per_ticker_mdx` from the
+real series instead of the generic one-scalar-at-a-time pass. `render_cell`
+still has to exist (the ABC requires it) and still has to produce something
+sensible on its own — `rolling_correlation.py`'s reconstructs an honest,
+if degenerate, two-point line straight from the scalar it *was* given,
+never a fabricated shape — since nothing stops it being called in
+isolation. Never reach for `self` to smuggle a series from `compute()` to
+`render_cell` instead: a plugin instance is one shared singleton serving
+every request (`measurements/__init__.py`'s `OFFICIAL_MEASUREMENTS`), and
+`registry.py`'s route handlers are plain `def`s, which Starlette runs in a
+threadpool — two concurrent requests for different ETFs really can
+interleave, and instance state one of them writes is state the other can
+read mid-request.
+
 ## Multiple columns from one plugin (issue #100)
 
 Upside and downside capture, a return and its own momentum, the two halves of a

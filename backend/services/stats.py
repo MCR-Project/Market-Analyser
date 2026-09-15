@@ -663,6 +663,75 @@ def tail_correlation(
     return {"value": round(correlation, PERCENT_DP), "granularity": granularity}
 
 
+def rolling_correlation(
+    asset_values: list[float], benchmark_values: list[float], dates: list[str], periods: int
+) -> dict:
+    """Pearson correlation of the asset's returns with the benchmark's,
+    computed separately over consecutive, non-overlapping blocks of
+    `periods` returns each, rather than once across the whole window
+    (issue #110) - the path a relationship actually took, not the single
+    number an average of it collapses to. A holding whose correlation
+    climbed from 0.3 to 0.9 over the window and one that fell from 0.9 to
+    0.3 both average 0.6, and they are opposite findings.
+
+    `periods` counts *paired returns*, not calendar days or dates - the
+    caller's own choice, stated on its own doc page, applied the same way
+    whether this stretch of the window happens to be daily, weekly or
+    monthly rows (issue #10): a block is "N returns", never "N days".
+
+    Blocks are counted back from the most recent return, so the last one
+    always ends on the window's own last date; only a leftover, oldest
+    partial block, if any, is dropped - the freshest block is never the
+    one sacrificed to an inexact division.
+
+    Built from the same raw, unscaled paired returns `tail_correlation`
+    above uses, not the trading-time-scaled ones `beta`/`r_squared` use -
+    this is about which periods moved together, not about comparing
+    dispersion across gaps of different lengths.
+
+    Returns `{"series": [...] | None, "change": ... | None,
+    "granularity": ...}`. `series` has one entry per full block, oldest
+    first, `None` for a block with too little variance in either series to
+    correlate at all. `change` is the last block's ρ less the first
+    block's - positive reads as "moving with the benchmark more than it
+    used to" - and is `None`, with `series` also `None`, whenever there
+    are fewer than two full blocks, or either the first or the last one
+    has no computable ρ of its own: a lone reading is not a path, and a
+    change needs both of its own ends.
+    """
+    pairs = _paired_returns(asset_values, benchmark_values, dates, scaled=False)
+    granularity = granularity_of(dates)
+    n_blocks = len(pairs) // periods
+    if n_blocks < 2:
+        return {"series": None, "change": None, "granularity": granularity}
+
+    # Drop the leftover, oldest partial block so every block kept is full
+    # and the most recent one still ends on the window's own last date.
+    trimmed = pairs[len(pairs) - n_blocks * periods:]
+
+    series = []
+    for i in range(n_blocks):
+        block = trimmed[i * periods:(i + 1) * periods]
+        asset_r = [a for a, _ in block]
+        bench_r = [b for _, b in block]
+        mean_a = sum(asset_r) / periods
+        mean_b = sum(bench_r) / periods
+        covariance = sum((a - mean_a) * (b - mean_b) for a, b in block) / (periods - 1)
+        variance_a = sum((a - mean_a) ** 2 for a in asset_r) / (periods - 1)
+        variance_b = sum((b - mean_b) ** 2 for b in bench_r) / (periods - 1)
+        if variance_a == 0 or variance_b == 0:
+            series.append(None)
+        else:
+            correlation = covariance / math.sqrt(variance_a * variance_b)
+            series.append(round(correlation, PERCENT_DP))
+
+    if series[0] is None or series[-1] is None:
+        return {"series": None, "change": None, "granularity": granularity}
+
+    change = round(series[-1] - series[0], PERCENT_DP)
+    return {"series": series, "change": change, "granularity": granularity}
+
+
 # ── Basket statistics (weights, and the risk they carry) ──────────────────────
 
 def herfindahl(weights: list[float]) -> float | None:

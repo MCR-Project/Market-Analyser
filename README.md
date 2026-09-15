@@ -145,9 +145,10 @@ example_stock: NVDA     # optional
 
 ρ alone says how tightly two things move together, and nothing about
 magnitude, about how much of the fund's own risk a holding actually drives,
-or about whether the relationship holds up on the days it matters. Six
-columns (issue #107) answer those questions instead, all official
-measurements next to `correlation.py`:
+about whether the relationship holds up on the days it matters, or about
+whether it is strengthening or fading. Seven columns — six from issue #107,
+plus Rolling Correlation from issue #110 — answer those questions instead,
+all official measurements next to `correlation.py`:
 
 - **Risk Contribution** — each holding's own share of the fund's variance
   (`wᵢ·Cov(rᵢ, r_fund) ÷ Var(r_fund)`), summing to 100% across the fund.
@@ -169,8 +170,22 @@ measurements next to `correlation.py`:
 - **Upside / Downside Capture** — one plugin, two columns: how much of the
   fund's own compounded return a holding captured over exactly the periods
   the fund rose, and over exactly the periods it fell.
+- **Correlation to Fund (Rolling)** — ρ computed separately over consecutive,
+  non-overlapping 30-return blocks across the window (30 is `services.stats`'
+  own `MIN_OVERLAPPING_RETURNS` — the bar this app already draws for "enough
+  returns to trust a correlation at all", reused as "how long one rolling
+  reading should span" rather than a second, unexplained number), instead of
+  once over the whole thing. An ordinary correlation is an average, and an
+  average hides its own history: a holding whose ρ climbed from 0.3 to 0.9
+  and one whose fell from 0.9 to 0.3 can both average 0.6 and be opposite
+  findings. The cell draws the resulting path with `<Spark>` (issue #106) —
+  the column this component exists for — while the column itself sorts and
+  filters by the *change*, the last block's ρ less the first's, since a path
+  needs a single number to rank by the same as any other column, and "is
+  this relationship strengthening or weakening" is a more useful question
+  than "what does it read right now".
 
-All five read a common benchmark, the fund's own weighted-return index
+All six read a common benchmark, the fund's own weighted-return index
 (`measurements/inputs/fund_index.py`, issue #107) — built once from
 whichever tracked holdings have a complete price history over the window,
 weights renormalised to sum to 100% so the untracked share isn't silently

@@ -692,6 +692,127 @@ class TailCorrelationTests(unittest.TestCase):
         self.assertIsNone(result["value"])
 
 
+# ── Rolling correlation (issue #110) ────────────────────────────────────────
+
+def _to_values(returns, start=100.0):
+    values = [start]
+    for r in returns:
+        values.append(values[-1] * (1 + r))
+    return values
+
+
+def _dated(n):
+    """n consecutive ISO dates, one return apart, so granularity is 'D'
+    and every gap is exactly one day - the shape of a real daily window."""
+    return [f"2020-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(n)]
+
+
+class RollingCorrelationTests(unittest.TestCase):
+    PERIODS = 30
+
+    def _rng(self, seed):
+        return random.Random(seed)
+
+    def test_a_holding_moving_toward_the_fund_reports_a_positive_change(self):
+        """Two 30-return blocks: the asset is uncorrelated with the
+        benchmark in the first and moves in exact lockstep in the second -
+        a holding that has started diversifying nothing it used to."""
+        rng = self._rng(1)
+        bench_returns = [rng.uniform(-0.03, 0.03) for _ in range(2 * self.PERIODS)]
+        early_asset = [rng.uniform(-0.03, 0.03) for _ in range(self.PERIODS)]
+        late_asset = bench_returns[self.PERIODS:]  # exact copy -> rho = 1
+        asset_returns = early_asset + late_asset
+
+        dates = _dated(2 * self.PERIODS + 1)
+        result = stats.rolling_correlation(
+            _to_values(asset_returns), _to_values(bench_returns), dates, self.PERIODS
+        )
+
+        self.assertEqual(len(result["series"]), 2)
+        self.assertAlmostEqual(result["series"][-1], 1.0, places=4)
+        self.assertIsNotNone(result["change"])
+        self.assertGreater(result["change"], 0)
+        self.assertAlmostEqual(result["change"], result["series"][-1] - result["series"][0], places=4)
+
+    def test_a_holding_moving_away_from_the_fund_reports_a_negative_change(self):
+        """The reverse of the above: lockstep early, uncorrelated late."""
+        rng = self._rng(2)
+        bench_returns = [rng.uniform(-0.03, 0.03) for _ in range(2 * self.PERIODS)]
+        early_asset = bench_returns[:self.PERIODS]  # exact copy -> rho = 1
+        late_asset = [rng.uniform(-0.03, 0.03) for _ in range(self.PERIODS)]
+        asset_returns = early_asset + late_asset
+
+        dates = _dated(2 * self.PERIODS + 1)
+        result = stats.rolling_correlation(
+            _to_values(asset_returns), _to_values(bench_returns), dates, self.PERIODS
+        )
+
+        self.assertAlmostEqual(result["series"][0], 1.0, places=4)
+        self.assertLess(result["change"], 0)
+
+    def test_series_length_matches_the_number_of_full_blocks(self):
+        rng = self._rng(3)
+        for n_blocks in (2, 3, 5):
+            with self.subTest(n_blocks=n_blocks):
+                returns = [rng.uniform(-0.02, 0.02) for _ in range(n_blocks * self.PERIODS)]
+                bench = [rng.uniform(-0.02, 0.02) for _ in range(n_blocks * self.PERIODS)]
+                dates = _dated(n_blocks * self.PERIODS + 1)
+                result = stats.rolling_correlation(
+                    _to_values(returns), _to_values(bench), dates, self.PERIODS
+                )
+                self.assertEqual(len(result["series"]), n_blocks)
+
+    def test_a_leftover_partial_block_is_dropped_from_the_oldest_end(self):
+        """65 returns with 30-period blocks makes two full blocks with 5
+        left over. Construct the asset so the oldest 5 returns (which
+        must be the ones dropped) are unrelated, the next 30 are exactly
+        anti-correlated with the benchmark, and the last 30 move in exact
+        lockstep with it. If the oldest returns were kept instead of
+        dropped, neither block would read as a clean +-1."""
+        rng = self._rng(4)
+        bench_returns = [rng.uniform(-0.03, 0.03) for _ in range(65)]
+        stale_prefix = [rng.uniform(-0.03, 0.03) for _ in range(5)]
+        anti_correlated_block = [-r for r in bench_returns[5:35]]
+        matched_block = bench_returns[35:]
+        asset_returns = stale_prefix + anti_correlated_block + matched_block
+
+        dates = _dated(66)
+        result = stats.rolling_correlation(
+            _to_values(asset_returns), _to_values(bench_returns), dates, self.PERIODS
+        )
+
+        self.assertEqual(len(result["series"]), 2)
+        self.assertAlmostEqual(result["series"][0], -1.0, places=4)
+        self.assertAlmostEqual(result["series"][1], 1.0, places=4)
+
+    def test_fewer_than_two_full_blocks_is_null(self):
+        rng = self._rng(5)
+        returns = [rng.uniform(-0.02, 0.02) for _ in range(self.PERIODS + 10)]
+        bench = [rng.uniform(-0.02, 0.02) for _ in range(self.PERIODS + 10)]
+        dates = _dated(self.PERIODS + 11)
+        result = stats.rolling_correlation(_to_values(returns), _to_values(bench), dates, self.PERIODS)
+        self.assertIsNone(result["series"])
+        self.assertIsNone(result["change"])
+
+    def test_no_variance_in_the_first_or_last_block_is_null(self):
+        """A flat run of returns (a holding that hasn't traded, or a
+        stretch with no price movement at all) has no variance for its
+        own block to correlate - null, not a change measured against a
+        block that cannot support one."""
+        rng = self._rng(6)
+        bench_returns = [rng.uniform(-0.02, 0.02) for _ in range(2 * self.PERIODS)]
+        flat_first_block = [0.0] * self.PERIODS
+        asset_returns = flat_first_block + bench_returns[self.PERIODS:]
+
+        dates = _dated(2 * self.PERIODS + 1)
+        result = stats.rolling_correlation(
+            _to_values(asset_returns), _to_values(bench_returns), dates, self.PERIODS
+        )
+
+        self.assertIsNone(result["series"])
+        self.assertIsNone(result["change"])
+
+
 # ── Idiosyncratic volatility reusing a precomputed R² (issue #107) ─────────
 
 class IdiosyncraticVolatilityReuseTests(unittest.TestCase):
