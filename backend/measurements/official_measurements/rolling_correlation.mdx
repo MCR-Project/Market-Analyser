@@ -1,0 +1,71 @@
+---
+title: Correlation to Fund (Rolling)
+summary: How a holding's correlation to its fund has moved over the window, not just what it averaged to.
+---
+
+## What it measures
+
+An ordinary correlation is one number for the whole window, and an average
+hides its own history. A holding whose correlation to the fund climbed from
+0.3 to 0.9 and one that fell from 0.9 to 0.3 can both average 0.6 — opposite
+findings wearing the same figure. This column shows the path instead: the
+holding's correlation to its fund's own weighted return, read separately
+over consecutive 30-return blocks across the window rather than once across
+all of it.
+
+## Where the numbers come from
+
+`holdings` for each ticker's weight, `price_frame` for closes, `fund_index`
+for the fund's own weighted-return series — the same benchmark Beta/R²/
+Idiosyncratic Volatility, Tail Correlation and the capture ratios use.
+
+## How it is computed
+
+<Formula tex={String.raw`\rho_k = \rho\big(r_i, r_{\text{fund}} \mid \text{block } k\big), \quad k = 1 \ldots n`} />
+
+The window's paired returns are split into consecutive, non-overlapping
+blocks of **30 returns each** — the same bar `MIN_OVERLAPPING_RETURNS`
+already draws elsewhere in this app for "enough returns to trust a
+correlation at all" (about six trading weeks), reused here as how long one
+rolling reading should span rather than a second, unexplained number.
+Blocks are counted back from the window's most recent return, so the last
+block always ends on the window's own last date; only a leftover, oldest
+partial block, if any, is dropped. Pearson correlation is computed
+separately within each block, on raw (unscaled) paired returns — the same
+kind Tail Correlation uses, since this is about which periods moved
+together, not about comparing dispersion across gaps of different lengths.
+
+**The column sorts and filters by the *change*, not by the most recent
+reading**: the last block's ρ less the first block's. A holding at 0.85 that
+was 0.5 three blocks ago sorts above a holding steady at 0.95 the whole
+window, because +0.35 is a bigger *move toward* the fund than 0 is — this
+column answers "is this relationship strengthening or weakening", not "what
+does it stand at right now".
+
+<WorkedExample />
+
+## How it reads
+
+The sparkline is the path; the number beside it is the last block's ρ less
+the first's. A rising line and a positive change mean the holding has been
+moving with the fund more than it used to over the window; a falling line
+and a negative change mean the reverse. A flat line near zero change means
+the relationship has been stable, whatever level it sits at.
+
+<Warning>
+A rising line is a description of the window shown, not a forecast. Nothing
+here predicts whether the trend continues, reverses, or was simply a
+coincidence of the periods this window happened to cover — change the
+window to see whether the same direction holds over a longer or shorter
+stretch.
+</Warning>
+
+## Caveats
+
+Null with a reason, not zero, whenever the window cannot support two full,
+comparable blocks of 30 returns each, or whenever the earliest or the
+latest block on its own had no variance to correlate — a short window (or a
+holding that only recently listed) can leave too little history for a
+"before" and "after" reading to exist at all, in which case there is no
+path to draw and no change to report, rather than a flat line implying a
+stability the window never actually demonstrated.

@@ -250,7 +250,32 @@ benchmark's own worst decile of periods by return, built from the same raw,
 unscaled paired returns `up_capture`/`down_capture` use rather than the
 trading-time-scaled ones `beta`/`r_squared` use — a tail is about which
 periods were worst by how much they moved, not about comparing dispersion
-across gaps of different lengths. `idiosyncratic_volatility` takes an
+across gaps of different lengths.
+
+`rolling_correlation` (issue #110) is the same raw-returns Pearson
+correlation split into consecutive, non-overlapping blocks of `periods`
+returns each instead of restricted to a slice — a *path* across the window
+rather than one number for all of it or for a tail of it. Blocks are
+counted back from the most recent return, so a leftover partial block, if
+any, is the *oldest* one dropped, never the freshest. Returns `{"series":
+[...] | None, "change": ..., "granularity": ...}` rather than the plain
+`{"value", "granularity"}` shape every other function here uses: `series`
+is one ρ per block, oldest first, and `change` — the last block's ρ less
+the first's — is the one number `measurements/official_measurements/
+rolling_correlation.py` actually sorts and filters the column by, the same
+"a path still needs a scalar to rank by" rule `<Spark>` cells always carry
+(issue #106). Both are `None` together whenever fewer than two full blocks
+fit, or either the first or the last one has no variance of its own to
+correlate — a lone reading is not a path, and a change needs both of its
+own ends. `periods` is required, not defaulted here: it is `measurements/
+official_measurements/rolling_correlation.py`'s own declared choice (30,
+reusing `config.MIN_OVERLAPPING_RETURNS`'s already-justified "about six
+trading weeks" bar for "enough returns to trust a correlation" as "how
+long one rolling reading should span"), stated on that plugin's own doc
+page rather than baked into this module the way `tail_correlation`'s
+`quantile` default is.
+
+`idiosyncratic_volatility` takes an
 optional `r_squared_result` (issue #107) so a caller that already computed
 a holding's own R² against the same benchmark — `fund_relation`'s own
 compute(), reporting both from one pass — can pass that result straight
