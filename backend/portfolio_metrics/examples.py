@@ -13,22 +13,31 @@ measurements/examples.py states: `simulate_portfolio` runs against
 override) exactly as `POST /api/portfolio/simulate` would, and the
 metric's own `value()` reads its figure back out of that real response -
 never a fabricated number standing in for one.
+
+A computed_from="etf_id" entry (issue #105) follows the same rule over a
+fund instead of a run: `metric.value(etf_id)` is called against the
+documented example ETF (`metric.example_etf`, or `config.
+DOCS_EXAMPLE_ETF`) exactly as the fund metrics card would, and a null
+result carries whatever `metric.reason(etf_id)` says - the etf_id
+counterpart to a run's own `metrics["reasons"]` entry, since there is no
+shared response here to read a reason out of.
 """
 
-from config import DOCS_EXAMPLE_PORTFOLIO
+from config import DOCS_EXAMPLE_ETF, DOCS_EXAMPLE_PORTFOLIO
 from services.portfolio import simulate_portfolio
 
 
 def build_example(metric) -> dict:
-    """Build the worked-example payload for one portfolio metric.
-
-    A computed_from="etf_id" entry (issue #105) has no run to simulate -
-    its own value() takes an etf_id directly - so this only echoes which
-    fund it would be shown against; #105 is what actually exercises that
-    path with a real metric.
-    """
+    """Build the worked-example payload for one portfolio metric."""
     if metric.computed_from != "run":
-        return {"etf_id": metric.example_etf, "value": None}
+        etf_id = metric.example_etf or DOCS_EXAMPLE_ETF
+        value = metric.value(etf_id)
+        reason = metric.reason(etf_id) if value is None else None
+        return {
+            "etf_id": etf_id,
+            "value": value,
+            **({"reason": reason} if reason else {}),
+        }
 
     portfolio = metric.example_portfolio or DOCS_EXAMPLE_PORTFOLIO
     run = simulate_portfolio(

@@ -9,8 +9,9 @@ decisions.
 | `cache.py` | Process-local TTL dict, one shared singleton |
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
-| `stats.py` | Return and risk arithmetic over a plain series — no I/O, shared by `portfolio.py` and every future single-holding metric |
+| `stats.py` | Return and risk arithmetic over a plain series — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
 | `portfolio.py` | The simulation — decides what series to hand `stats.py` and assembles its answers into a portfolio's shape, no I/O of its own beyond the reads it calls |
+| `fund_metrics.py` | The fund-level metrics card's arithmetic assembly (issue #105) — `portfolio.py`'s counterpart for a fund's own basket rather than a simulated run: decides what to hand `stats.py`, assembles the answer, no arithmetic of its own |
 
 ## The pattern every `market_data` function follows
 
@@ -193,7 +194,8 @@ matters, a list of ISO dates the same length): no I/O, and no imports from
 `market_data`, `supabase_client` or `yfinance` — that is what lets a future
 single-holding measurement call it directly instead of reaching past
 `services/market_data` the way `backend/CLAUDE.md`'s layering table forbids
-(issue #98). `portfolio.py` is its first and, so far, only caller.
+(issue #98). `portfolio.py` was its first caller; `fund_metrics.py` (issue
+#105) is its second.
 
 The module docstring states the conventions once — **a year is 365.25 days;
 volatility (and anything built from the same scaled returns — downside
@@ -212,11 +214,17 @@ alongside their value; CAGR does not, because the entire point of counting
 elapsed days instead of rows is that its answer must not depend on how
 finely the window was sampled.
 
-`herfindahl`/`effective_n` (concentration of a set of weights) and
+`herfindahl`/`effective_n` (concentration of a set of weights),
 `risk_contribution` (each holding's share of portfolio variance, an Euler
-decomposition) are the two exceptions to the "returns a value plus its
-granularity" shape: the first two have no time dimension at all, and the
-third already returns one figure per ticker.
+decomposition) and `diversification_ratio` (issue #105 — the weighted
+average of a basket's own holding volatilities over its actual, realised
+one) are exceptions to the "returns a value plus its granularity" shape:
+the first two have no time dimension at all, `risk_contribution` already
+returns one figure per ticker, and `diversification_ratio` returns one
+bare number. `risk_contribution` and `diversification_ratio` share their
+alignment step (`_aligned_covariance`, private) so both are always read
+off the exact same covariance matrix for a given basket and window,
+rather than each aligning it independently and happening to agree.
 
 A figure a series cannot support is `None` everywhere in this module, never
 0 — a two-row series has a return but no volatility, and reporting 0 would
@@ -278,3 +286,38 @@ CPU cost per request from a caller who has proven nothing about who they are.
 rounds each holding's value and sums the total from those rounded parts, so a
 stacked chart's bands add up to exactly the total line drawn above them —
 computing the total independently would leave them a cent apart.
+
+## `fund_metrics.py` — the fund card (issue #105)
+
+`compute_fund_metrics(etf_id)` is `portfolio.py`'s counterpart for a
+fund's own basket instead of a simulated run: it decides which series to
+hand `stats.py` and assembles the result into the fund's shape —
+`trackedWeightCoverage`, `diversificationRatio`, `top5VarianceShare`,
+plus a `reasons` entry for whichever of the latter two came back null.
+No arithmetic of its own; `stats.diversification_ratio` and
+`stats.risk_contribution` own all of it.
+
+**Only a holding priced for every date in the window joins the joint
+covariance matrix.** This is the one place this module's read pattern
+deliberately differs from the correlation matrix's own
+(`_correlation_summary` above): a pairwise correlation can lean on
+pandas' `min_periods` and let each pair share whatever history it has in
+common, because it is computed one pair at a time. A basket's variance
+decomposition needs one covariance matrix built from every holding's
+returns aligned to the *same* stretch of dates at once — narrowing the
+whole window to whatever the fund's newest holding has traded would
+silently shrink a year-old fund's window to a few weeks the moment it
+added one position. A holding with any gap over the window is excluded
+from `diversificationRatio`/`top5VarianceShare` instead; it still counts
+toward `trackedWeightCoverage`, which needs no shared window at all and
+is never null.
+
+Cached by `services.cache`, keyed on `etf_id` alone at
+`CACHE_TTL_SECONDS` — the same tier the price series and correlation
+matrix it shares a window with already use. This is what keeps the three
+`computed_from="etf_id"` portfolio-metric classes
+(`portfolio_metrics/official_metrics/diversification_ratio.py` and its
+two siblings), each independently calling this once per `value()`/
+`reason()`, from repeating the same holdings/price read and covariance
+arithmetic three times over for one `GET /api/portfolio-metrics/{etf_id}`
+request.

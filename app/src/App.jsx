@@ -8,6 +8,8 @@
  *  ┌────────────────────────────────────────────┐
  *  │ EtfDashboard  (identity · sector · chart)  │
  *  ├────────────────────────────────────────────┤
+ *  │ FundMetricsCard (diversification, etc.)    │
+ *  ├────────────────────────────────────────────┤
  *  │ ViewTabs + per-view toolbar                │
  *  ├────────────────────────────────────────────┤
  *  │ TableView: Metrics button + search + table │
@@ -15,7 +17,7 @@
  *  │ MatrixView + DetailAside                   │
  *  │ NetworkView + DetailAside                  │
  *  └────────────────────────────────────────────┘
- *  Overlays: StockPopup, MeasurementPicker
+ *  Overlays: StockPopup, MeasurementPicker, MetricsPicker (fund metrics)
  *  (EtfDashboard owns its own ETF-picker overlay internally)
  *
  * Mounted by main.jsx at /etf/:etfId and /etf/:etfId/:view — the URL is
@@ -28,13 +30,16 @@ import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
 import { useMeasurements } from './hooks/useMeasurements';
 import { useMeasurementWindow } from './hooks/useMeasurementWindow';
+import { useFundMetrics } from './hooks/useFundMetrics';
 import { usePublishLiveStatus } from './hooks/useLiveStatus';
 import { EtfDashboard } from './components/etf/EtfDashboard';
+import { FundMetricsCard } from './components/etf/FundMetricsCard';
 import { StockPopup } from './components/stock/StockPopup';
 import { ViewTabs } from './components/ui/ViewTabs';
 import { Loading } from './components/ui/Loading';
 import { ErrorState } from './components/ui/ErrorState';
 import { MeasurementPicker } from './components/ui/MeasurementPicker';
+import { MetricsPicker } from './components/ui/MetricsPicker';
 import { describeFetchError } from './utils/errorCopy';
 import { TableView } from './views/TableView';
 import { MatrixView } from './views/MatrixView';
@@ -54,6 +59,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [stockPopup, setStockPopup] = useState(null);
   const [measurePickerOpen, setMeasurePickerOpen] = useState(false);
+  const [fundMetricsPickerOpen, setFundMetricsPickerOpen] = useState(false);
 
   // This copy is unrelated to NetworkView's own edge-ρ threshold — it's
   // only used for the Header's live badge and StockPopup's peer
@@ -61,6 +67,7 @@ export default function App() {
   const corrData = useLiveCorrelation(etfId);
   const { window: measurementWindow, setWindow: setMeasurementWindow } = useMeasurementWindow();
   const measurements = useMeasurements(etfId, measurementWindow);
+  const fundMetrics = useFundMetrics(etfId);
 
   // The shared Header shows the connectivity badge, but this is the page
   // that knows whether anything actually loaded.
@@ -146,6 +153,7 @@ export default function App() {
         ) : (
           <>
             <EtfDashboard />
+            <FundMetricsCard fundMetrics={fundMetrics} onOpenPicker={() => setFundMetricsPickerOpen(true)} />
 
             {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
             <ViewTabs tabs={tabs} active={activeView} onSelect={selectView} />
@@ -159,6 +167,20 @@ export default function App() {
 
       {measurePickerOpen && (
         <MeasurementPicker manifest={measurements.manifest} activeIds={measurements.activeIds} onToggle={measurements.toggle} onClose={() => setMeasurePickerOpen(false)} />
+      )}
+
+      {fundMetricsPickerOpen && (
+        <MetricsPicker
+          tileMetrics={fundMetrics.tileMetrics}
+          families={fundMetrics.families}
+          activeIds={fundMetrics.activeIds}
+          onToggle={fundMetrics.toggle}
+          onClose={() => setFundMetricsPickerOpen(false)}
+          eyebrow="FUND METRICS"
+          subtitle="Select which tiles to show on the fund metrics card"
+          ariaLabel="Fund metrics"
+          emptyText="No fund metrics available — is the backend running?"
+        />
       )}
     </>
   );

@@ -25,7 +25,7 @@ rate_limit.py            per-client request limiting on /api/* — see "Errors a
 api/routes.py            every /api endpoint except the measurement/portfolio-metric ones
 services/                data access and arithmetic — see services/CLAUDE.md
 measurements/            the column plugin system — see measurements/CLAUDE.md
-portfolio_metrics/       the portfolio summary tile registry (issue #104), mirroring measurements/
+portfolio_metrics/       the portfolio summary tile registry (issue #104), mirroring measurements/ — also holds the fund-level metrics card's registry entries (issue #105)
 scripts/                 the data pipeline — see scripts/CLAUDE.md
 sql/                     migrations already applied, kept for review and history
 tests/                   pytest suite for everything above

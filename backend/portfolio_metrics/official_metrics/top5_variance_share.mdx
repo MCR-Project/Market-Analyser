@@ -1,0 +1,45 @@
+---
+title: Top 5 Variance Share
+summary: How much of the fund's own risk its five biggest risk contributors account for — not necessarily its five biggest positions.
+---
+
+## What it measures
+
+Not every holding contributes risk in proportion to its weight. A small,
+volatile position that moves opposite the rest of the basket can add
+almost nothing to the fund's own swings; a merely mid-sized one that
+moves with everything else can dominate them. This figure sums the five
+largest of those actual contributions — each holding's own share of the
+fund's total variance — rather than the five largest positions by
+weight.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{share} = \sum_{i \in \text{top 5}} \frac{w_i \cdot \text{marginal}_i}{\sigma^2_{\text{fund}}}`} />
+
+Each holding's share comes from `services.stats.risk_contribution` — the
+Euler decomposition of variance, weight times marginal contribution to
+variance, over the fund's total variance — computed from the same joint
+covariance matrix Diversification Ratio reads. The five largest of those
+shares are summed here; every tracked holding's share still sums to 100%
+across the whole fund, this is just the top slice of it.
+
+<WorkedExample />
+
+## How it reads
+
+A high share means the fund's risk is concentrated in a handful of
+holdings, even if its weight looks spread across many more — the kind of
+concentration a plain "top 5 by weight" figure can miss entirely when
+the biggest positions happen to be the calmer ones. A low share means
+the fund's risk is genuinely distributed across more than a handful of
+names.
+
+## Caveats
+
+This measures risk concentration, not weight concentration — it can be
+high even in a fund whose top five *positions* are unremarkable, if
+those happen to be the five holdings actually driving its swings. Like
+Diversification Ratio, it is computed only from the fund's tracked
+holdings and the window they share; see Tracked Weight Coverage for how
+much of the fund that excludes.

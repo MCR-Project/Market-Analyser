@@ -29,7 +29,10 @@ Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar
 `ComparisonChart`, `PortfolioSummary`, `ComparisonSummary`, `WindowControls`,
 `BenchmarkBar`, and the dialogs/notices (`CreatePortfolioDialog`,
 `ApplyWeightsDialog`, `DeletePortfolioDialog`, `SharePortfolioDialog`,
-`SharedNotice`, `StorageNotice`, `MetricsPicker`).
+`SharedNotice`, `StorageNotice`). `MetricsPicker`, the tile enable/disable
+dialog, lives in `components/ui/` (issue #105 moved it there once the ETF
+dashboard's fund metrics card needed the same dialog PortfolioSummary
+already had).
 
 ## Three principles
 
@@ -167,6 +170,17 @@ shape fits one of those six formats.
   an empty result falls back to the registry's own default set.
 - `MetricsPicker` (in "Dialogs" below) is the enable/disable dialog — it
   only ever lists `tileMetrics`, grouped by family.
+- **The registry also holds three `computed_from="etf_id"` entries**
+  (diversification ratio, top-5 variance share, tracked weight coverage
+  — issue #105), fetched from the same `/api/portfolio-metrics` manifest
+  but filtered out of `tileMetrics` here — they have no value in a run's
+  own response, so offering them in this dialog would toggle on a tile
+  that can only ever show a dash. The fund metrics card
+  (`app/src/components/etf/FundMetricsCard.jsx`, `hooks/useFundMetrics.js`)
+  is the independent consumer that filters the same manifest down to
+  those three instead. "Different metrics, one mechanism" is #105's own
+  phrase for it — one backend registry, two frontend consumers that each
+  filter it to the half they can actually use.
 
 ## Comparison
 
@@ -261,10 +275,14 @@ total before and after.
 writes fail for reasons unrelated to this app (permission, an insecure origin),
 and a button reporting success it did not have is worse than no button.
 
-`MetricsPicker` (issue #104) mirrors `app/src/components/ui/MeasurementPicker.jsx`,
-simplified: a portfolio metric never groups several tiles under one plugin, so
+`MetricsPicker` (issue #104; now `components/ui/MetricsPicker.jsx` — issue
+#105 moved it there once the ETF dashboard's fund metrics card needed the
+same dialog) mirrors `MeasurementPicker.jsx` in that same directory,
+simplified: a metric never groups several tiles under one plugin, so
 every row is a plain toggle — no schema preview, no multi-column grouping —
 grouped by family instead, with the group header read off the manifest's
 `families` the same way `PortfolioSummary`'s own row headers are. It stays
 available on a read-only (shared) portfolio, unlike the write-action buttons
 beside it: choosing which tiles to look at is a view preference, not a write.
+Its `eyebrow`/`subtitle`/`ariaLabel`/`emptyText` props default to this
+page's own copy; the fund metrics card passes its own.

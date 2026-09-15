@@ -193,6 +193,13 @@ export const api = {
   getPortfolioMetricExample: (id, opts = {}) =>
     fetchJson(`/portfolio-metric-docs/${encodeURIComponent(id)}/example`, opts),
 
+  // Fund-level metric values (issue #105) — the computed_from="etf_id"
+  // entries in that same registry, scoped by fund rather than by run.
+  // The manifest itself is listPortfolioMetrics above; this is only the
+  // per-fund values/reasons.
+  getFundMetrics: (etfId, opts = {}) =>
+    fetchJson(`/portfolio-metrics/${encodeURIComponent(etfId)}`, opts),
+
   // Measurement plugin system
   listMeasurements: (opts = {}) => fetchJson('/measurements', opts),
 

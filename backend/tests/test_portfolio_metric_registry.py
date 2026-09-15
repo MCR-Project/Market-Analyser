@@ -51,6 +51,7 @@ EXPECTED_IDS = [
     "finalValue", "totalReturn", "cagr", "volatility", "maxDrawdown",
     "contributed", "totalInvested", "gain", "moneyWeightedReturn",
     "dividendIncome", "dividendYield", "incomeUnknownFor",
+    "diversificationRatio", "top5VarianceShare", "trackedWeightCoverage",
 ]
 
 
@@ -118,7 +119,7 @@ class ManifestShapeTests(unittest.TestCase):
             self.assertEqual(manifest["family"], "dividend")
 
     def test_families_are_declared_data_not_frontend_layout(self):
-        for key in ("portfolio", "account"):
+        for key in ("portfolio", "account", "diversification", "coverage"):
             self.assertIn("label", FAMILIES[key])
             self.assertIn("note", FAMILIES[key])
 

@@ -56,7 +56,7 @@ import { PortfolioChart } from './PortfolioChart';
 import { PortfolioSummary } from './PortfolioSummary';
 import { HoldingsTable } from './HoldingsTable';
 import { WindowControls } from './WindowControls';
-import { MetricsPicker } from './MetricsPicker';
+import { MetricsPicker } from '../ui/MetricsPicker';
 
 const CURRENCY = new Intl.NumberFormat('en-US', {
   style: 'currency',

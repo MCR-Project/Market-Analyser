@@ -15,6 +15,14 @@ only a manifest and a pair of documentation endpoints.
     definitions themselves (label + note), so `PortfolioSummary.jsx`'s two
     row headers are read off this rather than hardcoded (issue #104's own
     decision).
+  - `GET /api/portfolio-metrics/{etf_id}` — the fund-level counterpart to
+    a run's own response (issue #105): the real value of every
+    computed_from="etf_id" metric for one fund, plus a reason for each
+    one that came back null. There is no per-metric route here either,
+    for the same reason there is none for a "run" metric — every
+    computed_from="etf_id" metric shipped today reads its figure out of
+    the one fund-level computation `services.fund_metrics.
+    compute_fund_metrics` already does.
   - `GET /api/portfolio-metric-docs/{metric_id}` — parsed frontmatter + raw
     MDX body of the .mdx shipped next to the metric.
   - `GET /api/portfolio-metric-docs/{metric_id}/example` — the worked
@@ -46,6 +54,42 @@ def list_portfolio_metrics():
         "metrics": [m.manifest() for m in ALL_METRICS],
         "families": FAMILIES,
     }
+
+
+@metric_router.get(
+    "/portfolio-metrics/{etf_id}",
+    summary="Fund-level metric values for one ETF",
+    description=(
+        "Returns the real value of every computed_from=\"etf_id\" "
+        "portfolio metric for one fund - the fund-level counterpart to "
+        "POST /api/portfolio/simulate's response, which every "
+        "computed_from=\"run\" metric already reads its own value out of."
+    ),
+    tags=["portfolio-metrics"],
+)
+def get_fund_metrics(etf_id: str):
+    """One fund, every fund-level metric, one read.
+
+    Deliberately not one route per metric, the same reason a "run"
+    metric has none: every computed_from="etf_id" metric shipped today
+    is a thin read of `services.fund_metrics.compute_fund_metrics`,
+    itself cached by etf_id, so calling each metric's own `value()`/
+    `reason()` here costs nothing beyond the first.
+
+    A `SymbolNotFound`/`DataUnavailable` from resolving the fund is
+    deliberately not caught: main.py maps them onto 404/503, the same
+    contract every other etf_id-scoped route in this app honours.
+    """
+    fund_metrics = [m for m in ALL_METRICS if m.computed_from == "etf_id"]
+    values: dict = {}
+    reasons: dict = {}
+    for m in fund_metrics:
+        values[m.id] = m.value(etf_id)
+        if values[m.id] is None:
+            reason = m.reason(etf_id)
+            if reason is not None:
+                reasons[m.id] = reason
+    return {"etfId": etf_id.upper(), "values": values, "reasons": reasons}
 
 
 @metric_router.get(
