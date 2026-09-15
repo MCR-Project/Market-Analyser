@@ -1,0 +1,69 @@
+---
+title: Beta, R² and Idiosyncratic Volatility
+summary: How sensitive a holding is to the fund, how much of its own movement the fund explains, and how much it does not.
+---
+
+## What it measures
+
+Three related answers to "how does this holding move relative to its fund",
+each isolating a different part of the question:
+
+- **Beta** — how much the holding tends to move for each 1% the fund moves.
+  Above 1 means more sensitive than the fund itself; below 1, less; negative
+  means it tends to move the opposite way.
+- **R²** — how much of the holding's own variance the fund's movement
+  explains, from 0 (no linear relationship) to 1 (moves in lockstep, up to a
+  scale factor set by beta).
+- **Idiosyncratic volatility** — the annualised volatility left over once
+  the fund-explained part is removed. A high-beta holding with a low R² can
+  still carry a lot of risk that has nothing to do with the fund at all.
+
+## Where the numbers come from
+
+`holdings` for each ticker's weight, `price_frame` for closes, `fund_index`
+for the fund's own weighted-return series (issue #107) — the "r_fund" every
+holding here is measured against, built once from the fund's tracked
+holdings with a complete price history over the table's shared window.
+
+## How it is computed
+
+<Formula tex={String.raw`\beta_i = \frac{\mathrm{Cov}(r_i, r_{\text{fund}})}{\mathrm{Var}(r_{\text{fund}})}`} />
+
+<Formula tex={String.raw`R^2_i = \rho(r_i, r_{\text{fund}})^2`} />
+
+<Formula tex={String.raw`\sigma_{i,\text{idio}} = \sigma_i \sqrt{1 - R^2_i}`} />
+
+R² and idiosyncratic volatility are computed from the **same** correlation
+in one pass — `services.stats.idiosyncratic_volatility` accepts the already-
+computed R² result directly rather than measuring the relationship to the
+fund twice.
+
+<WorkedExample />
+
+## How it reads
+
+| Beta | R² | Reading |
+| --- | --- | --- |
+| ≈ 1 | high | Moves with the fund, roughly like an average constituent |
+| > 1 | high | Amplifies the fund's moves, and that's most of what it does |
+| any | low | Its own story — the fund explains little of what it does |
+
+A fund priced against itself — beta and R² of the fund's own index against
+itself — is the sanity check this column's own tests are built on: both
+report exactly 1, and idiosyncratic volatility exactly 0.
+
+## Caveats
+
+Only holdings priced for every date in the window join the fund index and
+can be measured against it — see `fund_index`'s own description. Idiosyncratic
+volatility can never exceed a holding's own total volatility by construction
+(`√(1 − R²) ≤ 1`); it does not, however, say the fund-explained part is
+"safe" — beta captures how much of the fund's own risk it inherits, not
+whether that risk was small.
+
+<Warning>
+Beta and R² describe a **linear** relationship over the window shown. A
+holding that tracks the fund closely in calm periods and diverges sharply in
+stressed ones can show a deceptively ordinary beta and R² here — Tail
+Correlation is the column built for exactly that question.
+</Warning>

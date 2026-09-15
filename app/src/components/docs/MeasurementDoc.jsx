@@ -15,17 +15,27 @@
  *
  * <WorkedExample /> is appended automatically unless the doc placed it
  * itself, so an author gets it for free but can position it deliberately.
+ *
+ * `columns` (issue #107) is every manifest row this plugin provides — one
+ * for a single-column measurement, several for one declaring `columns`
+ * (issue #100; first shipped for real by #107's fund-relation and
+ * capture-ratio plugins). `manifest` itself (identity fields: name,
+ * description, route, schemas — identical across a plugin's own columns)
+ * still drives the header and the doc/worked-example fetch; only "In the
+ * table" below needs the full list, since column header, filtering and
+ * default-on differ per column.
  */
 import { memo } from 'react';
 import { DocMdx } from './DocMdx';
 import { WorkedExample } from './WorkedExample';
 
-export const MeasurementDoc = memo(function MeasurementDoc({ manifest, doc }) {
+export const MeasurementDoc = memo(function MeasurementDoc({ manifest, columns, doc }) {
   const frontmatter = doc?.frontmatter || {};
   const title = frontmatter.title || manifest?.name || doc?.id;
   const summary = frontmatter.summary || manifest?.description;
   const mdx = doc?.mdx || null;
   const placesItsOwnExample = !!mdx && mdx.includes('<WorkedExample');
+  const resolvedColumns = columns?.length ? columns : (manifest ? [manifest] : []);
 
   return (
     <article className="max-w-[760px] w-full">
@@ -35,7 +45,9 @@ export const MeasurementDoc = memo(function MeasurementDoc({ manifest, doc }) {
             {doc?.origin === 'addon' ? 'Plugged-in' : 'Official'}
           </span>
           {manifest?.id && (
-            <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)]">{manifest.id}</span>
+            <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)]">
+              {manifest.measurement_id ?? manifest.id}
+            </span>
           )}
         </div>
         <h1 className="text-[28px] font-extrabold text-[var(--fg)] tracking-tight m-0">{title}</h1>
@@ -53,26 +65,49 @@ export const MeasurementDoc = memo(function MeasurementDoc({ manifest, doc }) {
 
       {!placesItsOwnExample && <WorkedExample measurementId={doc?.id} />}
 
-      {manifest && <ReferencePanels manifest={manifest} />}
+      {manifest && <ReferencePanels manifest={manifest} columns={resolvedColumns} />}
     </article>
   );
 });
 
 // ── Reference panels, derived entirely from the manifest ─────────────────
 
-const ReferencePanels = memo(function ReferencePanels({ manifest }) {
+const ReferencePanels = memo(function ReferencePanels({ manifest, columns }) {
+  const multiColumn = columns.length > 1;
+
   return (
     <>
       <Panel title="In the table">
-        <Rows
-          rows={[
-            ['Column header', manifest.column_label],
-            ['Shown by default', manifest.default_enabled ? 'Yes' : 'No — enable it in Metrics'],
-            ['Sorting', describeSort(manifest)],
-            ['Filtering', describeFilter(manifest)],
-            ['Window', describeWindow(manifest)],
-          ]}
-        />
+        {multiColumn ? (
+          <div className="flex flex-col gap-4">
+            {columns.map(col => (
+              <div key={col.id} className="border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden">
+                <div className="px-3 py-2 bg-[var(--bg-2)] border-b border-[var(--border)] font-[var(--font-mono)] text-[12px] font-bold text-[var(--fg)]">
+                  {col.column_label}
+                </div>
+                <Rows
+                  rows={[
+                    ['Shown by default', col.default_enabled ? 'Yes' : 'No — enable it in Metrics'],
+                    ['Sorting', describeSort(col)],
+                    ['Filtering', describeFilter(col)],
+                  ]}
+                  bare
+                />
+              </div>
+            ))}
+            <Rows rows={[['Window', describeWindow(manifest)]]} />
+          </div>
+        ) : (
+          <Rows
+            rows={[
+              ['Column header', manifest.column_label],
+              ['Shown by default', manifest.default_enabled ? 'Yes' : 'No — enable it in Metrics'],
+              ['Sorting', describeSort(manifest)],
+              ['Filtering', describeFilter(manifest)],
+              ['Window', describeWindow(manifest)],
+            ]}
+          />
+        )}
       </Panel>
 
       <Panel title="Inputs and outputs">
@@ -184,9 +219,12 @@ const Panel = memo(function Panel({ title, children }) {
   );
 });
 
-const Rows = memo(function Rows({ rows }) {
+/** `bare` drops the border/radius wrapper for a Rows table nested inside
+ *  another bordered box (issue #107's per-column table in ReferencePanels
+ *  above) — the parent's own border is enough. */
+const Rows = memo(function Rows({ rows, bare = false }) {
   return (
-    <div className="corr-scroll overflow-x-auto border border-[var(--border)] rounded-[var(--radius-md)]">
+    <div className={bare ? 'corr-scroll overflow-x-auto' : 'corr-scroll overflow-x-auto border border-[var(--border)] rounded-[var(--radius-md)]'}>
       <table className="w-full border-collapse text-[13px]">
         <tbody>
           {rows.filter(([, v]) => v != null && v !== '').map(([key, value]) => (

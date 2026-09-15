@@ -24,6 +24,15 @@ the page can say so rather than implying it is showing everything.
 Nothing here fetches anything the dashboard doesn't already fetch, so it
 rides the same caches in services.market_data — a doc page view costs no
 upstream requests that a normal page view wouldn't.
+
+**A multi-column plugin (issue #100) needs its own branch** (issue
+#107 is the first to actually exercise it — no official measurement
+declared `columns` before it). `run()`'s own `per_ticker`/
+`per_ticker_mdx`/`per_ticker_reason` nest one level deeper by column key
+for such a plugin; a worked example for it nests the same way rather
+than flattening onto the single-column shape, and additionally carries
+`columns` (the plugin's `resolved_columns`, key + label only) so a doc
+page knows there is more than one series to show per ticker at all.
 """
 
 from measurements.docs import resolve_examples
@@ -51,22 +60,16 @@ def build_example(measurement, frontmatter: dict | None = None) -> dict:
     all_tickers = [row[0] for row in holdings]
 
     result = measurement.run(etf_id=etf_id)
-    per_ticker = result.get("per_ticker", {}) or {}
-    per_ticker_mdx = result.get("per_ticker_mdx", {}) or {}
-    per_ticker_reason = result.get("per_ticker_reason") or {}
+    columns = measurement.resolved_columns
+    multi_column = len(columns) > 1
 
-    sample_tickers = _pick_sample_tickers(all_tickers, per_ticker, per_ticker_reason, example_stock)
+    if multi_column:
+        example = _build_multi_column_result(measurement, columns, result, all_tickers, example_stock)
+    else:
+        example = _build_single_column_result(result, all_tickers, example_stock)
 
-    example = {
-        "etf_id": etf_id,
-        "example_stock": example_stock if example_stock in sample_tickers else None,
-        "tickers": sample_tickers,
-        "inputs": _sample_inputs(measurement, etf_id, all_tickers, sample_tickers),
-        "per_ticker": {t: per_ticker.get(t) for t in sample_tickers},
-        "per_ticker_mdx": {t: per_ticker_mdx.get(t) for t in sample_tickers},
-        "truncated": len(per_ticker) > len(sample_tickers),
-        "total_tickers": len(per_ticker) or len(all_tickers),
-    }
+    example["etf_id"] = etf_id
+    example["inputs"] = _sample_inputs(measurement, etf_id, all_tickers, example["tickers"])
     # The window this example was actually computed over (issue #101) -
     # run()'s own default, since a worked example is never wired to the
     # table's shared control. Left out entirely for a plugin with no
@@ -74,6 +77,24 @@ def build_example(measurement, frontmatter: dict | None = None) -> dict:
     if "window" in result:
         example["window"] = result["window"]
         example["window_label"] = measurement.window_label(result["window"])
+    return example
+
+
+def _build_single_column_result(result: dict, all_tickers: list[str], example_stock: str) -> dict:
+    per_ticker = result.get("per_ticker", {}) or {}
+    per_ticker_mdx = result.get("per_ticker_mdx", {}) or {}
+    per_ticker_reason = result.get("per_ticker_reason") or {}
+
+    sample_tickers = _pick_sample_tickers(all_tickers, per_ticker, per_ticker_reason, example_stock)
+
+    example = {
+        "example_stock": example_stock if example_stock in sample_tickers else None,
+        "tickers": sample_tickers,
+        "per_ticker": {t: per_ticker.get(t) for t in sample_tickers},
+        "per_ticker_mdx": {t: per_ticker_mdx.get(t) for t in sample_tickers},
+        "truncated": len(per_ticker) > len(sample_tickers),
+        "total_tickers": len(per_ticker) or len(all_tickers),
+    }
     # Left out entirely when nothing in the sample has one (issue #99),
     # the same way run() leaves the key off a measurement that never sets
     # it — a doc page for a measurement with no reasons to show gets
@@ -82,6 +103,65 @@ def build_example(measurement, frontmatter: dict | None = None) -> dict:
         example["per_ticker_reason"] = {
             t: per_ticker_reason[t] for t in sample_tickers if t in per_ticker_reason
         }
+    return example
+
+
+def _build_multi_column_result(measurement, columns, result, all_tickers, example_stock) -> dict:
+    """The nested counterpart of `_build_single_column_result` for a
+    plugin declaring several columns (issue #100), exercised for real
+    for the first time by issue #107's fund-relation and capture-ratio
+    plugins.
+
+    `per_ticker`/`per_ticker_mdx`/`per_ticker_reason` are keyed by column
+    first, exactly matching `run()`'s own nesting for such a plugin,
+    rather than flattened onto the single-column shape — a ticker's beta
+    and its R² are different series, not one value with two names. Which
+    tickers make the sample is still decided once, across every column: a
+    ticker earns its row if *any* column has a real value or a reason for
+    it, the same "nothing to show, skip it" rule the single-column path
+    applies to its one column.
+    """
+    keys = [c["key"] for c in columns]
+    per_ticker_by_col = result.get("per_ticker", {}) or {}
+    per_ticker_mdx_by_col = result.get("per_ticker_mdx", {}) or {}
+    per_ticker_reason_by_col = result.get("per_ticker_reason") or {}
+
+    combined_values, combined_reasons = {}, {}
+    for key in keys:
+        for t, v in (per_ticker_by_col.get(key) or {}).items():
+            if v is not None:
+                combined_values[t] = v
+        for t, r in (per_ticker_reason_by_col.get(key) or {}).items():
+            combined_reasons[t] = r
+
+    sample_tickers = _pick_sample_tickers(all_tickers, combined_values, combined_reasons, example_stock)
+
+    example = {
+        "example_stock": example_stock if example_stock in sample_tickers else None,
+        "tickers": sample_tickers,
+        "columns": [{"key": c["key"], "label": c["label"]} for c in columns],
+        "per_ticker": {
+            key: {t: (per_ticker_by_col.get(key) or {}).get(t) for t in sample_tickers}
+            for key in keys
+        },
+        "per_ticker_mdx": {
+            key: {t: (per_ticker_mdx_by_col.get(key) or {}).get(t) for t in sample_tickers}
+            for key in keys
+        },
+        "truncated": len(all_tickers) > len(sample_tickers),
+        "total_tickers": len(all_tickers),
+    }
+    per_ticker_reason = {}
+    for key in keys:
+        col_reasons = {
+            t: (per_ticker_reason_by_col.get(key) or {})[t]
+            for t in sample_tickers
+            if t in (per_ticker_reason_by_col.get(key) or {})
+        }
+        if col_reasons:
+            per_ticker_reason[key] = col_reasons
+    if per_ticker_reason:
+        example["per_ticker_reason"] = per_ticker_reason
     return example
 
 

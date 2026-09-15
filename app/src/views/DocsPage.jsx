@@ -65,21 +65,46 @@ export function DocsPage() {
   ], [measurementData, metricData]);
   const families = metricData?.families || {};
 
-  const entry = manifest.find(m => m.id === measurementId) || null;
+  // Exact id match first (what DocsSidebar links to: a portfolio metric's
+  // own id, or a single-column measurement's), falling back to
+  // measurement_id (what DocLink in the table links to for a measurement
+  // — the plugin's own id, not any one column's namespaced one). A
+  // multi-column plugin (issue #100) has no manifest row whose `id`
+  // equals its own plugin id at all — only namespaced per-column ones
+  // (`fund_relation.beta`, …) — so without this fallback, the exact link
+  // every column header's "?" actually sends a reader to would 404.
+  const entry = manifest.find(m => m.id === measurementId)
+    || manifest.find(m => m.measurement_id === measurementId)
+    || null;
   const isMetric = entry?.origin === 'portfolio';
   const unknownId = !!measurementId && !!manifestData && !entry;
+  // Every manifest row this same plugin provides (issue #107's first
+  // real multi-column doc page) — a single-column plugin's own array of
+  // one, so ReferencePanels never needs to know which kind it's looking
+  // at beyond checking this array's length.
+  const columns = entry && !isMetric
+    ? manifest.filter(m => (m.measurement_id ?? m.id) === (entry.measurement_id ?? entry.id))
+    : [];
+
+  // The doc endpoint is keyed by plugin id, not by any one column's
+  // namespaced manifest id (a multi-column measurement ships one .mdx
+  // per plugin — see backend/measurements/CLAUDE.md) — measurement_id
+  // already *is* the plugin id for every measurement row, single-column
+  // or not, so this is a no-op fallback for the common case and the fix
+  // for the multi-column one.
+  const docId = entry ? (entry.measurement_id ?? entry.id) : null;
 
   // Resolves to null (no request) until both manifests have confirmed the
   // id is real, and which registry it belongs to. `deps` stays a
   // primitive, per useFetch's contract.
   const { data: doc, loading: docLoading, error: docError, retry: retryDoc } = useFetch(
     (signal) => {
-      if (!entry) return Promise.resolve(null);
+      if (!docId) return Promise.resolve(null);
       return isMetric
-        ? api.getPortfolioMetricDoc(entry.id, { signal })
-        : api.getMeasurementDoc(entry.id, { signal });
+        ? api.getPortfolioMetricDoc(docId, { signal })
+        : api.getMeasurementDoc(docId, { signal });
     },
-    [entry?.id || ''],
+    [docId || ''],
     { fallback: null }
   );
 
@@ -109,6 +134,7 @@ export function DocsPage() {
         <Content
           measurementId={measurementId}
           entry={entry}
+          columns={columns}
           isMetric={isMetric}
           families={families}
           unknownId={unknownId}
@@ -122,7 +148,7 @@ export function DocsPage() {
   );
 }
 
-function Content({ measurementId, entry, isMetric, families, unknownId, doc, loading, error, onRetry }) {
+function Content({ measurementId, entry, columns, isMetric, families, unknownId, doc, loading, error, onRetry }) {
   if (!measurementId) return <Landing />;
   if (unknownId) return <NotFound measurementId={measurementId} />;
   if (loading || (!doc && !error)) return <Loading variant="skeleton" lines={12} />;
@@ -135,7 +161,7 @@ function Content({ measurementId, entry, isMetric, families, unknownId, doc, loa
   }
   return isMetric
     ? <PortfolioMetricDoc manifest={entry} doc={doc} families={families} />
-    : <MeasurementDoc manifest={entry} doc={doc} />;
+    : <MeasurementDoc manifest={entry} columns={columns} doc={doc} />;
 }
 
 function Landing() {

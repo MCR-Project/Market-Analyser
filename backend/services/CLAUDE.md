@@ -191,11 +191,17 @@ a fault.
 
 Pure arithmetic over a plain series (a list of values and, wherever time
 matters, a list of ISO dates the same length): no I/O, and no imports from
-`market_data`, `supabase_client` or `yfinance` — that is what lets a future
+`market_data`, `supabase_client` or `yfinance` — that is what lets a
 single-holding measurement call it directly instead of reaching past
 `services/market_data` the way `backend/CLAUDE.md`'s layering table forbids
-(issue #98). `portfolio.py` was its first caller; `fund_metrics.py` (issue
-#105) is its second.
+(issue #98). `portfolio.py` was its first caller, `fund_metrics.py` (issue
+#105) its second; `backend/measurements/official_measurements/` (issue #107
+— risk_contribution, fund_relation, tail_correlation, capture_ratio) is the
+single-holding measurement issue #98 was written for, calling `beta`,
+`r_squared`, `idiosyncratic_volatility`, `up_capture`, `down_capture`,
+`tail_correlation`, `risk_contribution` and `weighted_index` directly rather
+than through `measurements/inputs/*` — the one explicitly-stated exception
+to that layer, not a violation of it.
 
 The module docstring states the conventions once — **a year is 365.25 days;
 volatility (and anything built from the same scaled returns — downside
@@ -225,6 +231,27 @@ bare number. `risk_contribution` and `diversification_ratio` share their
 alignment step (`_aligned_covariance`, private) so both are always read
 off the exact same covariance matrix for a given basket and window,
 rather than each aligning it independently and happening to agree.
+
+`tail_correlation` (issue #107) is `r_squared`'s sibling restricted to a
+benchmark's own worst decile of periods by return, built from the same raw,
+unscaled paired returns `up_capture`/`down_capture` use rather than the
+trading-time-scaled ones `beta`/`r_squared` use — a tail is about which
+periods were worst by how much they moved, not about comparing dispersion
+across gaps of different lengths. `idiosyncratic_volatility` takes an
+optional `r_squared_result` (issue #107) so a caller that already computed
+a holding's own R² against the same benchmark — `fund_relation`'s own
+compute(), reporting both from one pass — can pass that result straight
+through instead of paying for the same Pearson correlation twice; omitted,
+it computes its own exactly as before.
+
+`weighted_index` (issue #107) builds a synthetic price index by compounding
+a basket's own weighted-average simple return, weights renormalised to sum
+to 1 over whichever tickers are passed in — the materialised `r_fund` series
+every one of `beta`/`r_squared`/`idiosyncratic_volatility`/`up_capture`/
+`down_capture`/`tail_correlation` is compared against when the caller needs
+"how does this holding relate to its fund" rather than "how does this
+holding relate to another single series". `measurements/inputs/fund_index.py`
+is what actually builds and aligns the basket this is called on.
 
 A figure a series cannot support is `None` everywhere in this module, never
 0 — a two-row series has a return but no volatility, and reporting 0 would

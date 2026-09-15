@@ -286,6 +286,12 @@ than each getter re-resolving the fund on its own.
   metric averaging across rows of mixed granularity must divide each by
   the trading time it actually covers (`services/stats.py`'s
   `trading_days`) rather than treat every row as one day's volume.
+  `price_frame.get_aligned_closes(tickers, period)` (issue #107) is the
+  rectangular sibling: `get_price_frame`'s ragged per-ticker `[[date,
+  close], ...]` shape, restricted to the tickers priced for every date in
+  the window and aligned to one shared date list — the shape a joint
+  calculation (`fund_index`, `risk_contribution`) needs, that neither
+  `get_price_frame` nor `services.market_data.get_closes` returns as-is.
 - **`stock_info.get_stock_info(tickers)`** — each holding's own name,
   sector, market cap, currency and exchange, one `services.market_data.
   get_stock_info` call per ticker (already cached per ticker, so this is a
@@ -304,6 +310,29 @@ than each getter re-resolving the fund on its own.
   for the simulator. No window: a measurement wanting a fund's whole
   dividend history reads it in one call rather than one bounded to
   whatever window a price-based column happens to be showing.
+- **`fund_index.get_fund_index(tickers, weights, period)`** (issue #107) —
+  the fund's own weighted-return index: every "how does this holding relate
+  to its fund" column (`risk_contribution`, `fund_relation`,
+  `tail_correlation`, `capture_ratio`) needs the same `r_fund` series to
+  compare a holding against, and this builds it once rather than each
+  plugin constructing (and potentially disagreeing about) its own. Built on
+  `price_frame.get_aligned_closes(tickers, period)` — the rectangular
+  `(dates, values_by_ticker)` shape a joint calculation needs, restricted to
+  tickers priced for every date in the window's own calendar (taken as
+  whichever requested ticker has the most priced dates, not their
+  intersection — narrowing to the newest holding's own shorter history
+  would shrink a year-old fund's window to a few weeks the moment it gained
+  one new position, the same reasoning `services/fund_metrics.py` states
+  for the same problem, issue #105) — then `services.stats.weighted_index`,
+  called directly since `stats.py` is explicitly the one `services/` module
+  a measurement may reach past the `measurements/inputs/*` layer for (its
+  own docstring states this, issue #98). Weights are renormalised to sum to
+  100% over exactly the tickers that made the cut, so a fund whose tracked
+  weights sum to less than 100% still gets an index representative of what
+  *is* tracked. Returns `{"dates", "values_by_ticker", "fund_values"}` -
+  `fund_values` is `None` when fewer than two tickers have a complete
+  history to build an index from, which is what every column reading this
+  input reports as its own null case for every ticker.
 
 ## Documentation files
 
@@ -365,6 +394,21 @@ to the table's own control — and copies the resolved `"window"` and its
 `window_label(...)` onto the payload, so `WorkedExample.jsx` can say which
 window actually produced the numbers on the page rather than leaving the
 reader to assume it matches whatever the table happens to be showing.
+
+**A multi-column plugin (issue #100) needs its own branch here** — issue
+#107's fund-relation and capture-ratio plugins are the first *official*
+measurements to declare `columns`, which is what surfaced this: the original
+`build_example` assumed `per_ticker`/`per_ticker_mdx`/`per_ticker_reason`
+were flat `{ticker: value}` dicts, the single-column shape, and would have
+silently produced an empty or wrong payload for one that nests by column key
+first. `_build_multi_column_result` mirrors `_build_single_column_result`
+but keys everything by column, and adds a `columns` array (`{key, label}`
+per column) so the frontend knows there is more than one series to show per
+ticker at all — `WorkedExample.jsx` renders one "computed value + cell" pair
+of sub-columns per declared column when it sees that array, instead of the
+single flat pair. Which tickers make the sample is still decided once,
+across every column together: a ticker earns its row if *any* column has a
+real value or a reason for it.
 
 ## Registry and routing
 
