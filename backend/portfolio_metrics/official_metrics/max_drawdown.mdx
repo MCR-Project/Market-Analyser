@@ -1,0 +1,42 @@
+---
+title: Max Drawdown
+summary: The deepest fall from a prior peak the portfolio experienced in the window.
+---
+
+## What it measures
+
+How far the portfolio fell from its own high-water mark at the worst
+point in the window, and when the peak and the trough it fell to
+happened. Total return and CAGR describe where a run ended up; this is
+the number that describes what it felt like to be holding it on the worst
+day.
+
+## How it is computed
+
+Measured on the flow-free unit value — the only series it makes sense to
+watch for a fall, since a raw total can rise purely because money was
+paid in on a day the market did nothing:
+
+<Formula tex={String.raw`\text{drawdown}_t = \frac{\text{unitValue}_t - \max_{s \le t}(\text{unitValue}_s)}{\max_{s \le t}(\text{unitValue}_s)}`} />
+
+The reported figure is the most negative value this series reaches,
+alongside the date of the peak it fell from and the date of the trough it
+reached — a `{value, peakDate, troughDate}` object, not a bare percentage.
+
+<WorkedExample />
+
+## How it reads
+
+A deeper number is a rougher ride, full stop — there is no "good"
+drawdown. Read the dates alongside the value: a −20% recovered in six
+weeks and a −20% still underwater a year later are very different
+experiences this figure alone cannot distinguish; that distinction is
+what Time Under Water and the Pain Index, filed separately, exist to add.
+
+## Caveats
+
+0% is a real, common answer — it means the portfolio never fell below a
+prior peak in this window, not that the figure could not be computed.
+Measured on the total the portfolio actually held, never on any single
+holding in isolation: one position can fall much further than the whole
+basket without the portfolio itself drawing down nearly as much.

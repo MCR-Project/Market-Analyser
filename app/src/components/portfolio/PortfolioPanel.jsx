@@ -40,6 +40,7 @@ import { useComparisonRuns } from '../../hooks/useComparisonRuns';
 import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
 import { useSimulationWindow } from '../../hooks/useSimulationWindow';
 import { useRiskFreeRate } from '../../hooks/useRiskFreeRate';
+import { usePortfolioMetrics } from '../../hooks/usePortfolioMetrics';
 import {
   CONTRIBUTION_FREQUENCIES,
   DEFAULT_CONTRIBUTION,
@@ -55,6 +56,7 @@ import { PortfolioChart } from './PortfolioChart';
 import { PortfolioSummary } from './PortfolioSummary';
 import { HoldingsTable } from './HoldingsTable';
 import { WindowControls } from './WindowControls';
+import { MetricsPicker } from './MetricsPicker';
 
 const CURRENCY = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -408,6 +410,12 @@ export function PortfolioPanel({
   const { request: rateRequest } = useRiskFreeRate();
   const request = useMemo(() => ({ ...windowRequest, ...rateRequest }), [windowRequest, rateRequest]);
 
+  // The portfolio metric registry (issue #104) — which tiles PortfolioSummary
+  // draws, and the dialog that toggles them. A view preference, not a write,
+  // so it stays available on a read-only (shared) portfolio too.
+  const portfolioMetrics = usePortfolioMetrics();
+  const [metricsPickerOpen, setMetricsPickerOpen] = useState(false);
+
   // What the window was before a drag replaced it. A drag is easy to do
   // by accident and fiddly to undo by hand; choosing the window any other
   // way means the old one is no longer what anybody wants back.
@@ -506,6 +514,12 @@ export function PortfolioPanel({
       <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
         <Title portfolio={portfolio} onRename={onRename} readOnly={readOnly} />
         <div className="flex items-center gap-2 flex-none">
+          <button
+            onClick={() => setMetricsPickerOpen(true)}
+            className={`${ACTION_CLASS} text-[var(--fg-1)] bg-[var(--bg-2)] border-[var(--border)] hover:bg-[var(--bg-3)] focus-visible:outline-[var(--accent)]`}
+          >
+            Metrics
+          </button>
           {readOnly ? (
             <button
               onClick={onSaveCopy}
@@ -643,7 +657,7 @@ export function PortfolioPanel({
         )
       ) : simulation && (
         <>
-          <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} />
+          <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} portfolioMetrics={portfolioMetrics} />
           <PortfolioChart
             simulation={simulation}
             groupBy={groupBy}
@@ -673,6 +687,16 @@ export function PortfolioPanel({
           )
         }
       />
+
+      {metricsPickerOpen && (
+        <MetricsPicker
+          tileMetrics={portfolioMetrics.tileMetrics}
+          families={portfolioMetrics.families}
+          activeIds={portfolioMetrics.activeIds}
+          onToggle={portfolioMetrics.toggle}
+          onClose={() => setMetricsPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

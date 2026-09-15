@@ -1,0 +1,31 @@
+---
+title: Gain
+summary: What the portfolio actually made — final value less everything paid into it.
+---
+
+## What it measures
+
+The plain dollar profit: what the account is worth now, minus every
+dollar that was ever put into it. Where Total Return asks "how did the
+investing go" with deposits stripped out, Gain asks the more literal
+question — is there more money here than was paid in, and how much more.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{gain} = \text{finalValue} - \text{totalInvested}`} />
+
+<WorkedExample />
+
+## How it reads
+
+A positive Gain with a negative Total Return (or the reverse) is possible
+once contributions are on — Gain can be pulled up by fresh money arriving
+even in a falling market, while Total Return, reading the flow-free unit
+value, is not. Read the two together rather than expecting them to agree.
+
+## Caveats
+
+Once a rebalance starts moving money between holdings, each holding's own
+`contribution` field is the only way to say which one earned which part
+of this total — Gain itself is a portfolio-wide figure and does not
+attribute credit to any one position.

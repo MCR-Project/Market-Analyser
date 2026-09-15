@@ -45,8 +45,10 @@ import { StorageNotice } from '../components/portfolio/StorageNotice';
  *  default one. `compare` is deliberately absent — it names portfolio ids,
  *  which mean nothing in another browser. `rf` (issue #103) travels for
  *  the same reason `window`/`start`/`end` do: a Sharpe someone sends
- *  should be the Sharpe they saw, rate included. */
-const SHARED_VIEW_PARAMS = ['window', 'start', 'end', 'benchmark', 'rf'];
+ *  should be the Sharpe they saw, rate included. `metrics` (issue #104)
+ *  travels for the same reason again — which tiles the sender chose to
+ *  show is part of what they are sharing. */
+const SHARED_VIEW_PARAMS = ['window', 'start', 'end', 'benchmark', 'rf', 'metrics'];
 
 /** How to describe the window a share link carries, for the dialog that
  *  is about to hand it over. */

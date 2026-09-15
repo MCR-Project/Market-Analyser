@@ -1,0 +1,42 @@
+---
+title: Name as it should head the page
+summary: One sentence a reader can understand before knowing anything else.
+# example_etf: SMH      # optional — only meaningful for a computed_from="etf_id" entry (issue #105)
+---
+
+{/*
+  Copy this file next to your metric's module, named after it:
+  official_metrics/calmar.py -> official_metrics/calmar.mdx
+
+  `title` and `summary` are required; unknown keys are rejected. The
+  sections below are a convention, not a schema — nothing validates them —
+  but keeping to them means every metric reads the same way.
+
+  Available components: <Note>, <Warning>, <Formula>, <WorkedExample />.
+  Standard markdown works too, including GitHub-style tables.
+*/}
+
+## What it measures
+
+One paragraph, in plain language, on what a reader is looking at when they
+look at this tile. Say what a high value and a low value each mean before
+saying how the number is produced.
+
+## How it is computed
+
+The actual arithmetic. Keep it honest: this should match the metric's own
+`formula` and, ultimately, `services/portfolio.py`'s `_metrics()` (or
+`services/stats.py` for the shared return/risk arithmetic) line for line.
+
+<Formula tex={String.raw`x = \dots`} />
+
+<WorkedExample />
+
+## How it reads
+
+How to act on the value — what counts as high or low here, and what the
+number does *not* tell you.
+
+## Caveats
+
+Where the number misleads: what it excludes, what would surprise a reader.

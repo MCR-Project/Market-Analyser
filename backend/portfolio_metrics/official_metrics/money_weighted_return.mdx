@@ -1,0 +1,42 @@
+---
+title: Money-Weighted Return
+summary: The annual rate that reconciles every deposit, from the day it arrived, with the final value.
+---
+
+## What it measures
+
+What the *money* itself earned, given exactly when each dollar showed up
+— the internal rate of return (IRR). $1,000 that became $1,100 after a
+$100 deposit landed last week has not returned 10%; this is the figure
+that answers what it actually returned once the timing of that deposit is
+taken into account, which Total Return (deliberately) does not.
+
+## How it is computed
+
+Every cash movement is signed from the holder's point of view — negative
+going in, one positive flow at the end for what it all became — and this
+is the single annual rate that discounts every one of them, from the day
+it happened, to zero:
+
+<Formula tex={String.raw`\sum_{i} \frac{\text{flow}_i}{(1+r)^{\text{years}_i}} = 0`} />
+
+Solved by bisection rather than a closed form, over a 365.25-day year —
+the same year length `CAGR` compounds over, so the two rates answer
+different questions on the same calendar.
+
+<WorkedExample />
+
+## How it reads
+
+This is the account's own return, comparable to what an alternative use
+of that exact same money, on the exact same dates, would have needed to
+earn to match it. With no contributions it equals CAGR exactly, by
+construction — the two only diverge once money keeps arriving.
+
+## Caveats
+
+Needs a genuine sign change and elapsed time to solve for: a window too
+short, or a loss so total no annual rate discounts the deposits down to
+what came back, reports null rather than guessing. A portfolio that ended
+at essentially nothing reports −100% — every dollar is gone, and no rate
+describes that more honestly than all of it.

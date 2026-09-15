@@ -184,6 +184,15 @@ export const api = {
   simulatePortfolio: (portfolio, { signal } = {}) =>
     fetchJson('/portfolio/simulate', { signal, body: portfolio }),
 
+  // Portfolio metric registry (issue #104) — mirrors the measurement
+  // manifest/doc/example endpoints below, for the summary's tiles instead
+  // of the table's columns.
+  listPortfolioMetrics: (opts = {}) => fetchJson('/portfolio-metrics', opts),
+  getPortfolioMetricDoc: (id, opts = {}) =>
+    fetchJson(`/portfolio-metric-docs/${encodeURIComponent(id)}`, opts),
+  getPortfolioMetricExample: (id, opts = {}) =>
+    fetchJson(`/portfolio-metric-docs/${encodeURIComponent(id)}/example`, opts),
+
   // Measurement plugin system
   listMeasurements: (opts = {}) => fetchJson('/measurements', opts),
 

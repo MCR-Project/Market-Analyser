@@ -1,0 +1,32 @@
+---
+title: Paid In
+summary: The opening amount plus every contribution — every dollar that ever went in.
+---
+
+## What it measures
+
+Every dollar the account ever received: the opening lump sum plus the
+running sum of every recurring contribution since. It is the account-side
+counterpart to Final Value — one describes what came out, this describes
+what went in — and their difference is Gain.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{totalInvested} = \text{startValue} + \text{contributed}`} />
+
+Withdrawals are not modelled, so this only ever grows over the window.
+
+<WorkedExample />
+
+## How it reads
+
+With no recurring contribution this is simply the opening amount, and
+Total Return and Money-Weighted Return read the same — the account family
+only starts to diverge from the portfolio family once this number grows
+past the starting value.
+
+## Caveats
+
+Paid In sums the schedule, not the market: it says nothing about timing
+luck (a contribution paid in right before a fall costs more than one paid
+in after it) the way Money-Weighted Return does.

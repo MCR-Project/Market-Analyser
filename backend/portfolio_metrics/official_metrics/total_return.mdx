@@ -1,0 +1,45 @@
+---
+title: Total Return
+summary: What a dollar left alone in the portfolio did over the window.
+---
+
+## What it measures
+
+The portfolio's own performance — what the holdings did — with any money
+that arrived partway through taken back out first. A portfolio funded with
+a single lump sum and one funded the same way but topped up every month
+can show the *same* total return while their final values differ hugely,
+because this number answers "how did the investing go", not "how much
+richer did the account get".
+
+## How it is computed
+
+Read off the flow-free unit value (`services/stats.py`'s `unit_values`),
+not the raw total — a series that only moves when prices do, with every
+contribution's effect on the balance subtracted back out the moment it
+lands:
+
+<Formula tex={String.raw`\text{totalReturn} = \left(\frac{\text{unitValue}_{-1}}{\text{unitValue}_{0}} - 1\right) \times 100`} />
+
+With no contributions the unit value *is* the total, so this is identical
+to a plain "final divided by start" calculation for the common case — the
+distinction only starts to matter once money keeps arriving.
+
+<WorkedExample />
+
+## How it reads
+
+This is the number to compare against a benchmark's own total return over
+the same window — both are the same kind of question, asked the same
+way. It is not the number to compare against how much the account grew by
+in dollars; that is Gain, in the account row below.
+
+## Caveats
+
+<Warning>
+Once a recurring contribution is on, this stops answering "how much did my
+account grow" — that question is Money-Weighted Return, in the account
+row. Reading Total Return as account growth understates a fast-growing,
+regularly-funded portfolio's own performance, because the deposits are
+deliberately not counted as gains here.
+</Warning>

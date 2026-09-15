@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from api.routes import router
 from measurements.registry import measurement_router
+from portfolio_metrics.registry import metric_router
 from rate_limit import RateLimitMiddleware
 from services.market_data import DataUnavailable, SymbolNotFound
 
@@ -66,6 +67,7 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(measurement_router)
+app.include_router(metric_router)
 
 
 @app.exception_handler(DataUnavailable)

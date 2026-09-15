@@ -1,0 +1,33 @@
+---
+title: Contributed
+summary: The recurring contributions on their own, without the opening lump sum.
+---
+
+## What it measures
+
+The same figure Paid In reports, minus the amount the account opened
+with — useful when the question is specifically "how much have the
+top-ups added up to", separate from the money the portfolio started with.
+
+## How it is computed
+
+One contribution lands on the first trading row of every new period
+(monthly, quarterly or yearly) after the window's own first row — never
+on the first row itself, which is the opening lump sum rather than a
+contribution:
+
+<Formula tex={String.raw`\text{contributed} = \sum \text{contribution.amount}`} />
+
+<WorkedExample />
+
+## How it reads
+
+Zero with no schedule set, which is the default — a portfolio funded once
+reports Contributed as 0 and Paid In as its opening amount, the same
+relationship a single lump sum always has.
+
+## Caveats
+
+Says nothing about *when* each contribution arrived relative to the
+market, only the total. Money-Weighted Return is the figure that accounts
+for timing; this one is a plain sum.
