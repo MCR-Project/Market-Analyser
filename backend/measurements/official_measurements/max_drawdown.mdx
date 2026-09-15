@@ -1,0 +1,48 @@
+---
+title: Max Drawdown
+summary: The deepest fall from a prior peak in a holding's own price history over the window.
+---
+
+## What it measures
+
+The single worst peak-to-trough fall the holding's own price took inside
+the window — never a positive number, and 0% is a real answer (the holding
+never fell below a prior peak in the window), not a missing one. Two
+holdings with the same total return can have taken very different paths to
+get there; this is the one that says how rough the ride was, not just where
+it ended up.
+
+## Where the numbers come from
+
+`holdings` for the fund's constituents, `price_frame` for each holding's own
+closes over the table's shared window. No fund-level data.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{drawdown} = \min_t \left( \frac{P_t - \max_{s \le t} P_s}{\max_{s \le t} P_s} \right)`} />
+
+`services.stats.max_drawdown` walks the series once, tracking the running
+peak so far and the worst fall from it seen at any point — the same
+function the portfolio simulator's own Max Drawdown metric applies to a
+portfolio's own series.
+
+<WorkedExample />
+
+## How it reads
+
+Closer to 0% means a smoother ride; further below means a rougher one. It
+says nothing about how long the fall took, or how long it took to recover —
+only how deep it went.
+
+## Caveats
+
+Null with a reason, not zero, for a holding with fewer than two priced
+dates over the window — there has to be at least a peak and a later point
+to measure a fall between.
+
+<Warning>
+This is the deepest fall **inside the window shown**. A holding that fell
+further just before the window started, or that is still underwater from a
+fall that began earlier, will not show that history here — change the
+window to look further back.
+</Warning>

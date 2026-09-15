@@ -215,10 +215,23 @@ without it against a true 35%. `granularity_of` names the coarsest gap a
 computation actually saw ('D'/'W'/'M', the same letters a `prices` row's
 own granularity uses), and the functions whose answer depends on it —
 volatility, downside deviation, max drawdown, the underwater/pain-index
-pair, beta, R², idiosyncratic volatility, the capture ratios — carry it
-alongside their value; CAGR does not, because the entire point of counting
-elapsed days instead of rows is that its answer must not depend on how
-finely the window was sampled.
+pair, beta, R², idiosyncratic volatility, the capture ratios, `momentum`
+(issue #108) — carry it alongside their value; CAGR and `total_return`
+(issue #108) do not, because the entire point of counting elapsed days
+(or, for `total_return`, nothing but the two endpoints) instead of rows is
+that the answer must not depend on how finely the window was sampled.
+`total_return` (`last / first - 1`, as a percentage) is the one figure in
+this module with no time dimension at all beyond that - unlike CAGR it
+isn't even annualised, so it needs no `dates` argument to begin with.
+`momentum` (issue #108) is `total_return` over the same series with the
+final calendar month cut off - finds whichever row falls one month before
+the window's last one and reads the same ratio up to there instead, which
+is exactly why it carries a `granularity` `total_return` does not: how
+precisely "one month before the end" can be located depends on how
+coarsely that stretch of the window is bucketed. Both are read directly by
+`measurements/official_measurements/return_momentum.py`, one plugin
+declaring both as columns (issue #100's mechanism) so the two share one
+`price_frame` read per holding instead of two.
 
 `herfindahl`/`effective_n` (concentration of a set of weights),
 `risk_contribution` (each holding's share of portfolio variance, an Euler
