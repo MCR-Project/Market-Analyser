@@ -10,11 +10,19 @@
  * group the same way, from its own registry, with nothing here needing to
  * know the two registries are different beyond the `origin` they stamp.
  *
+ * A multi-column measurement (issue #100, first shipped for real by issue
+ * #107) contributes one manifest row per column, all sharing one `.mdx`
+ * doc — deduplicated here to a single link per plugin (`measurement_id`,
+ * which is already just `id` for every other kind of entry), pointing at
+ * the plugin's own id rather than any one column's namespaced one, the
+ * same id `DocLink` in the table links to. Without this, "Beta / R² /
+ * Idiosyncratic Volatility" would list itself three times.
+ *
  * Search filters name and description only. Both are already in the
  * manifest the page fetched anyway, so filtering is instant and needs no
  * request; the doc bodies are deliberately not searched.
  */
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { NavLink } from 'react-router';
 
 const GROUPS = [
@@ -29,8 +37,23 @@ function matches(measurement, query) {
   return haystack.includes(query.toLowerCase().trim());
 }
 
+/** One row per plugin rather than per column — first row wins for a
+ *  shared id, and manifest order is preserved. */
+function dedupeByPlugin(manifest) {
+  const seen = new Set();
+  const out = [];
+  for (const m of manifest) {
+    const linkId = m.measurement_id ?? m.id;
+    if (seen.has(linkId)) continue;
+    seen.add(linkId);
+    out.push({ ...m, linkId });
+  }
+  return out;
+}
+
 export const DocsSidebar = memo(function DocsSidebar({ manifest, query, onQueryChange }) {
-  const visible = manifest.filter(m => matches(m, query));
+  const deduped = useMemo(() => dedupeByPlugin(manifest), [manifest]);
+  const visible = deduped.filter(m => matches(m, query));
 
   return (
     <nav aria-label="Measurements" className="flex flex-col gap-4 min-h-0">
@@ -48,7 +71,7 @@ export const DocsSidebar = memo(function DocsSidebar({ manifest, query, onQueryC
         />
         {query && (
           <span className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] flex-none">
-            {visible.length}/{manifest.length}
+            {visible.length}/{deduped.length}
           </span>
         )}
       </div>
@@ -67,9 +90,9 @@ export const DocsSidebar = memo(function DocsSidebar({ manifest, query, onQueryC
               <div className="eyebrow mb-2 px-1">{group.label}</div>
               <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
                 {items.map(m => (
-                  <li key={m.id}>
+                  <li key={m.linkId}>
                     <NavLink
-                      to={`/docs/${m.id}`}
+                      to={`/docs/${m.linkId}`}
                       className="block px-3 py-2 rounded-[var(--radius-sm)] no-underline transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] aria-[current=page]:bg-[var(--accent-soft)] hover:bg-[var(--bg-2)]"
                     >
                       {({ isActive }) => (

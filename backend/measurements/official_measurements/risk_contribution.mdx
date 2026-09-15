@@ -1,0 +1,59 @@
+---
+title: Risk Contribution
+summary: Each holding's own share of the fund's variance — a different question than its share of value.
+---
+
+## What it measures
+
+Weight says how much of the fund's *money* sits in a holding. This says how
+much of the fund's *risk* it drives — and the two can disagree sharply. A 4%
+position that is twice as volatile as the fund and moves in lockstep with it
+can contribute far more risk than an 8% position that mostly moves on its
+own. A holding that tends to move opposite the rest of the fund can even
+contribute *negative* risk: including it made the fund calmer, not riskier.
+
+Every holding's contribution sums to 100% across the fund, so it reads like a
+weight — but it is answering a fundamentally different question.
+
+## Where the numbers come from
+
+`holdings` for each ticker's weight, `price_frame` for closes over the
+table's shared window. Only a holding priced for every date in that window
+joins the calculation — see "Caveats" below.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{contribution}_i = \frac{w_i \cdot \mathrm{Cov}(r_i, r_{\text{fund}})}{\mathrm{Var}(r_{\text{fund}})} \times 100`} />
+
+The Euler decomposition of variance: each holding's weight times its
+marginal contribution to the fund's variance, over the fund's own variance.
+`services.stats.risk_contribution` computes this from the full covariance
+matrix of the fund's tracked holdings directly, which is mathematically
+identical to building the fund's own return series and reading each
+holding's `Cov`/`Var` against it — the same helper the fund-level
+diversification card (issue #105) already shares.
+
+<WorkedExample />
+
+## How it reads
+
+A contribution well above a holding's own weight means it is punching above
+its size, risk-wise — concentrated, correlated exposure. A contribution near
+zero or negative means the holding is doing genuine diversifying work,
+however large its weight looks on its own.
+
+## Caveats
+
+Only holdings priced for every date in the window join the calculation — a
+holding with any gap in its price history over the window (a recent listing,
+mid-window) is excluded rather than narrowing the whole fund's window down
+to fit it, the same reasoning `services/fund_metrics.py` states for the
+fund-level card. Null with a reason, not zero, when fewer than two holdings
+qualify or the qualifying basket has no measurable variance at all to
+apportion.
+
+<Warning>
+This reads the fund's **tracked** holdings only (each at least 1% of the
+fund). A fund whose weight sits mostly below that threshold is describing
+less of itself than the contributions above might suggest.
+</Warning>

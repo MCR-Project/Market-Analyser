@@ -35,7 +35,7 @@ tests/                   pytest suite for everything above
 
 ```
 routes.py ──> services/*        (never yfinance or supabase directly)
-measurements/*/*.py ──> measurements/inputs/*   (never services/* directly)
+measurements/*/*.py ──> measurements/inputs/*, services/stats.py   (never services.market_data directly)
 services/* ──> yfinance, supabase
 scripts/* ──> services.market_data's private _*_live helpers, supabase_client
 ```
@@ -48,7 +48,11 @@ Two of these are load-bearing:
 - **Measurements never call `services.market_data` directly.** They go through
   `measurements/inputs/*`, which is what lets a measurement fetch everything it
   needs from an `etf_id` alone and lets its documentation page state the defaults
-  those getters quietly apply.
+  those getters quietly apply. `services/stats.py` is the one deliberate
+  exception (its own module docstring says so, issue #98): pure arithmetic, no
+  I/O, so a measurement (issue #107's risk_contribution/fund_relation/
+  tail_correlation/capture_ratio) may call it directly rather than through an
+  `inputs/*` wrapper that would add nothing.
 
 The scripts deliberately reach *past* the caching layer into
 `market_data`'s `_get_etf_info_live` / `_get_etf_holdings_live` /

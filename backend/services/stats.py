@@ -478,18 +478,33 @@ def r_squared(asset_values: list[float], benchmark_values: list[float], dates: l
 
 
 def idiosyncratic_volatility(
-    asset_values: list[float], benchmark_values: list[float], dates: list[str]
+    asset_values: list[float],
+    benchmark_values: list[float],
+    dates: list[str],
+    r_squared_result: dict | None = None,
 ) -> dict:
     """The asset's own annualised volatility with the part explained by
     its relationship to the benchmark removed: total volatility scaled by
     the square root of one minus R-squared, in the standard single-factor
     decomposition of variance into a market component and a residual one.
 
-    `{"value": None, ...}` wherever `volatility` or `r_squared` themselves
-    are None - there is nothing to remove a fraction from.
+    `r_squared_result` lets a caller that already computed this asset's
+    own R² against the same benchmark (issue #107's fund-relation column,
+    which reports both R² and idiosyncratic volatility from one pass) pass
+    that result straight through instead of this function silently paying
+    for the same Pearson correlation a second time - the two are meant to
+    "reuse the same ρ rather than recompute it" rather than each measuring
+    it independently. Left as `None` (the default), this computes it
+    itself, exactly as before - no existing caller passes it.
+
+    `{"value": None, ...}` wherever `volatility` or R² itself is None -
+    there is nothing to remove a fraction from.
     """
     total = volatility(asset_values, dates)
-    explained = r_squared(asset_values, benchmark_values, dates)
+    explained = (
+        r_squared_result if r_squared_result is not None
+        else r_squared(asset_values, benchmark_values, dates)
+    )
     if total["value"] is None or explained["value"] is None:
         return {"value": None, "granularity": total["granularity"]}
     residual = max(0.0, 1 - explained["value"])
@@ -543,6 +558,56 @@ def down_capture(asset_values: list[float], benchmark_values: list[float], dates
     the window to measure against.
     """
     return _capture(asset_values, benchmark_values, dates, up=False)
+
+
+def tail_correlation(
+    asset_values: list[float], benchmark_values: list[float], dates: list[str], quantile: float = 0.1
+) -> dict:
+    """Pearson correlation of the asset's returns with the benchmark's,
+    restricted to the benchmark's own worst `quantile` of periods by
+    return (issue #107) - does this holding still move with the fund on
+    the days that hurt, or only on an average one. An ordinary, full-
+    window correlation can hide a relationship that quietly comes apart
+    exactly when it would matter most.
+
+    Built from the same raw, unscaled paired returns `up_capture`/
+    `down_capture` use, not the trading-time-scaled ones `volatility`/
+    `beta` use - a tail is about which periods were the worst by how much
+    they actually moved, not about comparing dispersion across gaps of
+    different lengths.
+
+    The "worst decile" is a decile **of periods actually observed**, not
+    of calendar time: for a window answered in weekly buckets (issue #10
+    - a 1-5 year window, most of the time), this is the worst weeks, not
+    the worst days, and a null-rule reader should say so rather than let
+    "tail" quietly imply daily granularity it doesn't have.
+    `granularity_of` still names it, same as every other function here.
+
+    `{"value": None, ...}` when there are fewer than two periods in the
+    tail after the cutoff (a single point has no correlation to report),
+    or when either series has no variance within just that tail.
+    """
+    pairs = _paired_returns(asset_values, benchmark_values, dates, scaled=False)
+    granularity = granularity_of(dates)
+    if len(pairs) < 2:
+        return {"value": None, "granularity": granularity}
+
+    n_tail = max(1, round(len(pairs) * quantile))
+    tail = sorted(pairs, key=lambda p: p[1])[:n_tail]
+    if len(tail) < 2:
+        return {"value": None, "granularity": granularity}
+
+    asset_r = [a for a, _ in tail]
+    bench_r = [b for _, b in tail]
+    mean_a = sum(asset_r) / len(tail)
+    mean_b = sum(bench_r) / len(tail)
+    covariance = sum((a - mean_a) * (b - mean_b) for a, b in tail) / (len(tail) - 1)
+    variance_a = sum((a - mean_a) ** 2 for a in asset_r) / (len(tail) - 1)
+    variance_b = sum((b - mean_b) ** 2 for b in bench_r) / (len(tail) - 1)
+    if variance_a == 0 or variance_b == 0:
+        return {"value": None, "granularity": granularity}
+    correlation = covariance / math.sqrt(variance_a * variance_b)
+    return {"value": round(correlation, PERCENT_DP), "granularity": granularity}
 
 
 # ── Basket statistics (weights, and the risk they carry) ──────────────────────
@@ -706,3 +771,53 @@ def diversification_ratio(
 
     weighted_vol = sum(weights[t] * math.sqrt(max(covariance(t, t), 0.0)) for t in tickers)
     return round(weighted_vol / math.sqrt(portfolio_variance), PERCENT_DP)
+
+
+def weighted_index(
+    values_by_ticker: dict[str, list[float]], weights: dict[str, float], dates: list[str]
+) -> list[float] | None:
+    """A synthetic fund-level price index built by compounding the
+    weighted average of a basket's own simple returns (issue #107) -
+    the "r_fund" every per-holding-vs-fund statistic added alongside this
+    function is computed against (`beta`, `r_squared`,
+    `idiosyncratic_volatility`, `up_capture`/`down_capture`,
+    `tail_correlation`), materialised once as a plain value series so
+    those functions need no benchmark-specific branch of their own; they
+    already take one series to compare another against, and this is what
+    is handed to them as it.
+
+    Weights are renormalised to sum to 1 over exactly the tickers passed
+    in, so a basket whose tracked weights sum to less than 100% (issue
+    #105's own coverage gap) still produces an index representative of
+    what the tracked basket actually did, rather than one silently
+    dampened by the untracked share sitting out of the calculation as if
+    it earned nothing.
+
+    Starts at 100 and compounds by each date's weighted return - this
+    answers "how did the tracked basket move", nothing about what any
+    of it is worth, which is all every caller of this function needs: a
+    `benchmark_values` argument whose own returns are the fund's.
+
+    Alignment (every ticker's own list the same length as `dates`, on the
+    same calendar) is the caller's job, the same contract
+    `risk_contribution`/`diversification_ratio` above already state -
+    this function does not merge, forward-fill or resample anything.
+
+    `None` when there is nothing to build an index from: no tickers, or
+    weights that sum to zero or less.
+    """
+    tickers = list(values_by_ticker)
+    total_weight = sum(weights.get(t, 0.0) for t in tickers)
+    if not tickers or total_weight <= 0:
+        return None
+    normalised = {t: weights.get(t, 0.0) / total_weight for t in tickers}
+
+    index = [100.0]
+    for i in range(1, len(dates)):
+        step_return = sum(
+            normalised[t] * (values_by_ticker[t][i] / values_by_ticker[t][i - 1] - 1)
+            for t in tickers
+            if values_by_ticker[t][i - 1] > 0
+        )
+        index.append(index[-1] * (1 + step_return))
+    return index

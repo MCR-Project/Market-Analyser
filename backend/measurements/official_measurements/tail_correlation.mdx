@@ -1,0 +1,54 @@
+---
+title: Tail Correlation
+summary: Correlation to the fund on its own worst periods — whether a holding still moves with it on the days that hurt.
+---
+
+## What it measures
+
+An ordinary correlation is an average over the whole window — it can hide a
+relationship that holds up fine on a calm day and comes apart exactly when
+it would matter most. This computes correlation only over the fund's own
+worst decile of periods by return: does this holding still move with the
+fund when the fund is falling hardest, or does the relationship break down
+right when a reader would most want to rely on it?
+
+## Where the numbers come from
+
+`holdings` for each ticker's weight, `price_frame` for closes, `fund_index`
+for the fund's own weighted-return series — the same benchmark Beta/R²/
+Idiosyncratic Volatility and the capture ratios use.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{tail}_i = \rho\big(r_i, r_{\text{fund}} \mid r_{\text{fund}} \in \text{worst decile}\big)`} />
+
+The fund's own periods are ranked by return and the worst 10% are kept;
+Pearson correlation is then computed on exactly that slice, using raw
+(unscaled) paired returns — the same kind the capture ratios use, since this
+is about which periods were worst by how much they actually moved, not
+about comparing dispersion across gaps of different lengths.
+
+<WorkedExample />
+
+## How it reads
+
+Close to the holding's own full-window correlation: the relationship is
+stable, calm or stressed. Meaningfully lower (or negative) in the tail than
+elsewhere: the holding decouples from the fund exactly when the fund is
+struggling — a diversification story that only shows up under stress, which
+a full-window correlation would never reveal on its own.
+
+## Caveats
+
+<Warning>
+"Worst decile" is a decile **of periods actually observed**, not of
+calendar time. `prices` tiers by age (issue #10) — a 1-5 year window answers
+in weekly buckets — so for most windows on this table, "the fund's worst
+decile" means its worst *weeks*, not its worst days. Read the column
+header's window before treating this as a daily-stress figure.
+</Warning>
+
+Null with a reason, not zero, when fewer than two periods fall in the tail
+after the cutoff, or when the tail itself turns out to have no variance to
+correlate — a short window can leave too few periods for a decile to mean
+anything.

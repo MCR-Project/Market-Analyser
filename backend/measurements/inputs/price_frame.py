@@ -38,6 +38,43 @@ def get_price_frame(
     return {ticker: {"closes": value["closes"]} for ticker, value in frame.items()}
 
 
+def get_aligned_closes(tickers: list[str], period: str = DEFAULT_PERIOD) -> tuple[list[str], dict[str, list[float]]]:
+    """Close prices for `tickers` over `period`, restricted to exactly
+    the tickers priced for every date in the window's own trading
+    calendar and aligned to that shared date list (issue #107) - the
+    rectangular shape a joint calculation (risk_contribution, a fund's
+    own weighted index) needs, rather than `get_price_frame`'s own ragged
+    per-ticker `[[date, close], ...]` shape.
+
+    The reference calendar is taken as whichever requested ticker
+    reports the most priced dates, not the intersection across all of
+    them - the same reasoning `services/fund_metrics.py` states for the
+    fund-level card (issue #105): a joint calculation needs every series
+    aligned to the *same* stretch of dates at once, and narrowing that
+    stretch down to whatever a single newly-listed holding has traded
+    would shrink a year-old fund's own window to a few weeks the moment
+    it gained one new position. A ticker missing any date in that
+    calendar is excluded entirely rather than forward-filled.
+
+    Returns `(dates, values_by_ticker)` - `values_by_ticker` only has an
+    entry for a ticker that made the cut; both are empty when nothing did
+    (no tickers, or none with any priced history at all).
+    """
+    frame = get_price_frame(tickers, period=period)
+    per_ticker_dates = {t: dict(frame[t]["closes"]) for t in frame if frame[t]["closes"]}
+    if not per_ticker_dates:
+        return [], {}
+
+    reference_ticker = max(per_ticker_dates, key=lambda t: len(per_ticker_dates[t]))
+    dates = sorted(per_ticker_dates[reference_ticker].keys())
+    complete = [
+        t for t in tickers
+        if t in per_ticker_dates and all(d in per_ticker_dates[t] for d in dates)
+    ]
+    values_by_ticker = {t: [per_ticker_dates[t][d] for d in dates] for t in complete}
+    return dates, values_by_ticker
+
+
 def _sample(etf_id: str, tickers: list[str]):
     """Real value of this input for one ETF, for a doc's worked example.
 

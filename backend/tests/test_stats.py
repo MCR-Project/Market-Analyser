@@ -515,5 +515,145 @@ class DiversificationRatioTests(unittest.TestCase):
         self.assertIsNone(ratio)
 
 
+# ── Weighted index (issue #107) ─────────────────────────────────────────────
+
+class WeightedIndexTests(unittest.TestCase):
+    def test_a_single_holding_index_tracks_its_own_returns_exactly(self):
+        """One ticker at 100% weight: the index is that ticker's own
+        return series, just rebased to start at 100 - the "fund priced
+        against itself" case every per-holding-vs-fund statistic is
+        checked against."""
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06"]
+        values = [50.0, 55.0, 49.5]  # +10%, -10%
+
+        index = stats.weighted_index({"A": values}, {"A": 100.0}, dates)
+
+        self.assertAlmostEqual(index[0], 100.0, places=6)
+        self.assertAlmostEqual(index[1], 110.0, places=6)
+        self.assertAlmostEqual(index[2], 99.0, places=6)
+
+    def test_two_equally_weighted_holdings_average_their_returns(self):
+        dates = ["2020-01-02", "2020-01-03"]
+        # A: +10%, B: -10% -> weighted return is exactly 0.
+        values_by_ticker = {"A": [100.0, 110.0], "B": [100.0, 90.0]}
+
+        index = stats.weighted_index(values_by_ticker, {"A": 0.5, "B": 0.5}, dates)
+
+        self.assertAlmostEqual(index[1], 100.0, places=6)
+
+    def test_weights_are_renormalised_when_they_do_not_sum_to_100(self):
+        """A basket whose tracked weights sum to 60 (issue #105's own
+        coverage gap) must produce the same index as the same two
+        holdings at 50/50 - the untracked 40 is not silently treated as
+        cash earning nothing."""
+        dates = ["2020-01-02", "2020-01-03"]
+        values_by_ticker = {"A": [100.0, 110.0], "B": [100.0, 90.0]}
+
+        full = stats.weighted_index(values_by_ticker, {"A": 30.0, "B": 30.0}, dates)
+        partial = stats.weighted_index(values_by_ticker, {"A": 0.5, "B": 0.5}, dates)
+
+        self.assertAlmostEqual(full[1], partial[1], places=6)
+
+    def test_no_tickers_or_zero_weight_is_null(self):
+        self.assertIsNone(stats.weighted_index({}, {}, []))
+        self.assertIsNone(
+            stats.weighted_index({"A": [100.0, 101.0]}, {"A": 0.0}, ["2020-01-02", "2020-01-03"])
+        )
+
+
+# ── Tail correlation (issue #107) ───────────────────────────────────────────
+
+class TailCorrelationTests(unittest.TestCase):
+    def test_correlated_in_the_tail_reports_close_to_one(self):
+        """Ten periods; the asset moves in lockstep with the benchmark on
+        the two worst (most negative) benchmark periods, and randomly
+        elsewhere - a full-window correlation would be muddied by the
+        "elsewhere" noise, but the worst-decile (here: worst 1-2 periods)
+        slice sees only the lockstep part."""
+        dates = [f"2020-01-{i:02d}" for i in range(2, 12)]
+        benchmark_returns = [0.01, -0.05, 0.02, 0.03, -0.08, -0.01, 0.04, -0.02, 0.015, -0.03]
+        # Asset mirrors the benchmark exactly, so every slice - tail or
+        # not - is a perfect correlation regardless of which periods are
+        # selected. This pins down that tail_correlation actually reads
+        # the worst decile rather than, say, the whole window inverted.
+        asset_returns = list(benchmark_returns)
+
+        def to_values(returns):
+            values = [100.0]
+            for r in returns:
+                values.append(values[-1] * (1 + r))
+            return values
+
+        bench_values = to_values(benchmark_returns)
+        asset_values = to_values(asset_returns)
+        full_dates = ["2020-01-01"] + dates
+
+        result = stats.tail_correlation(asset_values, bench_values, full_dates, quantile=0.2)
+
+        self.assertAlmostEqual(result["value"], 1.0, places=4)
+
+    def test_only_the_worst_decile_is_used(self):
+        """Construct an asset that mirrors the benchmark only on its two
+        worst periods and is exactly anti-correlated everywhere else.
+        Restricted to the worst 20% (2 of 10), tail correlation must read
+        close to +1, not some blend with the anti-correlated majority."""
+        dates = ["2020-01-01"] + [f"2020-01-{i:02d}" for i in range(2, 12)]
+        benchmark_returns = [0.01, -0.05, 0.02, 0.03, -0.08, -0.01, 0.04, -0.02, 0.015, -0.03]
+        # Worst two benchmark periods (index 1: -0.05, index 4: -0.08) are
+        # mirrored; every other period is negated.
+        worst_two = {1, 4}
+        asset_returns = [
+            r if i in worst_two else -r for i, r in enumerate(benchmark_returns)
+        ]
+
+        def to_values(returns):
+            values = [100.0]
+            for r in returns:
+                values.append(values[-1] * (1 + r))
+            return values
+
+        result = stats.tail_correlation(
+            to_values(asset_returns), to_values(benchmark_returns), dates, quantile=0.2
+        )
+
+        self.assertGreater(result["value"], 0.9)
+
+    def test_fewer_than_two_periods_in_the_tail_is_null(self):
+        dates = ["2020-01-02", "2020-01-03"]
+        result = stats.tail_correlation([100.0, 105.0], [100.0, 95.0], dates, quantile=0.1)
+        self.assertIsNone(result["value"])
+
+    def test_fewer_than_two_paired_returns_is_null(self):
+        result = stats.tail_correlation([100.0], [100.0], ["2020-01-02"])
+        self.assertIsNone(result["value"])
+
+
+# ── Idiosyncratic volatility reusing a precomputed R² (issue #107) ─────────
+
+class IdiosyncraticVolatilityReuseTests(unittest.TestCase):
+    DATES = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07"]
+    BENCHMARK = [100.0, 110.0, 99.0, 108.9]
+    ASSET = [100.0, 120.0, 96.0, 115.2]
+
+    def test_a_precomputed_r_squared_gives_the_same_answer_as_computing_it_internally(self):
+        computed_internally = stats.idiosyncratic_volatility(self.ASSET, self.BENCHMARK, self.DATES)
+
+        r2 = stats.r_squared(self.ASSET, self.BENCHMARK, self.DATES)
+        reused = stats.idiosyncratic_volatility(
+            self.ASSET, self.BENCHMARK, self.DATES, r_squared_result=r2
+        )
+
+        self.assertEqual(computed_internally, reused)
+
+    def test_a_precomputed_null_r_squared_is_respected_rather_than_recomputed(self):
+        """A fabricated null R² must short-circuit idiosyncratic
+        volatility to null too, proving the passed-in result is actually
+        used rather than silently ignored in favour of recomputing."""
+        result = stats.idiosyncratic_volatility(
+            self.ASSET, self.BENCHMARK, self.DATES, r_squared_result={"value": None, "granularity": "D"}
+        )
+        self.assertIsNone(result["value"])
+
+
 if __name__ == "__main__":
     unittest.main()

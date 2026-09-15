@@ -1,0 +1,58 @@
+---
+title: Upside / Downside Capture
+summary: How much of the fund's own return a holding captured on the way up, and on the way down — two different questions one average return can't separate.
+---
+
+## What it measures
+
+A holding that returns the same as its fund over a window can have gotten
+there two very different ways: rising and falling right alongside it, or
+sitting flat and then catching one sharp rally. Upside capture asks how much
+of the fund's own compounded return a holding captured over exactly the
+periods the fund rose; downside capture asks the same over exactly the
+periods it fell. 100% on both means the holding simply mirrors the fund;
+below 100% on the downside and near or above 100% on the upside is the
+combination most readers are actually hoping to see.
+
+## Where the numbers come from
+
+`holdings` for each ticker's weight, `price_frame` for closes, `fund_index`
+for the fund's own weighted-return series — the same benchmark Beta/R²/
+Idiosyncratic Volatility and Tail Correlation use.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{up} = \frac{\prod_{r_{\text{fund}} > 0} (1 + r_i) - 1}{\prod_{r_{\text{fund}} > 0} (1 + r_{\text{fund}}) - 1} \times 100`} />
+
+<Formula tex={String.raw`\text{down} = \frac{\prod_{r_{\text{fund}} < 0} (1 + r_i) - 1}{\prod_{r_{\text{fund}} < 0} (1 + r_{\text{fund}}) - 1} \times 100`} />
+
+Each ratio compounds the holding's own returns over exactly the periods
+selected by the fund's own sign — never blended, never over the whole
+window — as a percentage of the fund's own compounded return over that same
+selection.
+
+<WorkedExample />
+
+## How it reads
+
+| Up capture | Down capture | Reading |
+| --- | --- | --- |
+| ≥ 100% | < 100% | Participates in rallies, cushions declines — the ideal combination |
+| ≥ 100% | ≥ 100% | Amplifies the fund in both directions |
+| < 100% | < 100% | Dampens the fund in both directions — a defensive holding |
+
+## Caveats
+
+Each ratio is null, not zero, when the fund never had an up (or down)
+period at all in the window — there is nothing to capture a share of.
+Computed from raw, unscaled paired returns rather than the trading-time-
+scaled ones Beta/Idiosyncratic Volatility use: a capture ratio compares
+like return to like return over one identical stretch, not a dispersion
+figure needing a common time footing first.
+
+<Warning>
+A short window, or one dominated by a single long rally or decline, can
+leave very few periods behind either ratio — a capture ratio built from a
+handful of periods is a much noisier estimate than the same figure over a
+full cycle.
+</Warning>

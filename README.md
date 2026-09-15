@@ -141,6 +141,53 @@ example_stock: NVDA     # optional
 ...
 ```
 
+### How a holding relates to its fund
+
+ρ alone says how tightly two things move together, and nothing about
+magnitude, about how much of the fund's own risk a holding actually drives,
+or about whether the relationship holds up on the days it matters. Six
+columns (issue #107) answer those questions instead, all official
+measurements next to `correlation.py`:
+
+- **Risk Contribution** — each holding's own share of the fund's variance
+  (`wᵢ·Cov(rᵢ, r_fund) ÷ Var(r_fund)`), summing to 100% across the fund.
+  Reuses `services.stats.risk_contribution` directly — the same Euler
+  decomposition the fund-level variance-share metric (issue #105) already
+  shares — rather than a second implementation.
+- **Beta / R² / Idiosyncratic Volatility** — one plugin, three columns:
+  sensitivity to the fund, how much of a holding's own variance the fund
+  explains, and the annualised volatility left over once that's removed.
+  R² and idiosyncratic volatility are computed from the **same** underlying
+  correlation in one pass — `idiosyncratic_volatility` accepts an
+  already-computed R² result rather than measuring the relationship twice.
+- **Tail Correlation** — ρ computed only over the fund's own worst decile of
+  periods by return: does a holding still move with the fund on the days
+  that hurt, or does the relationship come apart exactly when it would
+  matter most. Its own doc page states the granularity caveat plainly: for
+  a window answered in weekly buckets (most windows on this table), "worst
+  decile" means worst *weeks*, not worst days.
+- **Upside / Downside Capture** — one plugin, two columns: how much of the
+  fund's own compounded return a holding captured over exactly the periods
+  the fund rose, and over exactly the periods it fell.
+
+All five read a common benchmark, the fund's own weighted-return index
+(`measurements/inputs/fund_index.py`, issue #107) — built once from
+whichever tracked holdings have a complete price history over the window,
+weights renormalised to sum to 100% so the untracked share isn't silently
+treated as cash earning nothing. A holding missing any date in the window is
+excluded from the index and from every column built on it (still counted in
+`% of ETF`) rather than narrowing the whole fund's window down to fit it —
+the same reasoning the fund-level card (issue #105) states for the same
+problem. Every column here is window-aware, sharing the same table-wide
+control every other window-aware column already does (issue #101).
+
+This is also the first time an **official** measurement declares several
+columns from one plugin (issue #100's own mechanism, previously proven only
+by test stand-ins) — which is what pushed `examples.py` and
+`WorkedExample.jsx`'s worked-example machinery to actually grow multi-column
+support: a doc page for one of these now shows one "computed value + cell"
+pair per column, not just the first.
+
 - `title` and `summary` are **required**. Unknown keys are rejected rather
   than ignored, so a typo fails loudly instead of silently doing nothing.
 - `example_etf` / `example_stock` choose the fund and holding the worked

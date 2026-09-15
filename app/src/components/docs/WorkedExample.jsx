@@ -14,12 +14,20 @@
  * including a null's reason (issue #99) — a doc page showing a dash
  * ought to explain it the same way the table does.
  *
+ * A multi-column plugin (issue #100, first shipped for real by #107's
+ * fund-relation and capture-ratio measurements) sends a `columns` array
+ * alongside `per_ticker`/`per_ticker_mdx`/`per_ticker_reason`, each keyed
+ * one level deeper by column key — the same nesting `run()` itself uses.
+ * The result table below grows one "computed value + cell" pair of
+ * columns per declared column instead of one flat pair, rather than
+ * picking a single column to show and silently dropping the rest.
+ *
  * Every number here comes from the backend, which computes over the whole
  * fund and truncates afterwards. When the fetch fails this renders a
  * plain statement that the example is unavailable — never a blank space,
  * and never a fabricated number.
  */
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { useFetch } from '../../hooks/useFetch';
 import { api } from '../../utils/api';
 import { MdxCell } from '../ui/MdxCell';
@@ -185,8 +193,9 @@ export const WorkedExample = memo(function WorkedExample({ measurementId }) {
     );
   }
 
-  const { etf_id, tickers = [], inputs = [], per_ticker = {}, per_ticker_mdx = {},
+  const { etf_id, tickers = [], inputs = [], columns, per_ticker = {}, per_ticker_mdx = {},
           per_ticker_reason = {}, truncated, total_tickers, window_label } = data;
+  const multiColumn = Array.isArray(columns) && columns.length > 0;
 
   return (
     <section className="my-6">
@@ -234,28 +243,69 @@ export const WorkedExample = memo(function WorkedExample({ measurementId }) {
           <span className="font-[var(--font-mono)] text-[12px] font-bold text-[var(--fg)]">result</span>
         </div>
         <div className="corr-scroll overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr>
-                <Th>Ticker</Th>
-                <Th>Computed value</Th>
-                <Th>As shown in the table</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {tickers.map(ticker => (
-                <tr key={ticker}>
-                  <td className="px-4 py-2 border-b border-[var(--divider)] font-[var(--font-mono)] text-[12px] font-bold text-[var(--fg)] whitespace-nowrap">{ticker}</td>
-                  <td className="px-4 py-2 border-b border-[var(--divider)] font-[var(--font-mono)] text-[12px] text-[var(--fg-1)] tabular-nums whitespace-nowrap">
-                    {per_ticker[ticker] ?? '—'}
-                  </td>
-                  <td className="px-4 py-2 border-b border-[var(--divider)] min-w-[180px]">
-                    <MdxCell mdx={per_ticker_mdx[ticker]} reason={per_ticker_reason[ticker]} />
-                  </td>
+          {multiColumn ? (
+            <table className="w-full border-collapse text-[13px]">
+              <thead>
+                <tr>
+                  <Th rowSpan={2}>Ticker</Th>
+                  {columns.map(col => (
+                    <Th key={col.key} colSpan={2}>{col.label}</Th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+                <tr>
+                  {columns.map(col => (
+                    <Fragment key={col.key}>
+                      <Th>Value</Th>
+                      <Th>In the table</Th>
+                    </Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tickers.map(ticker => (
+                  <tr key={ticker}>
+                    <td className="px-4 py-2 border-b border-[var(--divider)] font-[var(--font-mono)] text-[12px] font-bold text-[var(--fg)] whitespace-nowrap">{ticker}</td>
+                    {columns.map(col => (
+                      <Fragment key={col.key}>
+                        <td className="px-4 py-2 border-b border-[var(--divider)] border-l border-l-[var(--divider)] font-[var(--font-mono)] text-[12px] text-[var(--fg-1)] tabular-nums whitespace-nowrap">
+                          {(per_ticker[col.key] || {})[ticker] ?? '—'}
+                        </td>
+                        <td className="px-4 py-2 border-b border-[var(--divider)] min-w-[140px]">
+                          <MdxCell
+                            mdx={(per_ticker_mdx[col.key] || {})[ticker]}
+                            reason={(per_ticker_reason?.[col.key] || {})[ticker]}
+                          />
+                        </td>
+                      </Fragment>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full border-collapse text-[13px]">
+              <thead>
+                <tr>
+                  <Th>Ticker</Th>
+                  <Th>Computed value</Th>
+                  <Th>As shown in the table</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {tickers.map(ticker => (
+                  <tr key={ticker}>
+                    <td className="px-4 py-2 border-b border-[var(--divider)] font-[var(--font-mono)] text-[12px] font-bold text-[var(--fg)] whitespace-nowrap">{ticker}</td>
+                    <td className="px-4 py-2 border-b border-[var(--divider)] font-[var(--font-mono)] text-[12px] text-[var(--fg-1)] tabular-nums whitespace-nowrap">
+                      {per_ticker[ticker] ?? '—'}
+                    </td>
+                    <td className="px-4 py-2 border-b border-[var(--divider)] min-w-[180px]">
+                      <MdxCell mdx={per_ticker_mdx[ticker]} reason={per_ticker_reason[ticker]} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </section>
@@ -270,9 +320,12 @@ function SectionHeading({ children }) {
   );
 }
 
-function Th({ children }) {
+function Th({ children, ...rest }) {
   return (
-    <th className="text-left font-[var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--fg-2)] px-4 py-2 border-b border-[var(--border)] whitespace-nowrap">
+    <th
+      className="text-left font-[var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--fg-2)] px-4 py-2 border-b border-[var(--border)] whitespace-nowrap"
+      {...rest}
+    >
       {children}
     </th>
   );

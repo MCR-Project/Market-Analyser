@@ -218,6 +218,26 @@ The docs route is `lazy()`-loaded in `main.jsx`: KaTeX and its fonts are about a
 third of the bundle and are only needed once someone opens a measurement's
 documentation.
 
+**A multi-column measurement's doc id is its plugin id, not any one column's**
+(issue #107, first exercised by a real official measurement — the mechanism
+existed since issue #100 but nothing had shipped `columns` yet). The manifest
+carries one row per *column*, namespaced `fund_relation.beta` and so on, but
+there is one `.mdx` and one worked example per *plugin* — `DocLink` in
+`TableView` already links to the plugin id (`measurement_id`), so `DocsPage.jsx`
+resolves `/docs/:measurementId` by exact `id` first (a portfolio metric, or a
+single-column measurement, where the two are equal anyway) and falls back to
+`measurement_id` — without that fallback, the exact link every multi-column
+column header's "?" sends a reader to 404s. `DocsSidebar.jsx` dedupes its own
+list the same way (one link per `measurement_id`, not one per column) so a
+three-column plugin doesn't list its own name three times. `MeasurementDoc.jsx`
+takes the *full* set of that plugin's manifest rows as `columns` so its "In the
+table" reference panel can show each column's own header/sort/filter rather
+than just the first one silently standing in for all of them; `WorkedExample.jsx`
+does the matching thing for the result table, reading a `columns` array off the
+payload (issue #107 also taught `examples.py` to send one) to render one
+"computed value + cell" pair of sub-columns per declared column instead of one
+flat pair.
+
 ## Styling
 
 Tailwind 4 via `@tailwindcss/vite`, with the design system as CSS variables in
