@@ -82,17 +82,53 @@ states for `render_cell` itself.
 
 **`render_cell`** returns a small MDX/JSX string using the shared cell
 vocabulary — `<Bar value={0.35} label=".35" />`, `<Stat text="$61.8B" />`,
-`<Badge text="…" />` (implemented in `app/src/components/ui/MdxCell.jsx`). This is
-the **only** place formatting lives; the frontend compiles the string and renders
-the tree without ever branching on a per-measurement `format`. Return `"—"` for a
-missing value. `column_key` is which column is being rendered — a single-column
-plugin's own key every time, so its implementation can accept and ignore the
-parameter; a multi-column plugin uses it to read the same raw value differently
-per column.
+`<Badge text="…" />`, `<Spark values={[...]} baseline={0} label="…" />` (issue
+#106 — see "Spark: a path, not a level" below) — implemented in
+`app/src/components/ui/MdxCell.jsx`. This is the **only** place formatting
+lives; the frontend compiles the string and renders the tree without ever
+branching on a per-measurement `format`. Return `"—"` for a missing value.
+`column_key` is which column is being rendered — a single-column plugin's own
+key every time, so its implementation can accept and ignore the parameter; a
+multi-column plugin uses it to read the same raw value differently per column.
+
+Unlike the documentation vocabulary in `app/src/components/docs/DocMdx.jsx`
+(a stable contract — see that page's own docs, and `app/CLAUDE.md`'s "MDX:
+two vocabularies, deliberately separate"), **this one is expected to keep
+changing.** Adding a component here is a normal, low-risk change; nothing
+downstream depends on the set staying fixed the way a written doc does.
 
 That string is executed as real JSX in the browser. Build it only from
 measurement-authored literals and already-computed numbers or strings — never
 interpolate fetched text (a company description, an API field) into it.
+
+### Spark: a path, not a level (issue #106)
+
+`Bar`/`Stat`/`Badge` each draw one number. Some metrics are not levels but
+paths — two holdings can both return 42% over a year, one grinding upward and
+the other flat for ten months before a jump, and as a single number they are
+interchangeable. `<Spark values={[...]} baseline={0} label="…" />` draws the
+series itself as a small line, no text inside the SVG (`preserveAspectRatio=
+"none"` would distort any glyph, the same rule every chart in this app
+follows — see `app/CLAUDE.md`'s "No text inside a stretched SVG").
+
+**The scalar-companion rule: a `<Spark>` column still needs a plain number in
+`per_ticker` to sort and filter by.** `TableView.jsx`'s sort/filter logic
+reads only `per_ticker` — it has no idea `per_ticker_mdx` exists, let alone
+that one column's snippet happens to carry a series — so a plugin rendering
+`<Spark>` must decide what single number represents that path for ranking
+purposes (a final value, a slope, an average) the same way every other
+column already has to. This is not new machinery, just a rule worth stating
+once here rather than leaving each plugin author to rediscover it: nothing
+about a series-valued cell changes `compute()`'s contract, which still
+returns exactly one scalar per ticker in `per_ticker`.
+
+`label` is a plugin-authored sentence describing the path in words (e.g.
+`"rose from .05 to .34, mostly in Q3"`) — there is nothing legible to put
+inside the SVG itself, so this is the only text associated with the cell,
+surfaced as a tooltip and real accessible text, not a glyph. An unavailable
+series is handled exactly like any other null value: `render_cell` returns
+`"—"` rather than a `<Spark>` with nothing to draw — there is no
+Spark-specific null case to implement.
 
 `run()` ties the three together and adds `per_ticker_mdx` alongside `per_ticker`
 (and `per_ticker_reason`, filtered down to actual nulls, when `compute` set one).
