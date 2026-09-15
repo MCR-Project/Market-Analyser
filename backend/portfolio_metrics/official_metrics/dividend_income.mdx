@@ -1,0 +1,48 @@
+---
+title: Dividend Income
+summary: Cash paid over the window by the holdings the dividends table can speak for.
+---
+
+## What it measures
+
+How much of the portfolio's value came from being paid, rather than from
+prices moving — read on its own, never added to Final Value, since
+`prices` stores dividend-adjusted closes and the payout is already
+counted inside every figure above the moment it arrived.
+
+This is the one metric on this page that never shows as a toggleable
+tile: `PortfolioSummary` prints it as a sentence under the tile grid
+instead (see "Caveats"), because the fact worth stating is a
+*relationship* — how much of what is already there came from income — not
+a number that invites being added on top of Final Value.
+
+## How it is computed
+
+One event at a time, on the shares actually held going into each ex-date
+— not the shares held at the *start* of the window, since buy and hold
+drifts, a rebalance resets it and a contribution grows it:
+
+<Formula tex={String.raw`\text{dividendIncome} = \sum_{\text{ticker}} \sum_{\text{events in window}} \text{shares\_held} \times \text{amount}`} />
+
+<WorkedExample />
+
+## How it reads
+
+A meaningful number for an income-oriented holding, closer to zero for a
+pure growth one — neither is wrong, they are different kinds of
+portfolio. Read Dividend Yield alongside it for the same fact as a
+percentage of everything paid in, which is comparable across portfolios
+of very different sizes the way a raw dollar figure is not.
+
+## Caveats
+
+<Note>
+`PortfolioSummary.jsx` renders this as prose, under the tile grid, on
+purpose (issue #68): "DIVIDEND INCOME $1,234" sitting beside "FINAL VALUE"
+invites exactly the addition this note exists to prevent. Look for it in
+the sentence beginning "These are total returns."
+</Note>
+
+Only speaks for holdings the `dividends` table has a record of — every
+ETF, and anything resolved outside the tracked universe, is named in
+Income Unknown For instead of silently read as having paid nothing.

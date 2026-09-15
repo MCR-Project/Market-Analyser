@@ -22,9 +22,10 @@ Interactive API docs at `http://localhost:8000/docs`, liveness at `/health`.
 main.py                  app object, CORS, rate limiting, exception→status mapping, /health
 config.py                TTLs, period→days table, sector-tag normalisation, doc-example defaults
 rate_limit.py            per-client request limiting on /api/* — see "Errors are the API"
-api/routes.py            every /api endpoint except the measurement ones
+api/routes.py            every /api endpoint except the measurement/portfolio-metric ones
 services/                data access and arithmetic — see services/CLAUDE.md
 measurements/            the column plugin system — see measurements/CLAUDE.md
+portfolio_metrics/       the portfolio summary tile registry (issue #104), mirroring measurements/
 scripts/                 the data pipeline — see scripts/CLAUDE.md
 sql/                     migrations already applied, kept for review and history
 tests/                   pytest suite for everything above

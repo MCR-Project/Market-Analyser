@@ -1,0 +1,42 @@
+---
+title: Income Unknown For
+summary: Holdings the dividends table has no record of, named rather than silently folded into Dividend Income.
+---
+
+## What it measures
+
+Which holdings, if any, Dividend Income could not speak for — every ETF
+(since those live in `etfs` and never get a `ticker` row), and anything
+resolved outside the tracked universe. Silence and "paid nothing" are not
+the same claim, and this is the list that keeps the two apart: without it,
+Dividend Income would quietly read an unknown as a zero, which would state
+that SPY pays no dividend.
+
+Never a toggleable tile — it surfaces as the warning-coloured clause at
+the end of `PortfolioSummary`'s dividend note, only when the list is
+non-empty.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{incomeUnknownFor} = \{\, t \in \text{holdings} : t \notin \text{tracked\_tickers}(\text{holdings}) \,\}`} />
+
+A ticker is "tracked" here if the `ticker` table has a row for it — which
+every stock synced by `scripts/fetch_daily.py` does, and no ETF (or
+anything resolved live for this one run) ever does.
+
+<WorkedExample />
+
+## How it reads
+
+An empty list is the common, good case: every holding's dividend history
+is on record, and Dividend Income can be trusted as the whole picture. A
+non-empty one does not mean those holdings paid nothing — it means the
+figure above them cannot see whatever they paid, and the value and total
+return still include it via the adjusted closes regardless.
+
+## Caveats
+
+A basket of ETF-of-ETF holdings, or one built entirely from symbols
+outside the tracked universe, can report every holding here — in that
+case Dividend Income is not wrong, exactly, but it is answering "how much
+income can be attributed" rather than "how much income was there."

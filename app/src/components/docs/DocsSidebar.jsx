@@ -1,12 +1,14 @@
 /**
- * DocsSidebar — the list of measurements you can read about, and a search
- * box for finding one.
+ * DocsSidebar — the list of measurements and portfolio metrics you can
+ * read about, and a search box for finding one.
  *
- * Built entirely from the backend manifest, grouped by each measurement's
+ * Built entirely from the backend manifest(s), grouped by each entry's
  * `origin`. That grouping is the point: a measurement plugged into
  * addon_measurements/ shows up under "Plugged-in measurements" on its own,
  * with nothing to add here — the same property that lets an addon ship its
- * own documentation.
+ * own documentation — and a portfolio metric (issue #104) joins as a third
+ * group the same way, from its own registry, with nothing here needing to
+ * know the two registries are different beyond the `origin` they stamp.
  *
  * Search filters name and description only. Both are already in the
  * manifest the page fetched anyway, so filtering is instant and needs no
@@ -18,6 +20,7 @@ import { NavLink } from 'react-router';
 const GROUPS = [
   { origin: 'official', label: 'Official measurements' },
   { origin: 'addon', label: 'Plugged-in measurements' },
+  { origin: 'portfolio', label: 'Portfolio metrics' },
 ];
 
 function matches(measurement, query) {

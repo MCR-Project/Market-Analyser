@@ -616,6 +616,55 @@ there is a price for, which is what lets the UI warn that a holding will
 sit in cash for part of the window. **404** when upstream has no history
 for the symbol — a fact about the symbol, and not one to retry.
 
+### Portfolio metrics
+
+Every tile in the portfolio summary — Final Value, Total Return, CAGR,
+Volatility, Max Drawdown, and the four account-side tiles that appear once
+something is actually contributed — comes from a metric registry
+(`backend/portfolio_metrics/`, issue #104), the same self-describing-plugin
+pattern `backend/measurements/` already uses for the holdings table.
+
+A metric class declares its id, name, family (`portfolio` — time-weighted,
+or `account` — money-weighted), formula, null rule and which of a small
+fixed set of display formats it wants (currency, percent, a signed
+variant of either, the drawdown object's `{value, peakDate, troughDate}`
+shape, or a bare list). `GET /api/portfolio-metrics` returns every
+registered metric plus the two families' own labels — `PortfolioSummary`
+reads its two row headers off that response rather than hardcoding them.
+Adding a metric to the registry is enough for it to appear in the
+enable/disable dialog and, for any of the five formats above, to render
+correctly as a tile — no frontend change required.
+
+**The arithmetic never moves.** A metric's `value()` reads its own figure
+back out of the same `POST /api/portfolio/simulate` response
+`services/portfolio.py`'s `_metrics()` has always produced — response keys
+and rounding are unchanged. The dividend trio
+(`dividendIncome`/`dividendYield`/`incomeUnknownFor`) is a full registry
+entry with its own doc page for each, but declares `tile: false`: the
+dividend note stays prose under the tile grid rather than becoming a
+toggleable tile of its own (see "Dividends" above).
+
+**Which tiles are on lives in the query string**, `?metrics=`, a
+comma-separated id list read and written through `withParams` exactly the
+way `?window=` and `?rf=` are — it survives a reload and travels in a
+share link. An unusable value (a stale id from an old link, or none at
+all) falls back to the registry's own default set.
+
+**A metric can be computed from a simulation run or from a fund.** Every
+metric shipped today is the first kind; the second exists so the
+fund-level metrics card (issue #105) can add its own entries to this same
+registry without reworking it — this issue only makes sure the mechanism
+can hold one, proven with a stand-in in the test suite rather than a real
+metric that needs one yet.
+
+Each metric documents itself the same way a measurement does: an `.mdx`
+file next to its module (`cagr.py` → `cagr.mdx`), served at
+`/docs/<metric id>` under its own "Portfolio metrics" sidebar group, with
+a worked example computed live against `DOCS_EXAMPLE_PORTFOLIO`
+(`backend/config.py`) — a funded basket, so both families' tiles have a
+real, non-null number to show. Copy
+`backend/portfolio_metrics/DOC_TEMPLATE.mdx` to start one.
+
 ### Bounding one anonymous client
 
 There are no accounts here (see "Where portfolios live, and why there is no

@@ -1,0 +1,44 @@
+---
+title: CAGR
+summary: The steady annual growth rate that would have produced the same total return.
+---
+
+## What it measures
+
+Compound annual growth rate — the single, constant yearly rate that,
+compounded over the window's own elapsed time, would turn the starting
+unit value into the ending one. It is what lets a nine-month run and a
+nine-year run be compared on the same footing, since Total Return alone
+cannot be: 40% over nine months and 40% over nine years are very
+different outcomes wearing the same number.
+
+## How it is computed
+
+Read off the flow-free unit value, over the actual calendar time elapsed
+— not the number of rows, which for an old window can be weekly or
+monthly buckets rather than trading days (`services/stats.py`, issue #10):
+
+<Formula tex={String.raw`\text{CAGR} = \left[\left(\frac{\text{unitValue}_{-1}}{\text{unitValue}_{0}}\right)^{365.25 / \text{elapsed days}} - 1\right] \times 100`} />
+
+A year is fixed at 365.25 days throughout this app, the same constant
+`services/stats.py`'s CAGR and this metric's own annualisation agree on
+everywhere it is used.
+
+<WorkedExample />
+
+## How it reads
+
+Read it as "the rate a savings account would need to match this run" —
+directly comparable across windows of different lengths, which Total
+Return is not. A CAGR above what a risk-free rate offers is compensation
+for the risk actually taken; nothing here says whether it was *enough*
+compensation for that risk — that is what Sharpe and Sortino, filed
+separately, exist to answer.
+
+## Caveats
+
+A single trading day has no elapsed time to compound a rate over, so a
+one-row window reports null rather than an undefined or infinite number.
+CAGR also says nothing about the path taken to get there — a smooth climb
+and a plunge-then-recovery can report the same CAGR while feeling nothing
+alike to hold; Max Drawdown is the figure that captures the difference.

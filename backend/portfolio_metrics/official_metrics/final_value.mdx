@@ -1,0 +1,36 @@
+---
+title: Final Value
+summary: What the portfolio is worth on the last date of the simulated window.
+---
+
+## What it measures
+
+The dollar value of the whole basket — every holding, plus any cash still
+waiting to be invested — on the last day the run covers. It is the
+starting point for almost everything else on the summary: total return,
+CAGR and gain are all this number, read against a different baseline.
+
+## How it is computed
+
+The running total the simulation already tracks day by day, read off its
+last row:
+
+<Formula tex={String.raw`\text{finalValue} = \text{total}_{-1}`} />
+
+Each holding's own value that day is rounded to the cent first, and the
+total is summed from those rounded parts — not computed independently —
+so the stacked chart's bands always add up to exactly this figure.
+
+<WorkedExample />
+
+## How it reads
+
+On its own, not much: $31,000 is only meaningful next to what went in.
+Total Return and Gain are the same fact expressed as a percentage and as a
+profit; read this one alongside them, not instead of them.
+
+## Caveats
+
+Dividend income is already inside this number — `prices` stores
+dividend-adjusted closes, so a payout was spent on more of the same
+holding the moment it arrived. It is never added a second time.

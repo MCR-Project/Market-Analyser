@@ -169,14 +169,20 @@ const prose = {
  *
  * `measurementId` is closed over so <WorkedExample /> knows which
  * measurement to fetch without the doc author having to repeat it.
+ * `WorkedExampleComponent` (issue #104) lets a doc from a different
+ * registry - a portfolio metric's, which has no per-ticker table to
+ * sample and fetches a differently-shaped worked example - supply its own
+ * implementation of the same `<WorkedExample />` tag rather than forking
+ * the whole vocabulary; every other tag, and the doc author's experience
+ * of writing one, stays identical either way.
  */
-function createDocComponents(measurementId) {
+function createDocComponents(measurementId, WorkedExampleComponent) {
   return {
     ...prose,
     Note,
     Warning,
     Formula,
-    WorkedExample: (props) => <WorkedExample measurementId={measurementId} {...props} />,
+    WorkedExample: (props) => <WorkedExampleComponent measurementId={measurementId} {...props} />,
   };
 }
 
@@ -201,7 +207,7 @@ function compileMdx(source) {
   return compileCache.get(source);
 }
 
-export function DocMdx({ mdx, measurementId }) {
+export function DocMdx({ mdx, measurementId, WorkedExampleComponent = WorkedExample }) {
   const [Content, setContent] = useState(null);
   const [failed, setFailed] = useState(false);
 
@@ -216,7 +222,10 @@ export function DocMdx({ mdx, measurementId }) {
     setContent(null);
   }
 
-  const components = useMemo(() => createDocComponents(measurementId), [measurementId]);
+  const components = useMemo(
+    () => createDocComponents(measurementId, WorkedExampleComponent),
+    [measurementId, WorkedExampleComponent]
+  );
 
   useEffect(() => {
     if (!mdx) return;

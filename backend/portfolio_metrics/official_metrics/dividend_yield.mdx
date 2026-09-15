@@ -1,0 +1,40 @@
+---
+title: Dividend Yield
+summary: Dividend income as a percentage of every dollar paid in.
+---
+
+## What it measures
+
+The same fact Dividend Income reports, scaled to be comparable across
+portfolios of very different sizes — $500 of income means something very
+different to a $10,000 account than to a $1,000,000 one, and this is the
+figure that says which.
+
+Like Dividend Income, this never shows as a toggleable tile: it appears in
+`PortfolioSummary`'s prose note instead (issue #68), as the percentage
+figure in the sentence stating how much of the total is income.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{dividendYield} = \frac{\text{dividendIncome}}{\text{totalInvested}} \times 100`} />
+
+Divided by everything paid in, not just the opening amount — a portfolio
+funded once a month for five years and one funded with a single lump sum
+of the same eventual size should not be credited with the same yield if
+only one of them actually held that much money the whole time.
+
+<WorkedExample />
+
+## How it reads
+
+Treat it the way a dividend yield is normally read — a rough sense of how
+income-oriented the portfolio is — but remember this is a total-return
+app: the yield does not need to be reinvested by hand the way it would for
+a real brokerage account, because `prices`' adjusted closes already did
+that automatically.
+
+## Caveats
+
+Only speaks for holdings the `dividends` table has a record of. See
+Dividend Income and Income Unknown For for what "not on record" means and
+which holdings it applies to.

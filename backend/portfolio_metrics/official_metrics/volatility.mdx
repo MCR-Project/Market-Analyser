@@ -1,0 +1,40 @@
+---
+title: Volatility
+summary: How much the portfolio's return swung from period to period, annualised.
+---
+
+## What it measures
+
+The annualised standard deviation of the run's own returns — how bumpy
+the ride was, not how far it ultimately went. Two portfolios can post the
+same total return while one climbed in a nearly straight line and the
+other lurched there; volatility is the number that tells them apart.
+
+## How it is computed
+
+Each consecutive pair of rows in the flow-free unit value produces one
+return, first divided by the square root of the trading time its own gap
+covers — a weekly or monthly bucket (issue #10) is not one trading day,
+and treating it as one would understate the swings a coarse window
+actually saw. The standard deviation of those scaled returns is then
+annualised to 252 trading days:
+
+<Formula tex={String.raw`\sigma_{\text{annual}} = \mathrm{stdev}\!\left(\frac{r_i}{\sqrt{\text{trading\_days}(gap_i)}}\right) \times \sqrt{252}`} />
+
+<WorkedExample />
+
+## How it reads
+
+Higher means bumpier, not necessarily worse — a portfolio can be more
+volatile than another and still be the better holding, which is exactly
+the question a risk-adjusted ratio (Sharpe, Sortino — filed separately)
+exists to answer instead of volatility alone. Read it next to Max
+Drawdown: volatility is the typical swing, drawdown is the worst one.
+
+## Caveats
+
+Needs at least two returns to exist at all — a window with only one row
+of price history reports null rather than zero, since a single point
+implies nothing about dispersion. It is computed on the flow-free unit
+value, so a large contribution never registers as a swing in this figure
+the way it would if it were read off the raw total.

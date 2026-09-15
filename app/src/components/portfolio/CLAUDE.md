@@ -18,16 +18,18 @@ It is spread across four directories, so a change often touches all of them:
 | `hooks/usePortfolioSimulation.js` | the open portfolio's run |
 | `hooks/useComparisonRuns.js` | one run per line on the comparison chart |
 | `hooks/useSimulationWindow.js` | the window, held in the query string |
+| `hooks/useRiskFreeRate.js` | `?rf=`, an override for Sharpe/Sortino's rate (issue #103) — no visible control yet |
+| `hooks/usePortfolioMetrics.js` | the portfolio metric registry manifest, and `?metrics=` (issue #104) |
 | `hooks/useComparison.js` | `?compare=` and `?benchmark=` |
 | `hooks/useChartBrush.js` | dragging a window out of either chart |
 | `components/portfolio/*` | everything below |
 
-Components here: `PortfolioPanel` (the container, ~670 lines), `PortfolioSidebar`,
+Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar`,
 `HoldingsTable`, `AddHolding`, `TickerSearchField`, `PortfolioChart`,
 `ComparisonChart`, `PortfolioSummary`, `ComparisonSummary`, `WindowControls`,
 `BenchmarkBar`, and the dialogs/notices (`CreatePortfolioDialog`,
 `ApplyWeightsDialog`, `DeletePortfolioDialog`, `SharePortfolioDialog`,
-`SharedNotice`, `StorageNotice`).
+`SharedNotice`, `StorageNotice`, `MetricsPicker`).
 
 ## Three principles
 
@@ -131,6 +133,41 @@ date drops the preset.
   drag (warning colour) rather than sprung at the end.
 - Presets push history; retyping a date replaces, so the back button stays useful.
 
+## The portfolio metric registry (issue #104)
+
+`PortfolioSummary` no longer hand-draws its own tiles. Every one — its
+label, its family, whether it shows by default, how to draw its value —
+is declared by a backend metric class (`backend/portfolio_metrics/`), the
+same self-describing-plugin pattern `backend/measurements/` already uses
+for the holdings table columns. `usePortfolioMetrics` fetches the
+manifest once; `PortfolioSummary` groups the active entries by `family`
+and draws each one according to its declared `format`
+(`currency`/`currency_signed`/`percent`/`percent_signed`/`drawdown`/`list`)
+— it does not know what CAGR means, only that it is `"percent_signed"`.
+**Adding a metric to the registry needs no change here** as long as its
+shape fits one of those six formats.
+
+- **The two family row headers are also declared data.** `families` in
+  the manifest response carries each family's label and note; the
+  `THE PORTFOLIO · TIME-WEIGHTED, ...` / `THE ACCOUNT · MONEY-WEIGHTED, ...`
+  text on screen is that data, not a hardcoded string.
+- **The account row's visibility is the one thing still decided here,
+  not by the manifest**: it only renders once `metrics.contributed > 0`
+  (issue #67, unchanged) — a fact about *this run*, not something a
+  metric declares about itself.
+- **The dividend family is never a tile**, on purpose (issue #68): its
+  three entries (`dividendIncome`/`dividendYield`/`incomeUnknownFor`)
+  declare `tile: false`, so `usePortfolioMetrics`'s `tileMetrics` never
+  offers them to the dialog or the grid — `DividendNote` keeps reading
+  `metrics.dividendIncome` etc. directly, same as before this issue.
+- `?metrics=` is a comma-separated id list, read/written through
+  `withParams`/`readList` exactly like every other multi-value URL param
+  here — never by replacing the whole query string. An id that is stale,
+  unknown, or not `tile`-eligible is filtered out rather than erroring;
+  an empty result falls back to the registry's own default set.
+- `MetricsPicker` (in "Dialogs" below) is the enable/disable dialog — it
+  only ever lists `tileMetrics`, grouped by family.
+
 ## Comparison
 
 `?compare=<ids>&benchmark=<symbols>`, up to `MAX_LINES` (6) lines including the
@@ -223,3 +260,11 @@ total before and after.
 `SharePortfolioDialog` **shows** the link rather than only copying it: clipboard
 writes fail for reasons unrelated to this app (permission, an insecure origin),
 and a button reporting success it did not have is worse than no button.
+
+`MetricsPicker` (issue #104) mirrors `app/src/components/ui/MeasurementPicker.jsx`,
+simplified: a portfolio metric never groups several tiles under one plugin, so
+every row is a plain toggle — no schema preview, no multi-column grouping —
+grouped by family instead, with the group header read off the manifest's
+`families` the same way `PortfolioSummary`'s own row headers are. It stays
+available on a read-only (shared) portfolio, unlike the write-action buttons
+beside it: choosing which tiles to look at is a view preference, not a write.

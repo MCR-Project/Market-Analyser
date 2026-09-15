@@ -58,6 +58,30 @@ MIN_OVERLAPPING_RETURNS = 30
 DOCS_EXAMPLE_ETF = "SPY"
 DOCS_EXAMPLE_STOCK = "AAPL"
 
+# Which basket a portfolio metric's documentation simulates for its worked
+# example, when the metric class names no `example_portfolio` of its own
+# (issue #104) - the run-based counterpart to DOCS_EXAMPLE_ETF above, same
+# reasoning: a fixed default keeps a doc page reproducible rather than
+# depending on whatever portfolio the reader happens to have open.
+#
+# Carries a recurring contribution on purpose. Metrics split into two
+# families - portfolio (time-weighted: total return, CAGR, volatility,
+# drawdown) and account (money-weighted: paid in, contributed, gain,
+# money-weighted return) - and the second family is only ever non-trivial
+# once something has actually been contributed. A single lump sum would
+# leave every account-family metric's worked example equal to its
+# portfolio-family sibling, illustrating nothing about the split the two
+# families exist to make. $200/month over 5y is enough elapsed time for
+# CAGR, volatility and the money-weighted return to all be real numbers
+# rather than a null this particular example happens to hit.
+DOCS_EXAMPLE_PORTFOLIO = {
+    "holdings": [{"ticker": "SPY", "weight": 60}, {"ticker": "AGG", "weight": 40}],
+    "value": 10_000,
+    "period": "5y",
+    "rebalance": "none",
+    "contribution": {"amount": 200, "frequency": "monthly"},
+}
+
 # Shared window vocabulary for window-aware measurement columns (issue
 # #101). A plugin opts in to a table-wide window control by setting its own
 # window_options/window_default to these - or occasionally a narrower
