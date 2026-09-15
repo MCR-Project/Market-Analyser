@@ -323,6 +323,39 @@ that would claim it pays no dividend. A holding with no market cap on
 record is null on both Market Cap and Cap-Weight Tilt, and excluded from
 the tilt denominator entirely rather than treated as zero-weight.
 
+### Whether a position can be sold
+
+Value Held says a fund holds $61.8B of something. It says nothing about
+whether that position could actually be sold, which for a thinly traded
+constituent of a large fund is the more interesting fact. **Days to
+Liquidate** (issue #111) answers it in the plainest possible unit: value
+held ÷ the holding's own average daily dollar volume (`close × volume`,
+averaged across the window) — days of normal trading it would take to
+exit the fund's entire position, at that position's own recent pace. Value
+held reuses Value Held's own arithmetic (fund AUM × weight) exactly, so
+the two columns cannot disagree.
+
+This is the first official column to actually read `prices.volume` — the
+`price_frame` input getter's own bulk, volume-widened read (issue #102),
+until now fetched by nothing. One trap is specific to it: a coarse row's
+volume is a bucket **sum**, not one day's (roughly 21 trading days for a
+monthly bucket — `sql/001_optimize_prices_storage.sql`'s own reason
+`volume` stayed a `bigint`), so averaging bucketed rows straight would
+read a monthly sum as a single day's, overstating every position's
+liquidity by about the width of its bucket. `services.stats.
+average_bucketed_daily_value` divides each row by the trading days the
+gap back to the row before it actually covers before averaging — the same
+conversion every other bucket-spanning figure in this app already uses —
+so a window mixing daily, weekly and monthly rows corrects each one by
+its own bucket's width rather than a single blanket adjustment.
+
+Null with a reason, not zero, for a holding `prices` has no rows for at
+all (every ETF, and anything resolved outside the tracked universe) or
+priced for fewer than two dates, the same case `price_frame`'s own volume
+field is already null for. The doc states plainly that this is a scale
+assuming today's volume continues, not a plan — a real sale of that size
+would itself move the price, which nothing here models.
+
 ## Portfolio simulator
 
 A portfolio here is **a simulation, not an account**: a basket of tickers,

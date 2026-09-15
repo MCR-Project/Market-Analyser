@@ -118,6 +118,38 @@ def granularity_of(dates: list[str]) -> str:
     return "M"
 
 
+def average_bucketed_daily_value(rows: list[tuple[str, float]]) -> float | None:
+    """The average per-day value of a series whose rows are already
+    bucket sums rather than daily figures (issue #111) - built for a
+    holding's dollar volume (`close x volume`, `prices.volume` being a
+    whole bucket's sum, not one day's - `sql/001_optimize_prices_
+    storage.sql`'s own reasoning for why that column stayed `bigint`),
+    but stated generally since nothing here is specific to volume.
+
+    Each row after the first is divided by the trading time the gap back
+    to the row before it covers (`trading_days`, the same conversion
+    every other bucket-spanning figure in this module uses) before the
+    average is taken - not doing this would read a monthly bucket's
+    ~21-day sum as though it were a single day's, overstating every
+    figure built from it by about the width of the bucket. The first row
+    is dropped rather than guessed at: nothing in `rows` alone says how
+    wide its own bucket is without an earlier date to measure the gap
+    from.
+
+    `rows` is `[(date, value), ...]`, oldest first, `value` already a
+    bucket's own sum. `None` with fewer than two rows - there is no gap
+    to measure even one bucket's width from.
+    """
+    if len(rows) < 2:
+        return None
+    parsed = [pd.Timestamp(d) for d, _ in rows]
+    per_day = [
+        rows[i][1] / trading_days((parsed[i] - parsed[i - 1]).days)
+        for i in range(1, len(rows))
+    ]
+    return sum(per_day) / len(per_day)
+
+
 def _returns_with_gaps(values: list[float], dates: list[str]) -> list[tuple[float, float]]:
     """(raw return, trading days covered) for each consecutive pair, the
     shared walk every single-series function below takes. A row preceded

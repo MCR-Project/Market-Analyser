@@ -3,7 +3,8 @@ official_measurement — the built-in, first-party measurement plugins
 shipped with the app (correlation, % of ETF, value held, the
 fund-relation family added by issue #107, the holding's-own-price-
 history family added by issue #108, the metadata/income family added by
-issue #109, and the rolling correlation column added by issue #110).
+issue #109, the rolling correlation column added by issue #110, and the
+days-to-liquidate column added by issue #111).
 
 measurements/__init__.py combines OFFICIAL_MEASUREMENTS with
 addon_measurements.ADDON_MEASUREMENTS to build the full ALL_MEASUREMENTS
@@ -13,6 +14,7 @@ the registry serves.
 from measurements.official_measurements.capture_ratio import CaptureRatioMeasurement
 from measurements.official_measurements.cap_weight_tilt import CapWeightTiltMeasurement
 from measurements.official_measurements.correlation import CorrelationMeasurement
+from measurements.official_measurements.days_to_liquidate import DaysToLiquidateMeasurement
 from measurements.official_measurements.dividend_income import DividendIncomeMeasurement
 from measurements.official_measurements.etf_weight import EtfWeightMeasurement
 from measurements.official_measurements.fund_relation import FundRelationMeasurement
@@ -47,4 +49,7 @@ OFFICIAL_MEASUREMENTS = [
     # The path a holding's correlation to its fund took, not just its
     # average over the window (issue #110).
     RollingCorrelationMeasurement(),
+    # Whether a position could actually be sold, not just what it is
+    # worth (issue #111).
+    DaysToLiquidateMeasurement(),
 ]

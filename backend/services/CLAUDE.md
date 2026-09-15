@@ -245,6 +245,22 @@ alignment step (`_aligned_covariance`, private) so both are always read
 off the exact same covariance matrix for a given basket and window,
 rather than each aligning it independently and happening to agree.
 
+`average_bucketed_daily_value` (issue #111) is a third: built for a
+holding's average daily dollar volume (`days_to_liquidate.py`'s own
+`close x volume`), but stated generally over any already bucket-summed
+`[(date, value), ...]` series, since nothing in it is specific to volume.
+Divides each row by the trading days the gap back to the row before it
+covers (`trading_days`, the same conversion `_returns_with_gaps` uses)
+before averaging, so a monthly bucket's ~21-trading-day sum of
+`prices.volume` (`sql/001_optimize_prices_storage.sql`'s own reason that
+column stayed a `bigint`) is not read as a single day's - left
+uncorrected, every position built from monthly-bucketed history would
+look about twenty times more liquid than it actually is. The first row is
+dropped rather than guessed at: nothing in the series says how wide its
+own bucket is without an earlier date to measure the gap from. `None`
+with fewer than two rows, the same "nothing to average" case every other
+function here reports as absent rather than zero.
+
 `tail_correlation` (issue #107) is `r_squared`'s sibling restricted to a
 benchmark's own worst decile of periods by return, built from the same raw,
 unscaled paired returns `up_capture`/`down_capture` use rather than the
