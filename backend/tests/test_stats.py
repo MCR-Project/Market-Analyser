@@ -83,6 +83,55 @@ class GranularityOfTests(unittest.TestCase):
         )
 
 
+class AverageBucketedDailyValueTests(unittest.TestCase):
+    def test_daily_rows_average_plainly(self):
+        """Gaps of a day apart each divide by 1.0, so the average is just
+        the plain mean of the rows themselves."""
+        rows = [
+            ("2020-01-02", 100.0), ("2020-01-03", 200.0),
+            ("2020-01-06", 150.0), ("2020-01-07", 300.0),
+        ]
+        result = stats.average_bucketed_daily_value(rows)
+        # First row dropped (no gap to measure its own bucket from);
+        # remaining three divided by 1.0 each.
+        self.assertAlmostEqual(result, (200.0 + 150.0 + 300.0) / 3, places=6)
+
+    def test_a_monthly_bucket_is_not_read_as_a_single_days_sum(self):
+        """A monthly bucket summing ~21 trading days of a steady 100/day
+        rate should average back to close to 100/day, not to the raw
+        ~2100 the unadjusted bucket sum would suggest - about a
+        twentyfold overstatement left uncorrected."""
+        daily_rate = 100.0
+        rows = [
+            ("2020-01-01", daily_rate * 21),
+            ("2020-02-01", daily_rate * 21),
+            ("2020-03-01", daily_rate * 21),
+        ]
+        result = stats.average_bucketed_daily_value(rows)
+        self.assertGreater(result, daily_rate * 0.5)
+        self.assertLess(result, daily_rate * 2)
+        # And nowhere near the naive, uncorrected bucket-sum average.
+        self.assertLess(result, daily_rate * 21 / 5)
+
+    def test_daily_and_monthly_windows_of_the_same_underlying_rate_agree(self):
+        """The acceptance criterion directly: a steady 100/day rate,
+        answered as 30 individual daily rows or as one monthly bucket
+        summing the same 30 days, must read as comparable averages."""
+        daily_rate = 100.0
+        daily_rows = [(f"2020-{1 + i // 28:02d}-{1 + i % 28:02d}", daily_rate) for i in range(31)]
+        monthly_rows = [("2019-12-01", daily_rate * 21), ("2020-01-01", daily_rate * 21)]
+
+        daily_result = stats.average_bucketed_daily_value(daily_rows)
+        monthly_result = stats.average_bucketed_daily_value(monthly_rows)
+
+        self.assertAlmostEqual(daily_result, daily_rate, places=6)
+        self.assertAlmostEqual(monthly_result / daily_result, 1.0, delta=0.1)
+
+    def test_fewer_than_two_rows_is_null(self):
+        self.assertIsNone(stats.average_bucketed_daily_value([]))
+        self.assertIsNone(stats.average_bucketed_daily_value([("2020-01-02", 100.0)]))
+
+
 # ── Returns, raw and scaled ───────────────────────────────────────────────────
 
 class PeriodReturnsTests(unittest.TestCase):

@@ -1,0 +1,74 @@
+---
+title: Days to Liquidate
+summary: How many normal trading days it would take to sell the fund's entire position in a holding.
+---
+
+## What it measures
+
+Value Held says a fund holds, say, $61.8B of a stock. It says nothing about
+whether that position could actually be sold. For a large position in a
+thinly traded name, that is the more interesting fact. This column divides
+the value held by the holding's own average daily dollar volume, giving the
+position's size in the plainest possible unit: days of normal trading.
+
+## Where the numbers come from
+
+`holdings` for each ticker's weight, `etf_info` for the fund's AUM,
+`price_frame` for closes and volume together — the bulk, volume-widened
+read (issue #102), since this is the first official column to actually read
+`prices.volume` rather than a call per holding.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{days} = \frac{\text{value held}}{\text{average daily dollar volume}}`} />
+
+Value held is exactly the same arithmetic the Value Held column itself
+uses — fund AUM times weight — so the two columns cannot disagree. Average
+daily dollar volume is the mean, across the window, of each priced date's
+`close × volume`, with one correction described below.
+
+<WorkedExample />
+
+## The bucket correction
+
+`prices.volume` is a whole bucket's **sum**, not one day's — about 21
+trading days for a monthly bucket, the reason that column stayed a
+`bigint` in the first place. Averaging bucketed rows straight would read a
+monthly sum as though it were a single day's total, overstating every
+position's liquidity by roughly the width of its bucket — a holding priced
+in monthly rows would look about twenty times more liquid than it is.
+
+Each row is instead divided by the trading days the gap back to the row
+before it actually covers, before the average is taken — the same
+conversion every other bucket-spanning figure in this app already uses
+(`services.stats.trading_days`). A window mixing daily, weekly and monthly
+rows (issue #10) corrects each one by its own bucket's width rather than
+applying one blanket adjustment to the whole series.
+
+## How it reads
+
+A holding under a day or two is liquid relative to the position — the fund
+could unwind it in the ordinary course of a session or two. A holding in
+the double digits is a position that would take real time to exit at
+anything resembling its own average trading pace.
+
+<Warning>
+This is a scale, not a plan. It assumes today's average volume continues
+unchanged and takes no account of market impact — actually selling a
+position this size would itself move the price and very likely draw the
+average down further, the opposite of the assumption the number rests on.
+It is a way to compare positions against each other, not a timeline for
+unwinding one.
+</Warning>
+
+## Caveats
+
+Null with a reason, not zero, for a holding the `prices` table has no rows
+for at all — every ETF, and anything resolved outside the tracked
+universe, the same holdings `price_frame`'s own volume field is null for.
+A holding priced for fewer than two dates has no gap to measure even one
+bucket's width from, and is null for the same reason.
+
+This column is out of scope for anything beyond the ratio itself: no
+liquidity score or composite rating, and no bid-ask spread or intraday
+data, none of which this app's pipeline carries.
