@@ -1,0 +1,69 @@
+---
+title: Dividend Yield & Income Share
+summary: Trailing twelve-month income against a holding's price, and how much of its return came from being paid rather than from the price moving.
+---
+
+## What it measures
+
+**Yield** is the plainest reading of income: every dividend declared over
+the trailing twelve months, divided by the holding's own last close. It says
+nothing about the price return over the same stretch — a holding can yield
+well and still have lost money, or yield nothing and still have been the
+best performer in the fund.
+
+**Income Share** puts the two together: of the total return a holding
+produced over the same twelve months — price change plus the income paid
+along the way — what fraction was the income rather than the price move.
+A holding that barely moved in price but paid steadily shows a high income
+share; one that surged in price while paying little to nothing shows a low
+one, even with an identical total return.
+
+## Where the numbers come from
+
+`holdings` for the fund's constituents, `price_frame` for each holding's own
+closes and `dividend_events` for its declared dividends, both restricted to
+the same trailing twelve months. This is a fixed stretch, not the table's
+shared window control — the two columns are defined against "trailing
+twelve months" specifically, the same way `stock_info`'s market cap is
+defined as "right now" regardless of what window the table happens to be
+showing elsewhere.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{yield} = \frac{\sum \text{dividends}}{\text{last close}} \times 100`} />
+
+<Formula tex={String.raw`\text{income share} = \frac{\sum \text{dividends}}{(\text{last close} - \text{first close}) + \sum \text{dividends}} \times 100`} />
+
+Dividend amounts are read exactly as the `dividends` table stores them —
+declared, unadjusted — while the closes behind the price change are
+adjusted, the same as every other price-derived figure in this app. That
+mismatch is deliberate, the same one `services/portfolio.py`'s own income
+figure carries: an adjusted close has already folded dividends back into
+the series as reinvestment, so this column is a readable approximation of
+where a holding's return came from, not a strict decomposition that sums
+to the return exactly.
+
+<WorkedExample />
+
+## How it reads
+
+Yield alone is a snapshot of income relative to price today. Income Share
+close to 100% means nearly all of the return came from being paid rather
+than the price moving; close to 0% means the opposite; a number well above
+100% or below 0% is not a bug — it means price and income pulled in
+opposite directions over the window, so one had to overshoot the total to
+cancel the other out.
+
+## Caveats
+
+<Warning>
+Both are null with a reason, not zero, for a holding the `dividends`
+table has no record of at all — every ETF, and anything resolved outside
+the tracked universe. Reporting 0.00% would say the holding pays no
+dividend, when the honest answer is that this app does not track one for
+it.
+</Warning>
+
+Income Share is also null when price change and income net to exactly
+zero over the window — there is no total return for income to be a share
+of, so the ratio is undefined rather than a divide against nothing.

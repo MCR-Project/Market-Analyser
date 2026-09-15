@@ -1,0 +1,59 @@
+---
+title: Cap-Weight Tilt
+summary: How far a holding's fund weight sits from what a plain cap-weighted basket would have given it.
+---
+
+## What it measures
+
+A cap-weighted basket gives every constituent exactly its share of the
+group's total market value — the passive, no-opinion allocation. This
+column is how far the fund's own weight strays from that: positive means
+the fund holds more of a name than a cap-weighted ranking would, negative
+means less. A fund tracking a cap-weighted index sits near zero on every
+row; one screening, tilting or equal-weighting shows real numbers.
+
+## Where the numbers come from
+
+`holdings` for the fund's own weights, `stock_info` for each holding's
+market cap. No window: both are snapshots, not history.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{tilt}_i = w_i - \frac{\text{cap}_i}{\sum_j \text{cap}_j}\times 100`} />
+
+The denominator sums market cap only over the fund's own **tracked**
+holdings — the constituents weighing at least 1% that this app's scrapers
+actually record, not the fund's full, often much longer, constituent
+list. That means the "cap-weighted basket" a tilt is measured against is
+itself restricted to names already on this table, not the real index's
+full universe: a fund whose long tail is entirely sub-1% positions
+compares its top holdings against a slightly smaller and slightly
+differently-shaped basket than the fund's own prospectus would.
+
+<WorkedExample />
+
+## How it reads
+
+| Tilt | Reading |
+| --- | --- |
+| Near 0pp | This holding's weight is close to what a plain cap-weighted ranking would give it |
+| Well above 0pp | The fund deliberately overweights this name relative to its market size |
+| Well below 0pp | The fund deliberately underweights it, or excludes it from a cap-weighted peer's usual share |
+
+Summed across a fund's tracked holdings, tilts land close to zero — not
+exactly, since the tracked set's own weights do not sum to exactly 100%
+either (measurements/inputs/holdings.py's own 1%-cutoff rule).
+
+## Caveats
+
+<Warning>
+The tracked-set denominator means this column cannot see a fund's
+untracked tail at all. A fund built from hundreds of sub-1% positions
+looks, by this column alone, like a basket of only its largest names —
+correct about the holdings it can see, silent about everything below the
+cutoff.
+</Warning>
+
+Null with a reason, not zero, for a holding with no market cap on record —
+answering it with 0pp would claim the fund's weight exactly matches a
+cap-weighted basket, rather than that the comparison could not be made.

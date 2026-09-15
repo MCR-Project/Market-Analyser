@@ -272,6 +272,42 @@ ratio up to there — which *does* carry a `granularity`, since which row
 counts as "one month before the end" depends on how coarsely that stretch
 of the window happens to be bucketed (issue #10).
 
+### Metadata and income, per holding
+
+Two more official measurements (issue #109), across three columns, neither
+of them window-aware — each answers a question about right now or about a
+fixed trailing stretch, not about the table's shared lookback:
+
+- **Market Cap** — straight from `stock_info`, converted to billions so it
+  reuses Value Held's own $/B/T thresholds rather than every reader
+  converting the exponent by hand.
+- **Cap-Weight Tilt** — a holding's fund weight less the weight a passive,
+  cap-weighted basket of the same *tracked* holdings would have given it
+  (`wᵢ − capᵢ ÷ Σ cap`). The denominator can only sum over holdings this
+  app actually tracks (weighing at least 1% — `measurements/inputs/
+  holdings.py`'s own rule), not a fund's full constituent list, so tilts
+  sum to only approximately zero across a fund, not exactly.
+- **Dividend Yield & Income Share** — one plugin, two columns, both fixed
+  to the trailing twelve months rather than the table's window control.
+  Yield is declared dividends over that stretch divided by the holding's
+  last close. Income Share is that same income measured against the
+  holding's total return over the identical stretch — price change plus
+  income — so a reader can see how much of what a holding made came from
+  being paid rather than from its price moving. Dividend amounts are read
+  exactly as `dividends` stores them: unadjusted, the same choice the
+  [Dividends](#dividends) section below states for the simulator's own
+  income figure, and for the same reason — the closes behind the price
+  change are always adjusted, so summing the two is a readable
+  approximation of where a return came from, not a strict decomposition.
+
+**Absence is never zero, on any of the three.** An ETF holding, or
+anything resolved outside the tracked universe, has no row in `ticker` and
+reports null with a reason for yield and income share — the same
+`incomeUnknownFor` distinction the simulator draws — rather than a 0.00%
+that would claim it pays no dividend. A holding with no market cap on
+record is null on both Market Cap and Cap-Weight Tilt, and excluded from
+the tilt denominator entirely rather than treated as zero-weight.
+
 ## Portfolio simulator
 
 A portfolio here is **a simulation, not an account**: a basket of tickers,

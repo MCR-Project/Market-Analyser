@@ -1,0 +1,48 @@
+---
+title: Market Cap
+summary: Each holding's own market capitalisation, readable across a whole fund at once.
+---
+
+## What it measures
+
+What the market as a whole thinks a holding is worth right now — its share
+price times its shares outstanding. It says nothing about a holding's place
+inside the fund (that is what % of ETF answers); it says how big the
+company itself is, the same figure the holding's own popup already shows,
+now sortable and filterable across every constituent at once.
+
+## Where the numbers come from
+
+`holdings` for the fund's constituents, `stock_info` for each holding's own
+metadata — name, sector, market cap, currency, exchange. `stock_info` reads
+straight from the `ticker` table where a holding has been synced, falling
+back to a live lookup otherwise; it takes no window, because a market cap
+is a snapshot, not something measured over a stretch of history.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{market cap} = \text{stock\_info}(\text{ticker}).\texttt{marketCap}`} />
+
+No arithmetic beyond a unit conversion: `stock_info` reports market cap in
+raw dollars, and this column divides by a billion so the same $/B/T
+thresholds the Value Held column already uses can be reused directly,
+rather than every reader converting the exponent in their head.
+
+<WorkedExample />
+
+## How it reads
+
+A larger figure is a larger company, nothing more — it is not scaled by
+how much of the fund that company represents, so a mega-cap making up 1%
+of one fund and 8% of another shows the identical market cap in both. The
+Cap-Weight Tilt column is the one that relates the two.
+
+## Caveats
+
+<Warning>
+Null with a reason, not zero, for a holding `stock_info` has no market cap
+for at all — a metadata field yfinance itself sometimes leaves blank, most
+often for a holding that is itself a fund rather than a company. A missing
+market cap here is exactly the case the Cap-Weight Tilt column excludes
+from its own denominator.
+</Warning>
