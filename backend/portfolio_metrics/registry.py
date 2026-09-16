@@ -33,10 +33,29 @@ from fastapi import APIRouter, HTTPException
 
 from portfolio_metrics import ALL_METRICS
 from portfolio_metrics.base import FAMILIES
-from portfolio_metrics.docs import DocError, load_doc
+from portfolio_metrics.docs import DocError, load_doc, resolve_attribution
 from portfolio_metrics.examples import build_example
 
 metric_router = APIRouter(prefix="/api")
+
+
+def _resolved_attribution(metric) -> dict:
+    """Author/author_url/version for one metric, resolved the same way
+    its own doc page is (issue #114) — mirrors `measurements.registry.
+    _resolved_attribution` exactly, including the reason a malformed doc
+    falls back to the class's own unresolved attribution here rather than
+    failing this whole manifest listing: that failure belongs to this
+    one metric's own `/portfolio-metric-docs/{id}` endpoint.
+    """
+    try:
+        frontmatter = load_doc(metric)["frontmatter"]
+    except DocError:
+        frontmatter = {}
+    return resolve_attribution(metric, frontmatter)
+
+
+def _manifest(metric) -> dict:
+    return {**metric.manifest(), **_resolved_attribution(metric)}
 
 
 @metric_router.get(
@@ -51,7 +70,7 @@ metric_router = APIRouter(prefix="/api")
 )
 def list_portfolio_metrics():
     return {
-        "metrics": [m.manifest() for m in ALL_METRICS],
+        "metrics": [_manifest(m) for m in ALL_METRICS],
         "families": FAMILIES,
     }
 

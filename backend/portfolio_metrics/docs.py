@@ -17,7 +17,11 @@ File format, same shape as a measurement's:
     title: Final Value
     summary: What the portfolio is worth at the end of the window.
     example_etf: SMH        # optional, only meaningful for a future
-    ---                      # computed_from="etf_id" entry (issue #105)
+                             #   computed_from="etf_id" entry (issue #105)
+    author: Jane Doe        # optional (issue #114) - overrides the class
+    author_url: https://…   #   attribute; shown in the metrics dialog and
+    version: "1.0"           #   this metric's own doc page
+    ---
 
     Free-form MDX body.
 
@@ -35,7 +39,7 @@ import yaml
 from config import DOCS_EXAMPLE_ETF
 
 REQUIRED_KEYS = ("title", "summary")
-OPTIONAL_KEYS = ("example_etf",)
+OPTIONAL_KEYS = ("example_etf", "author", "author_url", "version")
 ALLOWED_KEYS = REQUIRED_KEYS + OPTIONAL_KEYS
 
 FRONTMATTER_FENCE = "---"
@@ -131,7 +135,11 @@ def load_doc(metric) -> dict:
         "id": metric.id,
         "origin": metric.origin,
         "has_doc": has_doc,
-        "frontmatter": {**frontmatter, **resolve_example_etf(metric, frontmatter)},
+        "frontmatter": {
+            **frontmatter,
+            **resolve_example_etf(metric, frontmatter),
+            **resolve_attribution(metric, frontmatter),
+        },
         "mdx": body,
     }
 
@@ -153,4 +161,20 @@ def resolve_example_etf(metric, frontmatter: dict) -> dict:
         "example_etf": (
             frontmatter.get("example_etf") or metric.example_etf or DOCS_EXAMPLE_ETF
         ),
+    }
+
+
+def resolve_attribution(metric, frontmatter: dict) -> dict:
+    """Who wrote this metric, where to read more, and which version it is
+    (issue #114) — the doc's own frontmatter first, then the class,
+    mirroring `measurements.docs.resolve_attribution` exactly.
+
+    No third, repo-wide fallback, unlike `resolve_example_etf` above: an
+    unattributed metric stays unattributed rather than defaulting to
+    anyone.
+    """
+    return {
+        "author": frontmatter.get("author") or metric.author,
+        "author_url": frontmatter.get("author_url") or metric.author_url,
+        "version": frontmatter.get("version") or metric.version,
     }

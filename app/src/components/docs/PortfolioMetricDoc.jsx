@@ -11,6 +11,7 @@
 import { memo } from 'react';
 import { DocMdx } from './DocMdx';
 import { PortfolioMetricWorkedExample } from './PortfolioMetricWorkedExample';
+import { AttributionCard } from '../ui/AttributionCard';
 
 export const PortfolioMetricDoc = memo(function PortfolioMetricDoc({ manifest, doc, families }) {
   const frontmatter = doc?.frontmatter || {};
@@ -33,6 +34,19 @@ export const PortfolioMetricDoc = memo(function PortfolioMetricDoc({ manifest, d
         </div>
         <h1 className="text-[28px] font-extrabold text-[var(--fg)] tracking-tight m-0">{title}</h1>
         {summary && <p className="text-[15px] leading-relaxed text-[var(--fg-2)] mt-2 mb-0">{summary}</p>}
+        {/* Frontmatter-resolved attribution (issue #114) - no `origin`
+            here either, for the same reason MeasurementDoc.jsx omits it:
+            the badge above already says "Portfolio metric". A portfolio
+            metric never groups several columns (unlike a measurement),
+            so its own "list" is always itself, length one. */}
+        <div className="mt-3">
+          <AttributionCard
+            author={frontmatter.author}
+            authorUrl={frontmatter.author_url}
+            version={frontmatter.version}
+            metrics={manifest ? [{ key: manifest.id, name: manifest.name }] : []}
+          />
+        </div>
       </header>
 
       {mdx ? (

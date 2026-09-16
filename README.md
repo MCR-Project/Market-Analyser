@@ -135,6 +135,9 @@ title: Correlation to Fund
 summary: How closely a holding has moved with the rest of the fund.
 example_etf: SMH        # optional
 example_stock: NVDA     # optional
+author: Jane Doe        # optional (issue #114)
+author_url: https://…   # optional
+version: "1.0"            # optional — quote it, or YAML reads it as a number
 ---
 
 ## What it measures
@@ -210,6 +213,14 @@ pair per column, not just the first.
   measurement better than the defaults (`DOCS_EXAMPLE_ETF` /
   `DOCS_EXAMPLE_STOCK` in `backend/config.py`). A measurement class can
   declare the same two attributes; the doc's frontmatter wins.
+- `author` / `author_url` / `version` (issue #114) say who wrote this plugin,
+  where to read more about them, and which release it is. Same precedence as
+  `example_etf` above — the class declares a default, the doc's frontmatter
+  overrides it — but **no third, repo-wide fallback**: a plugin declaring
+  neither is shown as unattributed, in the measurement picker and at the head
+  of its own doc page, never credited to whoever owns this repository.
+  Portfolio and fund metrics (issue #104) carry the same three fields and are
+  shown with the same card, since both registries share one mechanism.
 - The body is not validated. The section headings in the template are a
   convention that keeps every measurement reading the same way, not a
   schema.
@@ -896,6 +907,14 @@ comma-separated id list read and written through `withParams` exactly the
 way `?window=` and `?rf=` are — it survives a reload and travels in a
 share link. An unusable value (a stale id from an old link, or none at
 all) falls back to the registry's own default set.
+
+**Every metric class carries the same `author`/`author_url`/`version`
+attribution a measurement plugin does** (issue #114 — see "Measurements"
+above for the doc frontmatter that overrides them), resolved onto its
+manifest row the same way and shown by the same `AttributionCard`, reused
+in the metrics dialog and at the head of the metric's doc page. A metric
+declaring neither shows as unattributed rather than crediting whoever owns
+this repository.
 
 **A metric can be computed from a simulation run, from a fund, or from
 the basket's own risk endpoint.** Eighteen metrics read

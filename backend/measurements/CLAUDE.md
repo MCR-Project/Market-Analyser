@@ -46,6 +46,10 @@ DOC_TEMPLATE.mdx              copy this to start a doc
 6. Copy `DOC_TEMPLATE.mdx` to `volatility.mdx` **next to the module** and fill it
    in. Shipping no doc is supported — the page falls back to the manifest
    metadata — but it leaves the column unexplained.
+7. Optionally, declare `author`/`author_url`/`version` on the class (or in the
+   doc's own frontmatter, which wins — issue #114). A plugin declaring neither
+   shows as unattributed in the picker and on its doc page, not credited to
+   whoever owns this repository — attribution is opt-in, not assumed.
 
 ## The three methods
 
@@ -372,6 +376,17 @@ Format: YAML frontmatter, then free-form MDX.
   computes against. Precedence, most specific first: the doc's frontmatter, then
   the measurement class's attributes, then `DOCS_EXAMPLE_ETF` /
   `DOCS_EXAMPLE_STOCK` in `config.py`.
+- `author` / `author_url` / `version` are optional (issue #114) — who wrote this
+  plugin, where to read more about them, and which release it is. Same two-level
+  precedence as the examples above (doc's frontmatter, then the class attribute)
+  but **no third, repo-wide fallback**: a plugin declaring neither stays
+  unattributed rather than defaulting to whoever owns this repository —
+  `MeasurementBase.author`/`author_url`/`version` default to `""`, and
+  `resolve_attribution` never fills an absent one in from anywhere else. Read the
+  resolved value, never `measurement.author` directly, which is why
+  `registry.py`'s `_column_manifest_entries` overlays `_resolved_attribution`
+  onto every manifest row rather than leaving the class's own raw attribute to
+  leak through.
 - **Unknown keys are rejected, not ignored** — a typo like `exemple_etf` fails
   loudly at the moment it is introduced rather than doing nothing forever.
 - Every value must be a string; quote anything that looks like a number or date.
@@ -453,6 +468,17 @@ The doc endpoints are **not** at `/api/measurements/{id}/doc` on purpose: plugin
 routes live under the same `/api` prefix, and
 `/measurements/correlation/{etf_id}` would happily match `etf_id="doc"`,
 shadowing the endpoint for exactly one measurement.
+
+**`_column_manifest_entries` also resolves attribution (issue #114)**, once per
+plugin via `_resolved_attribution` (not once per column — every column a
+multi-column plugin provides carries the identical author/author_url/version,
+which is what lets the frontend's `AttributionCard` group them under one card
+rather than crediting a two-column plugin's halves separately). It loads the
+plugin's own doc the same way `GET /api/measurement-docs/{id}` does, but catches
+`DocError` and falls back to the class's own unresolved attribution rather than
+letting one malformed `.mdx` 500 the whole manifest — that failure belongs to
+this one plugin's own doc endpoint, which every other plugin's picker does not
+depend on.
 
 Three outcomes for a doc request, deliberately distinct: no such measurement →
 404 (stable, do not retry); measurement with no `.mdx` → 200 with

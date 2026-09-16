@@ -12,6 +12,12 @@
  * row is the toggle, name and description included, because grouping a
  * plugin's columns has nothing to add when there is only one.
  *
+ * `AttributionCard` (issue #114) sits beneath the schema preview in
+ * either layout, reading straight off the manifest — every row already
+ * carries the plugin's resolved `author`/`author_url`/`version`
+ * (`backend/measurements/registry.py`'s `_column_manifest_entries`), so
+ * "who wrote this and what does it provide" needs no extra fetch.
+ *
  *  ┌─────────────────────────────────────────┐
  *  │ MEASUREMENTS                            │
  *  │ Select which metrics to compute         │
@@ -20,16 +26,19 @@
  *  │     Pearson ρ of daily returns...       │    the row is the toggle
  *  │     Inputs: etf_id, period, threshold   │
  *  │     Outputs: matrix, averages, hub...   │
+ *  │     Official · Jane Doe · v1.0          │
  *  ├─────────────────────────────────────────┤
  *  │ Capture Ratio                        ?  │  ← multi-column plugin:
  *  │ How much of the benchmark's...          │    header, then one
- *  │ [X] Upside Capture                      │    toggle row per column
+ *  │ Official · Jane Doe · Provides 2: …     │    toggle row per column
+ *  │ [X] Upside Capture                      │
  *  │ [ ] Downside Capture                    │
  *  └─────────────────────────────────────────┘
  */
 import { memo, useMemo } from 'react';
 import { Overlay } from './Overlay';
 import { DocLink } from './DocLink';
+import { AttributionCard } from './AttributionCard';
 
 /** A plugin's shared info: name, description, and its input/output
  * schema preview — identical across every column it provides, so shown
@@ -105,6 +114,15 @@ function SingleColumnRow({ column, active, onToggle }) {
           <div className="text-[15px] font-semibold text-[var(--fg)] mb-1">{column.name}</div>
           <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{column.description}</p>
           <SchemaPreview plugin={column} />
+          <div className="mt-2">
+            <AttributionCard
+              author={column.author}
+              authorUrl={column.author_url}
+              version={column.version}
+              origin={column.origin}
+              metrics={[{ key: column.id, name: column.name }]}
+            />
+          </div>
         </div>
       </button>
 
@@ -126,6 +144,15 @@ function ColumnGroup({ columns, activeIds, onToggle }) {
           <div className="text-[15px] font-semibold text-[var(--fg)] mb-1">{plugin.name}</div>
           <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{plugin.description}</p>
           <SchemaPreview plugin={plugin} />
+          <div className="mt-2">
+            <AttributionCard
+              author={plugin.author}
+              authorUrl={plugin.author_url}
+              version={plugin.version}
+              origin={plugin.origin}
+              metrics={columns.map(c => ({ key: c.id, name: c.column_label }))}
+            />
+          </div>
         </div>
         <div className="flex-none pt-0.5">
           <DocLink measurementId={plugin.measurement_id} measurementName={plugin.name} />

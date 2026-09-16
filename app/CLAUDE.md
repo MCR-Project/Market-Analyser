@@ -30,7 +30,7 @@ src/store/                   useEtfStore (URL-backed), portfolioStorage, portfol
 src/views/                   one file per route or tab panel
 src/components/
   layout/    AppLayout, Header
-  ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, MdxCell, MeasurementPicker, MetricsPicker, DocLink, Logo
+  ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
   charts/    AreaChart, BrushOverlay, ChartTooltip
   etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard
   stock/     StockPopup
