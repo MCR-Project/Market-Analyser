@@ -45,4 +45,12 @@ INPUT_SPEC = {
     ),
     "defaults": {"period": DEFAULT_PERIOD, "interval": CORRELATION_INTERVAL},
     "sample": _sample,
+    # Cost characteristic (issue #115) — a genuine pairwise sweep, every
+    # ticker against every other ("pairwise"), over a bounded price
+    # history ("windowed": True), through get_closes' own live-merge path
+    # ("live"). The heaviest combination any input getter in this package
+    # declares, which is the whole reason a correlation-derived column is
+    # expected to rate above a plain weight lookup without anyone having
+    # to say so by hand.
+    "cost": {"scaling": "pairwise", "network": "live", "windowed": True},
 }

@@ -23,6 +23,7 @@ plugin that actually declared support for it.
 import re
 from fastapi import APIRouter, HTTPException, Query
 from measurements import ALL_MEASUREMENTS
+from measurements import cost as cost_model
 from measurements.docs import DocError, load_doc, resolve_attribution
 from measurements.examples import build_example
 from services.market_data import DataUnavailable, SymbolNotFound
@@ -54,7 +55,15 @@ def _make_handler(measurement):
     of its own, which is what already carries `per_ticker_reason` (issue
     #99) and `window` (issue #101) into the response wherever a
     measurement sets either — there is no allowlist here to fall out of
-    date as `base.run()` grows what it puts in the result.
+    date as `base.run()` grows what it puts in the result. `cost` (issue
+    #115) is the one key added here rather than left to `run()` itself:
+    it is rated against the *actual* `window` this call resolved to, not
+    the plugin's own `window_default`, which is what lets the table's
+    live column header move a rating from Short to Long as a reader
+    widens the shared window control — the manifest's own `cost` (see
+    `_column_manifest_entries` below) is the same rating computed once,
+    statically, at `window_default`, for wherever a column is chosen or
+    explained before any run of it exists yet to rate for real.
     """
     param_names = PATH_PARAM_RE.findall(measurement.route)
     m = measurement  # captured in the closure
@@ -62,11 +71,13 @@ def _make_handler(measurement):
 
     def call(**kwargs):
         try:
-            return m.run(**kwargs)
+            result = m.run(**kwargs)
         except (DataUnavailable, SymbolNotFound):
             raise
         except Exception as e:
             raise HTTPException(500, f"Measurement '{m.id}' failed: {e}")
+        result["cost"] = cost_model.rate(m, window=kwargs.get("window"))
+        return result
 
     # `run()` itself resolves an unrecognised or missing window down to
     # `window_default` (issue #101), so the query default here only has to
@@ -153,9 +164,19 @@ def _column_manifest_entries(measurement) -> list[dict]:
     `window_options`/`window_default` (issue #101) need no explicit
     overlay here, unlike the per-column fields above: they are a plugin-
     level declaration, not a per-column one, so `{**base}` alone already
-    carries them onto every column a window-aware plugin provides.
+    carries them onto every column a window-aware plugin provides. `cost`
+    (issue #115) is the same: one rating per *plugin*, computed once at
+    its own `window_default` (see `measurements.cost.rate`'s own
+    docstring for why - the manifest describes a column before any run of
+    it exists to rate against a real, live-chosen window), carried onto
+    every column identically for the same reason a multi-column plugin's
+    author/author_url/version (issue #114) are.
     """
-    base = {**measurement.manifest(), **_resolved_attribution(measurement)}
+    base = {
+        **measurement.manifest(),
+        **_resolved_attribution(measurement),
+        "cost": cost_model.rate(measurement),
+    }
     columns = measurement.resolved_columns
     single = len(columns) == 1
 

@@ -25,7 +25,13 @@
  *     clickable to sort (ascending/descending toggle on repeat click) —
  *     a window-aware column's header also names its window, so two
  *     columns on screen never leave a reader guessing whether they
- *     describe the same stretch of history
+ *     describe the same stretch of history. A small dot beside the sort
+ *     label is that column's own cost rating (issue #115) — Short
+ *     through Extremely long, read off the live run's own `cost` once
+ *     it has answered (rated against the window this column was just
+ *     fetched with) or the manifest's own otherwise, so widening the
+ *     shared window can visibly move a column from Short to Long without
+ *     this view computing anything about cost itself
  *  3. Filter row: sector dropdown + per-measurement filters
  *  4. Scrollable rows: one row per holding, sorted per the active sort key
  */
@@ -35,6 +41,7 @@ import { Logo } from '../components/ui/Logo';
 import { Loading } from '../components/ui/Loading';
 import { MdxCell } from '../components/ui/MdxCell';
 import { DocLink } from '../components/ui/DocLink';
+import { CostBadge } from '../components/ui/CostBadge';
 import { WINDOW_OPTIONS } from '../hooks/useMeasurementWindow';
 
 const NAME_COL_WIDTH = 230;
@@ -213,12 +220,22 @@ export const TableView = memo(function TableView({
               const label = windowAware
                 ? `${m.column_label} · ${columnWindowLabel(m, measurementWindow)}`
                 : m.column_label;
+              // The live run's own cost once it has answered (rated
+              // against the *actual* window this plugin was just fetched
+              // with, issue #115) — falling back to the manifest's own,
+              // computed once at window_default, before that arrives.
+              // This is what lets a window-aware column's dot move from
+              // Short to Long as the shared control widens, with no
+              // client-side scoring logic of its own to keep in sync
+              // with measurements/cost.py.
+              const liveCost = measurements.results[m.measurement_id]?.cost;
               return (
                 <MetricSlot key={m.id} width={m.column_width} className="pl-2 border-l border-transparent">
                   {/* The "?" is a sibling of the sort button, not inside it:
                       reading about a column must not also re-sort it. */}
                   <div className="flex items-center gap-1.5">
                     <SortHeader label={label} active={sort.key === m.id} dir={sort.dir} onClick={() => handleSortClick(m.id, defaultDirFor(m))} />
+                    <CostBadge cost={liveCost || m.cost} compact />
                     <DocLink measurementId={m.measurement_id} measurementName={m.name} />
                   </div>
                 </MetricSlot>

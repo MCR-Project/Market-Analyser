@@ -30,4 +30,11 @@ INPUT_SPEC = {
     ),
     "defaults": {},
     "sample": _sample,
+    # Cost characteristic (issue #115) — one call describes the whole
+    # fund, so this does not grow with holding count ("per_request"), and
+    # reads no price history at all ("windowed": False). "live": the
+    # underlying get_etf_holdings still falls back to a live yfinance
+    # call on a cache/DB miss (services/CLAUDE.md's DB-first pattern),
+    # which is what the registry's cost model actually cares about.
+    "cost": {"scaling": "per_request", "network": "live", "windowed": False},
 }

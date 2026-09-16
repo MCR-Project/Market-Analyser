@@ -37,4 +37,10 @@ INPUT_SPEC = {
     ),
     "defaults": {},
     "sample": _sample,
+    # Cost characteristic (issue #115) — one read per holding
+    # ("per_holding": this loops get_stock_info once per ticker, per this
+    # module's own docstring, not a single bulk query the way price_frame's
+    # is), no price history ("windowed": False), each individual lookup
+    # DB-first with a live fallback ("live").
+    "cost": {"scaling": "per_holding", "network": "live", "windowed": False},
 }

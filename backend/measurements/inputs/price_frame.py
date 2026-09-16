@@ -101,4 +101,13 @@ INPUT_SPEC = {
     ),
     "defaults": {"period": DEFAULT_PERIOD, "interval": "1d"},
     "sample": _sample,
+    # Cost characteristic (issue #115) — one bulk query, but its own size
+    # still grows with the basket ("per_holding": a batched round trip is
+    # cheaper than one call per ticker, but not free of the holding
+    # count the way a single-fund read is), over a bounded price history
+    # ("windowed": True - DEFAULT_PERIOD here, or whatever `window` a
+    # window-aware caller passed straight through as `period`), with a
+    # live-merge path for any ticker the DB frame is missing (get_closes'
+    # own "complete a partial answer" rule) - "live".
+    "cost": {"scaling": "per_holding", "network": "live", "windowed": True},
 }
