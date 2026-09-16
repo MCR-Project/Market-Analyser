@@ -16,15 +16,17 @@
  * URL-held selection here follows (App.jsx's view slug, useSimulationWindow's
  * preset, useMeasurementWindow's window).
  *
- * There is no visible control wired to this yet. No figure on screen
- * depends on the rate today - Sharpe and Sortino are filed separately
- * (issue #112) - and a control that changes nothing is clutter, not a
- * feature, the same reasoning TableView's MeasurementWindowControl is
- * built on (issue #101). This hook, and `request` merged into the
- * simulate payload in PortfolioPanel.jsx, are the plumbing #112's tiles
- * will read from and display next to their own figure - "whatever rate
- * produced a figure is shown next to it" is a per-figure display, not a
- * global one this hook should invent a placement for.
+ * There is still no visible control wired to this: Sharpe and Sortino
+ * (issue #112) now read the rate this hook's `request` supplies, but
+ * "whatever rate produced a figure is shown next to it" turned out to
+ * be a documentation-page concern rather than an on-tile one -
+ * metrics.riskFreeRate/riskFreeRateSource are echoed in the response and
+ * carried into each ratio's own worked example, not rendered inline on
+ * the tile itself. A dedicated `?rf=` input is still just plumbing
+ * waiting for a reason to exist - the same "a control that changes
+ * nothing is clutter" reasoning TableView's MeasurementWindowControl is
+ * built on (issue #101) - and arrives if a reader ever needs to see or
+ * change the assumption without leaving the summary.
  */
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';

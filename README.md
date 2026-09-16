@@ -452,6 +452,22 @@ behind it:
 - **Drawdown is measured on the total**, the only series a holder
   experiences. A single holding can fall much further without the portfolio
   noticing.
+- **Time under water, pain index, Calmar, Sharpe and Sortino (issue #112)
+  are all read off the same flow-free unit value** total return, CAGR,
+  volatility and drawdown already are, so a deposit never reads as
+  performance in any of them either. Time Under Water is the longest
+  single stretch below a prior peak, in calendar days, with Share Under
+  Water naming what fraction of the whole window that and every other
+  stretch together came to; Pain Index is the time-weighted mean
+  drawdown depth across the window, where — like Max Drawdown — 0% is a
+  real answer, not a missing one. Calmar is CAGR over the absolute
+  depth of the worst drawdown. Sharpe and Sortino divide the run's own
+  annualised mean excess return (the arithmetic mean of period returns,
+  not CAGR — the same mean volatility's own dispersion is built from, so
+  numerator and denominator are measured the same way) by annualised
+  volatility and by downside deviation respectively; both are null with
+  a reason, not scored against an assumed zero, whenever no risk-free
+  rate is available for the run's own window and no override was given.
 - **A holding's gain is its final value less every dollar put into it** —
   the `contribution` field per holding, labelled GAIN in the UI. Once a
   rebalance starts moving money between holdings, a final value says
@@ -565,8 +581,8 @@ still include that income; only the income figure cannot see it.
 
 ### Scoring against a risk-free rate
 
-Sharpe and Sortino (filed separately) are the first metrics this app needs
-a risk-free rate for, and a single hardcoded figure would be meaningfully
+Sharpe and Sortino (issue #112) are the first metrics this app needs a
+risk-free rate for, and a single hardcoded figure would be meaningfully
 wrong: the windows this app can already simulate span years over which
 short rates moved several points, and a ratio computed against the wrong
 one is wrong by exactly that gap. So the rate is tracked like everything
@@ -584,10 +600,18 @@ window" below): `?rf=` overrides the tracked series for one run, surviving
 a reload and travelling in a shared link the same way `?window=` does, via
 `useRiskFreeRate.js`. An unusable value (missing, not a number) falls back
 to the tracked series rather than erroring — a bad link should open the
-app, not a complaint about itself. Whatever rate produces a figure is meant
-to be shown next to it, once a figure depends on one; a run this cannot be
-read for reports a null with a reason for that figure, never a ratio
-computed against an assumed zero.
+app, not a complaint about itself. Read for the run's **own window**, not
+a single point value: the tracked series' own average over the exact
+stretch a run covers, or the override if one was given — never a rate
+from some other, unrelated stretch of history.
+
+`metrics.riskFreeRate` and `metrics.riskFreeRateSource` ("tracked" or
+"override") echo exactly which rate produced Sharpe and Sortino, so a
+reader can always tell — surfaced in each ratio's own worked example
+rather than inline on the tile itself, since a control for choosing it
+does not exist yet (see `useRiskFreeRate.js`). A run neither the tracked
+series nor an override can answer for reports a null with a reason for
+both ratios, never one computed against an assumed zero.
 
 ### Choosing the window, and comparing
 
@@ -786,8 +810,10 @@ for the symbol — a fact about the symbol, and not one to retry.
 ### Portfolio metrics
 
 Every tile in the portfolio summary — Final Value, Total Return, CAGR,
-Volatility, Max Drawdown, and the four account-side tiles that appear once
-something is actually contributed — comes from a metric registry
+Volatility, Max Drawdown, the four account-side tiles that appear once
+something is actually contributed, and the six optional risk tiles issue
+#112 added (Time Under Water, Share Under Water, Pain Index, Calmar,
+Sharpe, Sortino) — comes from a metric registry
 (`backend/portfolio_metrics/`, issue #104), the same self-describing-plugin
 pattern `backend/measurements/` already uses for the holdings table.
 
@@ -795,12 +821,14 @@ A metric class declares its id, name, family (`portfolio` — time-weighted,
 or `account` — money-weighted), formula, null rule and which of a small
 fixed set of display formats it wants (currency, percent, a signed
 variant of either, the drawdown object's `{value, peakDate, troughDate}`
-shape, or a bare list). `GET /api/portfolio-metrics` returns every
-registered metric plus the two families' own labels — `PortfolioSummary`
-reads its two row headers off that response rather than hardcoding them.
-Adding a metric to the registry is enough for it to appear in the
-enable/disable dialog and, for any of the five formats above, to render
-correctly as a tile — no frontend change required.
+shape, a bare list, a plain ratio such as Calmar's — `1.42×` — or a count
+of days such as Time Under Water's — `45d`, issue #112's own two
+additions). `GET /api/portfolio-metrics` returns every registered metric
+plus the two families' own labels — `PortfolioSummary` reads its two row
+headers off that response rather than hardcoding them. Adding a metric to
+the registry is enough for it to appear in the enable/disable dialog and,
+for any of the formats above, to render correctly as a tile — no frontend
+change required.
 
 **The arithmetic never moves.** A metric's `value()` reads its own figure
 back out of the same `POST /api/portfolio/simulate` response
@@ -817,10 +845,12 @@ way `?window=` and `?rf=` are — it survives a reload and travels in a
 share link. An unusable value (a stale id from an old link, or none at
 all) falls back to the registry's own default set.
 
-**A metric can be computed from a simulation run or from a fund.** Twelve
-metrics read `run["metrics"][id]`; three (issue #105 — see "Fund metrics"
-below) read `services/fund_metrics.py` instead, keyed by `etf_id` rather
-than by a completed run.
+**A metric can be computed from a simulation run or from a fund.**
+Eighteen metrics read `run["metrics"][id]` — the original twelve plus
+issue #112's time under water, share under water, pain index, Calmar,
+Sharpe and Sortino; three (issue #105 — see "Fund metrics" below) read
+`services/fund_metrics.py` instead, keyed by `etf_id` rather than by a
+completed run.
 
 Each metric documents itself the same way a measurement does: an `.mdx`
 file next to its module (`cagr.py` → `cagr.mdx`), served at

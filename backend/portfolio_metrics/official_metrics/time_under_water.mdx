@@ -1,0 +1,47 @@
+---
+title: Time Under Water
+summary: The longest single stretch the run spent below a prior peak before recovering.
+---
+
+## What it measures
+
+Max Drawdown says how deep the worst fall went. It says nothing about how
+long the portfolio stayed down there — a 40% fall that recovered in two
+months and one that took three years report the identical −40%, and the
+difference between them is most of what it actually felt like to hold
+through. This is the duration Max Drawdown leaves out: the longest single
+stretch, in calendar days, spent below a prior high-water mark before
+climbing back to it.
+
+## How it is computed
+
+Measured on the flow-free unit value, the same series every other
+portfolio-family figure reads:
+
+<Formula tex={String.raw`\text{stretch} = \{t : \text{unitValue}_t < \max_{s \le t}(\text{unitValue}_s)\}`} />
+
+Every distinct underwater stretch in the window is found first — a run
+below the peak, ended the first time the series climbs back to (or past)
+it — and this figure reports the longest one's own duration: its end date
+less its start date. A stretch still open at the window's last row (the
+portfolio has not, as of the last thing observed, made its old peak back)
+is timed only as far as it has actually been observed, not guessed at.
+
+<WorkedExample />
+
+## How it reads
+
+A short number next to a deep Max Drawdown is a sharp fall that recovered
+quickly — uncomfortable, brief. A long number next to a shallow one is a
+grind: nothing dramatic happened, but the portfolio simply took a long
+time to get back to even. Share Under Water is this figure's own
+companion, filed alongside it — the *total* time spent below a peak
+across the whole window, not just the single longest stretch of it.
+
+## Caveats
+
+0 days is a real, common answer — it means the portfolio never fell below
+a prior peak in this window at all, not that the figure could not be
+computed. Null only when the window itself has fewer than two rows of
+price history to measure an elapsed day from. Like Max Drawdown, this is
+measured on the portfolio's own total, never on one holding in isolation.

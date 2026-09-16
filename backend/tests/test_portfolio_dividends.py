@@ -365,6 +365,11 @@ class DividendRouteTests(unittest.TestCase):
                 )
             if self.name == "ticker":
                 return SimpleNamespace(data=[{"id": "KO"}])
+            # get_risk_free_rate also reaches this fake now (issue #112) -
+            # empty, not self.ROWS (which has no "rate" column), so it
+            # answers None the same honest way an unsynced table would.
+            if self.name == "risk_free_rate":
+                return SimpleNamespace(data=[])
             return SimpleNamespace(data=self.ROWS)
 
     def test_the_response_reports_income_without_moving_the_value(self):

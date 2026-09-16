@@ -287,22 +287,37 @@ class SimulateRateFieldTests(unittest.TestCase):
             index=pd.to_datetime(["2020-01-02", "2020-06-01"]),
         )
 
-    def test_an_override_is_accepted_without_changing_the_run(self):
-        """Not yet read by simulate_portfolio (the ratios are filed
-        separately), so the run with and without it must be identical -
-        proof this is harmless request-shape plumbing, not a silent
-        behaviour change."""
+    def test_an_override_changes_only_the_rate_and_what_depends_on_it(self):
+        """The rate is a scoring assumption, not a property of the
+        simulation itself (issue #112): an override changes
+        metrics.riskFreeRate/riskFreeRateSource and whatever Sharpe/
+        Sortino read from them, and nothing else about the run - every
+        other series and metric stays byte-identical."""
         with (
             patch("services.portfolio.get_closes", return_value=self._closes()),
             patch("services.portfolio.get_dividends", return_value={}),
             patch("services.portfolio.tracked_tickers", return_value=set()),
+            # Deterministic "no tracked rate" for the un-overridden run,
+            # rather than depending on this test environment happening to
+            # have no real Supabase configured.
+            patch("services.portfolio.get_risk_free_rate", return_value=None),
         ):
             without = client.post("/api/portfolio/simulate", json=self._body())
             withrate = client.post("/api/portfolio/simulate", json=self._body(rate=4.2))
 
         self.assertEqual(without.status_code, 200)
         self.assertEqual(withrate.status_code, 200)
-        self.assertEqual(without.json(), withrate.json())
+        without_body, withrate_body = without.json(), withrate.json()
+
+        self.assertEqual(without_body["dates"], withrate_body["dates"])
+        self.assertEqual(without_body["total"], withrate_body["total"])
+        for key in ("cagr", "volatility", "maxDrawdown", "timeUnderWater", "shareUnderWater", "painIndex"):
+            self.assertEqual(without_body["metrics"][key], withrate_body["metrics"][key])
+
+        self.assertIsNone(without_body["metrics"]["riskFreeRate"])
+        self.assertIsNone(without_body["metrics"]["riskFreeRateSource"])
+        self.assertEqual(withrate_body["metrics"]["riskFreeRate"], 4.2)
+        self.assertEqual(withrate_body["metrics"]["riskFreeRateSource"], "override")
 
     def test_omitting_it_is_still_the_default(self):
         with (

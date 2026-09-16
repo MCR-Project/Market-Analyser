@@ -100,10 +100,12 @@ class MetricBase(ABC):
     # (12.3%), "percent_signed" (+12.3% / −12.3%, tone-coloured),
     # "drawdown" (a {value, peakDate, troughDate} object), "list"
     # (incomeUnknownFor's ticker list, joined for display), "ratio"
-    # (1.42×, issue #105's diversificationRatio). Adding a
-    # metric whose shape already fits one of these needs no frontend
-    # change at all - not just to appear in the dialog, but to render
-    # correctly as a tile too.
+    # (1.42×, issue #105's diversificationRatio; issue #112's own
+    # Calmar/Sharpe/Sortino share it, read by PortfolioSummary.jsx rather
+    # than FundMetricsCard.jsx since they are computed_from="run"), "days"
+    # (45d, issue #112's timeUnderWater). Adding a metric whose shape
+    # already fits one of these needs no frontend change at all - not
+    # just to appear in the dialog, but to render correctly as a tile too.
     format: str = "currency"
 
     # Which set this was registered in. Set by portfolio_metrics/__init__.py

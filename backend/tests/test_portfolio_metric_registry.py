@@ -43,12 +43,14 @@ from fastapi.testclient import TestClient
 from main import app
 from portfolio_metrics import ALL_METRICS
 from portfolio_metrics.base import FAMILIES, MetricBase
+from rate_limit import FixedWindowLimiter
 from services.portfolio import simulate_portfolio
 
 client = TestClient(app, raise_server_exceptions=False)
 
 EXPECTED_IDS = [
     "finalValue", "totalReturn", "cagr", "volatility", "maxDrawdown",
+    "timeUnderWater", "shareUnderWater", "painIndex", "calmar", "sharpe", "sortino",
     "contributed", "totalInvested", "gain", "moneyWeightedReturn",
     "dividendIncome", "dividendYield", "incomeUnknownFor",
     "diversificationRatio", "top5VarianceShare", "trackedWeightCoverage",
@@ -189,12 +191,23 @@ class DocEndpointTests(unittest.TestCase):
     def test_every_migrated_metric_has_a_written_doc(self):
         """Issue #104's own to-do: write the .mdx for each migrated
         metric - checked here so a missing file fails the suite instead
-        of quietly falling back to synthesised frontmatter forever."""
-        for metric in ALL_METRICS:
-            with self.subTest(id=metric.id):
-                resp = client.get(f"/api/portfolio-metric-docs/{metric.id}")
-                self.assertEqual(resp.status_code, 200)
-                self.assertTrue(resp.json()["has_doc"], f"{metric.id} ships no .mdx")
+        of quietly falling back to synthesised frontmatter forever.
+
+        One real HTTP call per registered metric, against the shared
+        `rate_limit.general_limiter` every TestClient call in this suite
+        draws from (issue #93) - patched to a fresh, generous instance
+        for the duration of this one loop rather than left to compete
+        with every other file's own calls for the real 120/minute budget,
+        the same "patch in a fresh limiter" rule test_rate_limit.py's own
+        tests follow, here to avoid tripping the shared one rather than
+        to test it.
+        """
+        with patch("rate_limit.general_limiter", FixedWindowLimiter(limit=1000, window_seconds=60)):
+            for metric in ALL_METRICS:
+                with self.subTest(id=metric.id):
+                    resp = client.get(f"/api/portfolio-metric-docs/{metric.id}")
+                    self.assertEqual(resp.status_code, 200)
+                    self.assertTrue(resp.json()["has_doc"], f"{metric.id} ships no .mdx")
 
     def test_a_metric_with_no_doc_file_gets_synthesised_frontmatter(self):
         class _NoDocMetric(MetricBase):

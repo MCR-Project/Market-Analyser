@@ -10,8 +10,11 @@
  * are active; this component only groups them by family and draws each
  * one according to its declared `format` — it does not know what CAGR
  * or Max Drawdown mean, only that one is "percent_signed" and the other
- * is "drawdown". Adding a metric to the registry is enough for it to
- * appear here correctly formatted, with no change to this file.
+ * is "drawdown". "ratio" (Calmar/Sharpe/Sortino, issue #112 — the same
+ * "N.NN×" reading FundMetricsCard.jsx's own diversificationRatio tile
+ * uses) and "days" (Time Under Water) are the two formats that issue
+ * added; adding a metric to the registry is enough for it to appear here
+ * correctly formatted otherwise, with no change to this file.
  *
  * The actual figures still come from `metrics` — `POST /api/portfolio/
  * simulate`'s unchanged response (issue #104 does not touch the
@@ -55,6 +58,21 @@ function percent(value, { signed = false } = {}) {
   const text = `${Math.abs(value).toFixed(1)}%`;
   if (!signed) return text;
   return `${value >= 0 ? '+' : '−'}${text}`;
+}
+
+// A plain, dimensionless ratio (Calmar, Sharpe, Sortino, issue #112) —
+// the same "N.NN×" reading FundMetricsCard.jsx already uses for
+// diversificationRatio, so the two read the same way wherever a reader
+// happens to see them.
+function ratio(value) {
+  if (value === null || value === undefined) return '—';
+  return `${value.toFixed(2)}×`;
+}
+
+// A whole number of calendar days (Time Under Water, issue #112).
+function days(value) {
+  if (value === null || value === undefined) return '—';
+  return `${value}d`;
 }
 
 function currencySigned(value) {
@@ -130,6 +148,12 @@ function MetricTile({ metric, metrics }) {
   }
   if (metric.format === 'percent') {
     return <Stat label={label} value={percent(value)} title={metric.description} reason={reason} />;
+  }
+  if (metric.format === 'ratio') {
+    return <Stat label={label} value={ratio(value)} title={metric.description} reason={reason} />;
+  }
+  if (metric.format === 'days') {
+    return <Stat label={label} value={days(value)} title={metric.description} reason={reason} />;
   }
   if (metric.format === 'currency_signed') {
     return (

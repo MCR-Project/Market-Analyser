@@ -1,0 +1,51 @@
+---
+title: Sharpe Ratio
+summary: Annualised mean excess return over annualised volatility.
+---
+
+## What it measures
+
+A portfolio can be more volatile than another and still be the better
+holding — the question is whether the extra return was worth the extra
+risk. Sharpe answers it directly: how much return the run produced above
+a risk-free baseline, for every unit of total volatility it took on to
+get there.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{Sharpe} = \frac{\overline{r} \times 252 - r_f}{\sigma}`} />
+
+`r̄ × 252` is the **arithmetic mean** of the run's own period returns,
+annualised — deliberately not CAGR. Volatility is already built from the
+arithmetic mean of the same period returns (each one first scaled by the
+trading time its own gap covers, the same way every bucket-spanning
+figure in this app is), and Sharpe is only a meaningful ratio when its
+numerator is measured the same way its denominator is. `r_f` is the
+annual risk-free rate for this run's own window — the tracked series' own
+average over it, or an explicit override.
+
+<WorkedExample />
+
+## How it reads
+
+Above 1 is generally considered good, above 2 very good, though what
+counts as good depends entirely on what else was available over the same
+stretch — Sharpe has no absolute scale of its own, only a comparison
+between the return actually taken and the risk paid for it. A negative
+Sharpe means the run did not even keep pace with the risk-free rate,
+whatever its own volatility.
+
+<Note>
+`metrics.riskFreeRate` and `metrics.riskFreeRateSource` in the worked
+example above state exactly which rate produced this figure — the
+tracked series' own average over this run's window ("tracked"), or the
+override this page's example portfolio supplied ("override").
+</Note>
+
+## Caveats
+
+Null when no risk-free rate is available for this window and no override
+was given — never scored against an assumed zero. Also null when the
+window has fewer than two period returns to measure a mean or a
+volatility from at all. Read alongside Sortino, which asks the same
+question but does not penalise the run for moving up.

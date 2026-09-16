@@ -261,6 +261,51 @@ own bucket is without an earlier date to measure the gap from. `None`
 with fewer than two rows, the same "nothing to average" case every other
 function here reports as absent rather than zero.
 
+`underwater_stretches` generalises `max_drawdown`'s single worst episode to
+every episode the series had: `{"start", "trough", "end", "depth"}` per
+stretch, `end: None` for one still open at the series' own last row rather
+than inventing a recovery that has not happened. `pain_index` and
+`time_under_water` (issue #112) are both built on it - the "how much, and
+for how long" and "for how long, and how much of the window" companions
+to `max_drawdown`'s "how much, once". `pain_index` is the time-weighted
+mean drawdown depth (each row's own drawdown weighted by the calendar days
+it persisted, the same reasoning every other bucket-spanning average in
+this module follows, so a window's sparse, coarse-tiered stretch is not
+under-counted against its own dense, daily one). `time_under_water`
+reports the longest stretch's own duration in calendar days alongside
+that same duration summed across every stretch as a share of the whole
+window - stretches never overlap, so the sum double-counts nothing. Both
+report `0`, a real answer, for a series that never fell below its own
+running peak, and `None` only where there is no elapsed day between any
+two rows to measure at all - the same floor `pain_index` (and, before this
+issue, only `max_drawdown`) already drew.
+
+`calmar_ratio` (issue #112) is the odd one out even among the "no time
+dimension" exceptions above: it takes two **already-computed** figures
+(a CAGR and a max-drawdown value) rather than a series at all, since
+`services/portfolio.py`'s own `_metrics()` has both in hand already and
+recomputing either from the series a second time would risk the two
+quietly disagreeing. `None` when either input is `None`, or when the
+drawdown is exactly `0` - a ratio against an assumed-riskless run is not
+a number, however good the CAGR.
+
+`sharpe_ratio`/`sortino_ratio` (issue #112) divide the same numerator -
+`_annualized_mean_return` (private), the **arithmetic** mean of the
+series' own period returns annualised by simple proportion rather than by
+root time, deliberately not `cagr`: it is built the same way
+`volatility`'s and `downside_deviation`'s own dispersion already is (both
+from the arithmetic mean of the same period returns), which is what keeps
+numerator and denominator of either ratio measuring the run the same way
+- by `volatility`'s value and by `downside_deviation`'s (target `0.0`,
+its own default) respectively. `rate` is a required argument, not
+defaulted here the way `tail_correlation`'s `quantile` is: it is the
+caller's own already-resolved annual risk-free rate (the tracked
+series' average over the run's window, or an override -
+`services/portfolio.py`'s `_resolve_rate`), stated on the metric's own
+doc page rather than baked into this module. `None` on the same terms
+`volatility`/`downside_deviation` themselves are - fewer than two period
+returns - or when the denominator itself is exactly `0`.
+
 `tail_correlation` (issue #107) is `r_squared`'s sibling restricted to a
 benchmark's own worst decile of periods by return, built from the same raw,
 unscaled paired returns `up_capture`/`down_capture` use rather than the
@@ -332,13 +377,25 @@ arithmetic itself belongs in `stats.py` above, not here. The invariants:
   intersection.** A gap inside a holding's own history is forward-filled; the
   dates before its first close stay empty, which is what keeps it cash.
 - **Time-weighted vs money-weighted is the point.** Total return, CAGR,
-  volatility and drawdown are read off `stats.unit_values` — the total with
-  deposits taken back out — and describe the portfolio. `moneyWeightedReturn`
-  (IRR by bisection, still computed here — it is about the account's own cash
-  flows, not shared with a single holding) describes the account. With no
-  contributions `units` *is* `totals`, by identity, which is what makes "off by
-  default" a promise: a run without contributions is not merely close to the
-  old result, it is the same object.
+  volatility, drawdown, time under water, pain index, Calmar, Sharpe and
+  Sortino (issue #112) are all read off `stats.unit_values` — the total
+  with deposits taken back out — and describe the portfolio.
+  `moneyWeightedReturn` (IRR by bisection, still computed here — it is
+  about the account's own cash flows, not shared with a single holding)
+  describes the account. With no contributions `units` *is* `totals`, by
+  identity, which is what makes "off by default" a promise: a run without
+  contributions is not merely close to the old result, it is the same
+  object - true of every metric added since, without any of them having to
+  re-earn it.
+- **The risk-free rate is resolved once, before `_metrics()` is called**
+  (issue #112's own `_resolve_rate`): an explicit `rate` argument if the
+  caller gave one, else `get_risk_free_rate`'s own average over *this
+  run's own window* - not a single point value, since the window a rate
+  is read for should be the one it is scoring. `(None, None)` when
+  neither is available, which `_metrics()` reads as "Sharpe and Sortino
+  are both null, with a reason" rather than scoring either against an
+  assumed zero. `metrics.riskFreeRate`/`riskFreeRateSource` echo whichever
+  one actually produced them.
 - **A holding's `contribution` is its final value less every dollar put into
   it.** Once a rebalance moves money between holdings, a final value says nothing
   about which holding earned it. These sum to the portfolio's gain. The UI labels

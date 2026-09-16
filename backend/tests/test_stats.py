@@ -440,6 +440,90 @@ class PainIndexTests(unittest.TestCase):
         self.assertIsNone(stats.pain_index([100.0], ["2020-01-02"])["value"])
 
 
+class TimeUnderWaterTests(unittest.TestCase):
+    def test_a_never_underwater_series_reports_zero(self):
+        result = stats.time_under_water(
+            [100.0, 110.0, 120.0], ["2020-01-02", "2020-01-03", "2020-01-06"]
+        )
+        self.assertEqual(result["longestDays"], 0)
+        self.assertEqual(result["shareOfWindow"], 0.0)
+
+    def test_the_longest_stretch_and_its_share_of_the_window(self):
+        """Peak on the 1st, underwater from the 2nd (the first row below
+        it) through the 5th (the first row back at or past it) - 3 days
+        of a 4-day window."""
+        dates = ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04", "2020-01-05"]
+        values = [100.0, 90.0, 80.0, 95.0, 100.0]
+        result = stats.time_under_water(values, dates)
+        self.assertEqual(result["longestDays"], 3)
+        self.assertAlmostEqual(result["shareOfWindow"], 75.0, places=4)
+
+    def test_a_stretch_still_open_at_the_last_row_is_timed_to_it(self):
+        dates = ["2020-01-01", "2020-01-02", "2020-01-03"]
+        values = [100.0, 90.0, 80.0]  # never recovers
+        result = stats.time_under_water(values, dates)
+        # Underwater from the 2nd (the first row below the peak) to the
+        # 3rd (the series' own last row, since it never recovers) - 1 day.
+        self.assertEqual(result["longestDays"], 1)
+        self.assertAlmostEqual(result["shareOfWindow"], 50.0, places=4)
+
+    def test_the_longest_of_several_stretches_wins(self):
+        dates = ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04",
+                 "2020-01-05", "2020-01-06", "2020-01-07", "2020-01-08"]
+        # Dip 1: underwater the 2nd only, recovered the 3rd (1 day). Dip
+        # 2: underwater the 5th through the 7th, recovered the 8th (3
+        # days) - the longer one.
+        values = [100.0, 90.0, 100.0, 105.0, 95.0, 85.0, 90.0, 105.0]
+        result = stats.time_under_water(values, dates)
+        self.assertEqual(result["longestDays"], 3)
+
+    def test_fewer_than_two_rows_is_null(self):
+        result = stats.time_under_water([100.0], ["2020-01-02"])
+        self.assertIsNone(result["longestDays"])
+        self.assertIsNone(result["shareOfWindow"])
+
+
+class CalmarRatioTests(unittest.TestCase):
+    def test_matches_cagr_over_absolute_drawdown(self):
+        self.assertAlmostEqual(stats.calmar_ratio(20.0, -10.0), 2.0, places=4)
+
+    def test_null_when_either_input_is_null(self):
+        self.assertIsNone(stats.calmar_ratio(None, -10.0))
+        self.assertIsNone(stats.calmar_ratio(20.0, None))
+
+    def test_null_when_there_was_no_drawdown_to_divide_by(self):
+        self.assertIsNone(stats.calmar_ratio(20.0, 0.0))
+
+
+class SharpeSortinoTests(unittest.TestCase):
+    def _rising_with_one_dip(self):
+        dates = [f"2020-01-{d:02d}" for d in (2, 3, 6, 7, 8, 9, 10)]
+        values = [100.0, 105.0, 95.0, 112.0, 108.0, 121.0, 130.0]
+        return values, dates
+
+    def test_sortino_is_at_least_sharpe_when_downside_deviation_is_smaller(self):
+        values, dates = self._rising_with_one_dip()
+        sharpe = stats.sharpe_ratio(values, dates, 1.0)
+        sortino = stats.sortino_ratio(values, dates, 1.0)
+        self.assertIsNotNone(sharpe["value"])
+        self.assertIsNotNone(sortino["value"])
+        self.assertGreaterEqual(sortino["value"], sharpe["value"])
+
+    def test_a_higher_rate_reads_a_lower_ratio(self):
+        """The rate only ever changes the numerator, so raising it must
+        not raise the ratio."""
+        values, dates = self._rising_with_one_dip()
+        low_rate = stats.sharpe_ratio(values, dates, 0.0)["value"]
+        high_rate = stats.sharpe_ratio(values, dates, 20.0)["value"]
+        self.assertLess(high_rate, low_rate)
+
+    def test_fewer_than_two_returns_is_null(self):
+        result = stats.sharpe_ratio([100.0], ["2020-01-02"], 2.0)
+        self.assertIsNone(result["value"])
+        result = stats.sortino_ratio([100.0], ["2020-01-02"], 2.0)
+        self.assertIsNone(result["value"])
+
+
 # ── Unit values ──────────────────────────────────────────────────────────────
 
 class UnitValuesTests(unittest.TestCase):

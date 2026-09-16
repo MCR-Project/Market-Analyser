@@ -614,7 +614,14 @@ class ContributionRouteTests(unittest.TestCase):
             return SimpleNamespace(data=self.ROWS)
 
     def _post(self, body):
-        with patch("services.market_data.get_client_optional", return_value=self._Client()):
+        with (
+            patch("services.market_data.get_client_optional", return_value=self._Client()),
+            # get_risk_free_rate also reaches get_client_optional now
+            # (issue #112) - _Client answers any table with these price
+            # rows, which have no "rate" column, so this is patched
+            # separately rather than taught to the fake.
+            patch("services.portfolio.get_risk_free_rate", return_value=None),
+        ):
             return client.post("/api/portfolio/simulate", json=body)
 
     BODY = {

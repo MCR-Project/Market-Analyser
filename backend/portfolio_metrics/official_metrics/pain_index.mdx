@@ -1,0 +1,47 @@
+---
+title: Pain Index
+summary: The mean drawdown depth across the whole window, weighted by how long each one persisted.
+---
+
+## What it measures
+
+Max Drawdown is "how much, once" — the single worst fall. This is "how
+much, on average" — every day of the window's own distance below its
+running peak, averaged across the whole stretch rather than reduced to
+its single worst moment. A portfolio that fell 40% once and spent a month
+there scores very differently here than one that sat 10% below its own
+peak for most of a year, even if the second one's Max Drawdown is far
+shallower.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{pain} = \frac{\sum_t \left|\frac{\text{unitValue}_t - \max_{s \le t}(\text{unitValue}_s)}{\max_{s \le t}(\text{unitValue}_s)}\right| \times \text{days}_t}{\sum_t \text{days}_t}`} />
+
+Each row's own drawdown from the running peak is weighted by how many
+calendar days it persisted before the next observation, not averaged one
+row, one vote — a window spanning storage tiers has far fewer rows in its
+oldest, coarsest stretch however long that stretch actually lasted, and an
+unweighted average would under-count exactly the years answered in
+monthly buckets.
+
+<WorkedExample />
+
+## How it reads
+
+Closer to 0% means the portfolio spent most of the window at or near its
+own high-water mark. A pain index well below the Max Drawdown figure
+means the worst fall was a brief exception rather than the window's own
+character; one close to it means the portfolio spent much of its time
+about as far down as it ever got.
+
+## Caveats
+
+<Note>
+Zero here is a genuine, common answer — a portfolio that never fell below
+a prior peak scores exactly 0%, the same as Max Drawdown does for the
+same run, not a missing or unsupported figure.
+</Note>
+
+Null only for a window with no elapsed day between any two rows at all —
+a single row of price history. Measured on the portfolio's own total,
+never on one holding in isolation.
