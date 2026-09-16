@@ -41,6 +41,7 @@ import { usePortfolioSimulation } from '../../hooks/usePortfolioSimulation';
 import { useSimulationWindow } from '../../hooks/useSimulationWindow';
 import { useRiskFreeRate } from '../../hooks/useRiskFreeRate';
 import { usePortfolioMetrics } from '../../hooks/usePortfolioMetrics';
+import { usePortfolioRisk } from '../../hooks/usePortfolioRisk';
 import {
   CONTRIBUTION_FREQUENCIES,
   DEFAULT_CONTRIBUTION,
@@ -53,6 +54,7 @@ import { BenchmarkBar } from './BenchmarkBar';
 import { ComparisonChart } from './ComparisonChart';
 import { ComparisonSummary } from './ComparisonSummary';
 import { PortfolioChart } from './PortfolioChart';
+import { PortfolioRiskCard } from './PortfolioRiskCard';
 import { PortfolioSummary } from './PortfolioSummary';
 import { HoldingsTable } from './HoldingsTable';
 import { WindowControls } from './WindowControls';
@@ -416,6 +418,18 @@ export function PortfolioPanel({
   const portfolioMetrics = usePortfolioMetrics();
   const [metricsPickerOpen, setMetricsPickerOpen] = useState(false);
 
+  // The same body `simulate` is asked with (issue #113's own "same body
+  // shape" decision) - null rather than an empty request whenever there
+  // is nothing to invest in, so usePortfolioRisk treats it the same way
+  // usePortfolioSimulation treats no holdings: nothing to fetch, not an
+  // error worth showing.
+  const simulateRequest = useMemo(() => {
+    if (!holdings.some(h => h.weight > 0)) return null;
+    return requestFor(holdings, portfolio.value, portfolio.rebalance, request, portfolio.contribution);
+  }, [holdings, portfolio.value, portfolio.rebalance, portfolio.contribution, request]);
+  const portfolioRisk = usePortfolioRisk(simulateRequest);
+  const [riskPickerOpen, setRiskPickerOpen] = useState(false);
+
   // What the window was before a drag replaced it. A drag is easy to do
   // by accident and fiddly to undo by hand; choosing the window any other
   // way means the old one is no longer what anybody wants back.
@@ -658,6 +672,7 @@ export function PortfolioPanel({
       ) : simulation && (
         <>
           <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} portfolioMetrics={portfolioMetrics} />
+          <PortfolioRiskCard portfolioRisk={portfolioRisk} onOpenPicker={() => setRiskPickerOpen(true)} />
           <PortfolioChart
             simulation={simulation}
             groupBy={groupBy}
@@ -695,6 +710,20 @@ export function PortfolioPanel({
           activeIds={portfolioMetrics.activeIds}
           onToggle={portfolioMetrics.toggle}
           onClose={() => setMetricsPickerOpen(false)}
+        />
+      )}
+
+      {riskPickerOpen && (
+        <MetricsPicker
+          tileMetrics={portfolioRisk.tileMetrics}
+          families={portfolioRisk.families}
+          activeIds={portfolioRisk.activeIds}
+          onToggle={portfolioRisk.toggle}
+          onClose={() => setRiskPickerOpen(false)}
+          eyebrow="PORTFOLIO RISK"
+          subtitle="Select which tiles to show on the portfolio risk card"
+          ariaLabel="Portfolio risk metrics"
+          emptyText="No portfolio risk metrics available — is the backend running?"
         />
       )}
     </div>

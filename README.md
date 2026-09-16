@@ -708,9 +708,8 @@ stored: the portfolio arrives in the request and leaves in the response.
     "frequency": "monthly"           // monthly | quarterly | yearly
   },
   "rate": null                       // risk-free rate override, % p.a. (issue
-                                      //   #103); omit for the tracked series.
-                                      //   Accepted, not yet read - the ratios
-                                      //   that use it are their own issue.
+                                      //   #103), scoring Sharpe/Sortino (issue
+                                      //   #112); omit for the tracked series.
 }
 ```
 
@@ -738,6 +737,14 @@ stored: the portfolio arrives in the request and leaves in the response.
     "volatility": 29.3332,           // annualised, percent
     "maxDrawdown": { "value": -17.4831,
                      "peakDate": "2026-01-28", "troughDate": "2026-03-30" },
+    "timeUnderWater": 83,            // longest stretch below a prior peak, days
+    "shareUnderWater": 22.6027,      // that time as a percent of the window
+    "painIndex": 3.4998,             // time-weighted mean drawdown depth, percent
+    "calmar": 3.4521,                // cagr / |maxDrawdown|
+    "sharpe": 1.6987,                // excess return over volatility
+    "sortino": 2.5931,               // excess return over downside deviation
+    "riskFreeRate": 3.7186,          // % p.a. Sharpe/Sortino were scored against
+    "riskFreeRateSource": "tracked", // "tracked" or "override" (the request's `rate`)
     "contributed": 1200.0,           // recurring contributions only
     "totalInvested": 11200.0,        // startValue + contributed
     "gain": 2817.3,                  // finalValue − totalInvested
@@ -781,6 +788,46 @@ which blames the window for what is really a bad symbol.
 resolves a ticker there before adding it, so the misleading message is
 mostly unreachable from the app.
 
+**`POST /api/portfolio/risk`** (issue #113) — how independently a
+basket's own holdings actually move. The same body `simulate` takes
+(`value`, `rebalance`, `contribution` and `rate` are accepted for shape
+parity — a caller can send it the exact request it built for `simulate`
+— but unused: this is a question about the basket's price history, not
+about a value simulated over it), its own endpoint rather than folded
+into `simulate`'s response, because a correlation matrix over the basket
+is a second, wider price read than a value simulation needs and making
+every run pay for it would slow down every simulation for the sake of
+the ones somebody actually asked a risk question of.
+
+```jsonc
+// response
+{
+  "start": "2025-09-08",             // the window actually used
+  "end": "2026-09-04",
+  "averageCorrelation": 0.42,        // mean pairwise ρ; lower is more diversified
+  "effectiveBets": 1.9763,           // 1..holding count; 1 for a basket of one
+  "riskShare": { "TXN": 62.3, "MSFT": 37.7 },  // percent of variance per holding, sums to 100
+  "reasons": {}                      // present only when a figure above is null
+}
+```
+
+`riskShare` is the Euler decomposition of the basket's variance
+(`services.stats.risk_contribution`) — not the same thing as dollar
+weight, and a holding whose own moves reliably offset the rest of the
+basket's can carry a genuinely negative share, which is real rather than
+an error. `effectiveBets` is the inverse Herfindahl of each holding's own
+risk-share *magnitude* (`services.stats.effective_n`) rather than its
+signed value, which is what keeps the figure a guaranteed `[1, holding
+count]` rather than one that only usually lands there. All three are
+null together, with a `reasons` entry each, when fewer than two holdings
+have a complete price history over the window or the basket has no
+measurable variance at all once aligned — the same two conditions the
+fund metrics card's own diversification ratio reports null for (see
+"Fund metrics" below). Reads nothing and stores nothing, and is bounded
+by the same `MAX_HOLDINGS` as `simulate`; the same 400/404/503 contract
+applies, so a caller already handling `simulate`'s errors handles this
+endpoint's too.
+
 **`GET /api/tickers/search?q=&limit=`** — find something to add to a
 basket. This is the as-you-type path, so it answers from a cached snapshot
 of the `ticker` and `etfs` tables and never calls yfinance and never
@@ -821,14 +868,19 @@ A metric class declares its id, name, family (`portfolio` — time-weighted,
 or `account` — money-weighted), formula, null rule and which of a small
 fixed set of display formats it wants (currency, percent, a signed
 variant of either, the drawdown object's `{value, peakDate, troughDate}`
-shape, a bare list, a plain ratio such as Calmar's — `1.42×` — or a count
+shape, a bare list, a plain ratio such as Calmar's — `1.42×` — a count
 of days such as Time Under Water's — `45d`, issue #112's own two
-additions). `GET /api/portfolio-metrics` returns every registered metric
-plus the two families' own labels — `PortfolioSummary` reads its two row
-headers off that response rather than hardcoding them. Adding a metric to
-the registry is enough for it to appear in the enable/disable dialog and,
-for any of the formats above, to render correctly as a tile — no frontend
-change required.
+additions — or a bare signed decimal such as Average Correlation's —
+`0.42` — issue #113's own addition, never tone-coloured since a negative
+reading there is not a loss the way a negative return is). `GET
+/api/portfolio-metrics` returns every registered metric plus the two
+families' own labels — `PortfolioSummary` reads its two row headers off
+that response rather than hardcoding them. Adding a metric to the
+registry is enough for it to appear in the enable/disable dialog and, for
+any of the formats above, to render correctly as a tile — no frontend
+change required (except a `computed_from="risk"` entry, which neither
+`PortfolioSummary` nor the fund metrics card renders at all — see
+"Portfolio risk" below for the one place that does).
 
 **The arithmetic never moves.** A metric's `value()` reads its own figure
 back out of the same `POST /api/portfolio/simulate` response
@@ -845,21 +897,26 @@ way `?window=` and `?rf=` are — it survives a reload and travels in a
 share link. An unusable value (a stale id from an old link, or none at
 all) falls back to the registry's own default set.
 
-**A metric can be computed from a simulation run or from a fund.**
-Eighteen metrics read `run["metrics"][id]` — the original twelve plus
-issue #112's time under water, share under water, pain index, Calmar,
-Sharpe and Sortino; three (issue #105 — see "Fund metrics" below) read
-`services/fund_metrics.py` instead, keyed by `etf_id` rather than by a
-completed run.
+**A metric can be computed from a simulation run, from a fund, or from
+the basket's own risk endpoint.** Eighteen metrics read
+`run["metrics"][id]` — the original twelve plus issue #112's time under
+water, share under water, pain index, Calmar, Sharpe and Sortino; three
+(issue #105 — see "Fund metrics" below) read `services/fund_metrics.py`
+instead, keyed by `etf_id` rather than by a completed run; three more
+(issue #113 — see "Portfolio risk" below) read `POST /api/portfolio/risk`
+instead of `simulate`'s own response, for the same "this would slow down
+every run" reason that response never grew these fields itself.
 
 Each metric documents itself the same way a measurement does: an `.mdx`
 file next to its module (`cagr.py` → `cagr.mdx`), served at
 `/docs/<metric id>` under its own "Portfolio metrics" sidebar group, with
 a worked example computed live — against `DOCS_EXAMPLE_PORTFOLIO`
-(`backend/config.py`) for a run-based metric, a funded basket so both
-families' tiles have a real, non-null number to show; against
-`DOCS_EXAMPLE_ETF` for a fund-based one. Copy
-`backend/portfolio_metrics/DOC_TEMPLATE.mdx` to start one.
+(`backend/config.py`) for a run-based *or* a risk-based metric (the
+latter run through `compute_portfolio_risk` instead of `simulate_
+portfolio`, but the same basket, so a reader sees one example basket
+throughout), a funded basket so both families' tiles have a real,
+non-null number to show; against `DOCS_EXAMPLE_ETF` for a fund-based
+one. Copy `backend/portfolio_metrics/DOC_TEMPLATE.mdx` to start one.
 
 ### Fund metrics
 
@@ -908,6 +965,38 @@ query-string key, `?fundMetrics=`, so it can never collide with the
 portfolio page's `?metrics=` even though both are comma-separated id
 lists read through the same `withParams`/`readList` helpers.
 
+### Portfolio risk
+
+A third registry entry (issue #113), reusing the same mechanism a third
+time: how independently the *simulated basket's own* holdings move,
+rather than a whole run's performance or a fund's published weights.
+Three `computed_from: "risk"` entries — **average correlation** (the
+mean pairwise ρ among the basket's holdings), **effective bets** (the
+inverse Herfindahl of the basket's own risk shares — how many genuinely
+independent positions the basket behaves like) and **risk share** (each
+holding's own percent of the basket's variance, an Euler decomposition
+that sums to 100 and can go negative for a holding that hedges the
+rest) — read from `POST /api/portfolio/risk` rather than from
+`simulate`'s response, for the cost reason that section states: a
+correlation matrix is a second, wider price read than a value simulation
+needs, so folding it into every run would slow down every simulation for
+the sake of the ones somebody actually asked a risk question of.
+
+Average correlation and effective bets are optional tiles on their own
+card, `PortfolioRiskCard`, below the portfolio summary — a fourth
+independent consumer of the `backend/portfolio_metrics/` manifest,
+filtered to `computed_from: "risk"` the way the fund metrics card filters
+to `"etf_id"`. `usePortfolioRisk` only issues the request once a tile on
+that card is actually switched on, and settles it independently of
+`usePortfolioSimulation`'s own fetch (the same `Promise.allSettled`
+independence `useComparisonRuns` already gives each comparison line), so
+a 503 from this endpoint costs only these two tiles and never touches the
+run's own chart or its other tiles. `?risk=` is its own query-string key,
+the same "never collide" rule `?metrics=`/`?fundMetrics=` already follow.
+Risk share has no tile at all — a per-holding breakdown does not fit a
+single number — but still ships a full doc page and worked example, the
+same "no tile, still documented" decision the dividend trio made.
+
 ### Bounding one anonymous client
 
 There are no accounts here (see "Where portfolios live, and why there is no
@@ -926,9 +1015,10 @@ caller can cost:
   Yahoo at most once every five minutes for a given fund, however many
   people ask for it in that window. A refresh inside that window is served
   the normal cached answer rather than refused.
-- **A simulation is capped at 50 holdings.** Comfortably more than any real
-  portfolio built here has needed, and well inside what a single request
-  from an unauthenticated caller should be able to ask for.
+- **A simulation, or a risk read, is capped at 50 holdings** — the same
+  `MAX_HOLDINGS`, shared rather than duplicated. Comfortably more than any
+  real portfolio built here has needed, and well inside what a single
+  request from an unauthenticated caller should be able to ask for.
 
 ## Frontend
 

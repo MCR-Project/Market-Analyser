@@ -10,29 +10,39 @@ water, share under water, pain index, Calmar, Sharpe and Sortino (issue
 #112) followed the same rule once `_metrics()` grew them: the arithmetic
 lives in services/stats.py and services/portfolio.py, not here.
 
-The last three (issue #105) are the odd ones out: `computed_from
-="etf_id"`, not "run" — a fund's own diversification ratio, its variance
-concentration and its tracked-weight coverage, read via
-services/fund_metrics.py rather than services/portfolio.py. They share
-this registry, this manifest endpoint and this doc/example machinery
-with the run-based metrics above rather than standing up a parallel one,
-per issue #105's own decision ("different metrics, one mechanism") — the
-frontend's own fund-metrics card only ever asks for the entries whose
-`computed_from` is "etf_id".
+The next three (issue #105) are `computed_from="etf_id"`, not "run" — a
+fund's own diversification ratio, its variance concentration and its
+tracked-weight coverage, read via services/fund_metrics.py rather than
+services/portfolio.py. They share this registry, this manifest endpoint
+and this doc/example machinery with the run-based metrics above rather
+than standing up a parallel one, per issue #105's own decision
+("different metrics, one mechanism") — the frontend's own fund-metrics
+card only ever asks for the entries whose `computed_from` is "etf_id".
+
+The last three (issue #113) are `computed_from="risk"` — a basket's own
+diversification, read from `POST /api/portfolio/risk` rather than folded
+into a run's response, since not every run needs the wider price read a
+correlation matrix costs. Neither PortfolioSummary.jsx nor
+FundMetricsCard.jsx renders these; PortfolioRiskCard.jsx is their own
+independent consumer of this manifest, the same "different metrics, one
+mechanism" pattern issue #105 already established for the etf_id trio.
 """
 
+from portfolio_metrics.official_metrics.average_correlation import AverageCorrelationMetric
 from portfolio_metrics.official_metrics.cagr import CagrMetric
 from portfolio_metrics.official_metrics.calmar import CalmarMetric
 from portfolio_metrics.official_metrics.contributed import ContributedMetric
 from portfolio_metrics.official_metrics.diversification_ratio import DiversificationRatioMetric
 from portfolio_metrics.official_metrics.dividend_income import DividendIncomeMetric
 from portfolio_metrics.official_metrics.dividend_yield import DividendYieldMetric
+from portfolio_metrics.official_metrics.effective_bets import EffectiveBetsMetric
 from portfolio_metrics.official_metrics.final_value import FinalValueMetric
 from portfolio_metrics.official_metrics.gain import GainMetric
 from portfolio_metrics.official_metrics.income_unknown_for import IncomeUnknownForMetric
 from portfolio_metrics.official_metrics.max_drawdown import MaxDrawdownMetric
 from portfolio_metrics.official_metrics.money_weighted_return import MoneyWeightedReturnMetric
 from portfolio_metrics.official_metrics.pain_index import PainIndexMetric
+from portfolio_metrics.official_metrics.risk_share import RiskShareMetric
 from portfolio_metrics.official_metrics.share_under_water import ShareUnderWaterMetric
 from portfolio_metrics.official_metrics.sharpe import SharpeMetric
 from portfolio_metrics.official_metrics.sortino import SortinoMetric
@@ -75,4 +85,10 @@ OFFICIAL_METRICS = [
     DiversificationRatioMetric(),
     Top5VarianceShareMetric(),
     TrackedWeightCoverageMetric(),
+    # The portfolio-risk family (issue #113) — computed_from="risk", shown
+    # on the portfolio risk card rather than the portfolio summary or the
+    # fund metrics card.
+    AverageCorrelationMetric(),
+    EffectiveBetsMetric(),
+    RiskShareMetric(),
 ]

@@ -20,6 +20,9 @@ Endpoints:
   POST /api/portfolio/simulate   — value a basket of tickers over a window,
                                    with optional rebalancing and recurring
                                    contributions
+  POST /api/portfolio/risk       — average pairwise correlation, effective
+                                   bet count and per-holding risk share for
+                                   the same basket (issue #113)
 """
 
 from fastapi import APIRouter, Query, HTTPException
@@ -32,7 +35,7 @@ from services.market_data import (
     compute_correlation_matrix,
     list_etf_summaries,
 )
-from services.portfolio import simulate_portfolio
+from services.portfolio import compute_portfolio_risk, simulate_portfolio
 from services.tickers import DEFAULT_SEARCH_LIMIT, resolve_ticker, search_tickers
 from config import SECTOR_TAG
 
@@ -395,6 +398,45 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
                 portfolio.contribution.model_dump() if portfolio.contribution else None
             ),
             rate=portfolio.rate,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/portfolio/risk")
+def post_portfolio_risk(portfolio: PortfolioIn):
+    """How independently a basket's own holdings actually move (issue
+    #113) - the same body `POST /api/portfolio/simulate` takes (`value`,
+    `rebalance`, `contribution` and `rate` are accepted for shape parity
+    but unused: this question is about the basket's price history, not
+    about a value simulated over it), read from its own endpoint rather
+    than folded into every run.
+
+    Returns `averageCorrelation` (the basket's holdings' average pairwise
+    correlation - lower means more diversified), `effectiveBets` (the
+    number of equally weighted holdings that would concentrate risk the
+    way the basket's actual risk contributions do - between 1 and the
+    holding count, exactly 1 for a basket of one) and `riskShare` (each
+    holding's own share of the basket's variance, a percentage per ticker
+    summing to 100 - see services/portfolio.py's `compute_portfolio_risk`
+    for the full model). All three are null, with a `reasons` entry each,
+    wherever the basket cannot support them: fewer than two holdings with
+    a complete price history over the window, or no measurable variance
+    once aligned.
+
+    Reads nothing and stores nothing, exactly as `simulate` does, and is
+    bounded by the same `MAX_HOLDINGS`. A request that cannot be answered
+    is a 400 naming what is wrong, a holding that does not exist is a 404
+    naming the ticker, and a failure to reach the price source is a
+    retryable 503 - the same contract `simulate` honours, so a caller
+    already handling that response handles this one too.
+    """
+    try:
+        return compute_portfolio_risk(
+            [holding.model_dump() for holding in portfolio.holdings],
+            period=portfolio.period,
+            start=portfolio.start,
+            end=portfolio.end,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

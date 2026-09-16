@@ -20,13 +20,15 @@ It is spread across four directories, so a change often touches all of them:
 | `hooks/useSimulationWindow.js` | the window, held in the query string |
 | `hooks/useRiskFreeRate.js` | `?rf=`, an override for Sharpe/Sortino's rate (issue #103) — no visible control yet |
 | `hooks/usePortfolioMetrics.js` | the portfolio metric registry manifest, and `?metrics=` (issue #104) |
+| `hooks/usePortfolioRisk.js` | the `computed_from="risk"` entries of that same registry, `?risk=`, and the (gated) fetch of `POST /api/portfolio/risk` (issue #113) |
 | `hooks/useComparison.js` | `?compare=` and `?benchmark=` |
 | `hooks/useChartBrush.js` | dragging a window out of either chart |
 | `components/portfolio/*` | everything below |
 
 Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar`,
 `HoldingsTable`, `AddHolding`, `TickerSearchField`, `PortfolioChart`,
-`ComparisonChart`, `PortfolioSummary`, `ComparisonSummary`, `WindowControls`,
+`ComparisonChart`, `PortfolioSummary`, `PortfolioRiskCard` (issue #113),
+`ComparisonSummary`, `WindowControls`,
 `BenchmarkBar`, and the dialogs/notices (`CreatePortfolioDialog`,
 `ApplyWeightsDialog`, `DeletePortfolioDialog`, `SharePortfolioDialog`,
 `SharedNotice`, `StorageNotice`). `MetricsPicker`, the tile enable/disable
@@ -181,6 +183,20 @@ shape fits one of those six formats.
   those three instead. "Different metrics, one mechanism" is #105's own
   phrase for it — one backend registry, two frontend consumers that each
   filter it to the half they can actually use.
+- **A third consumer, `PortfolioRiskCard`/`usePortfolioRisk.js` (issue
+  #113), filters the same manifest a third time**, to the three
+  `computed_from="risk"` entries (average correlation, effective bets,
+  risk share — the last with `tile: false`, so it never reaches this
+  card either). Unlike the fund metrics card, its values fetch is
+  gated: `usePortfolioRisk` only calls `POST /api/portfolio/risk` once a
+  tile on the card is actually switched on, since that read is a wider
+  price fetch than `simulate` needs and issue #113's whole reason for
+  giving it its own endpoint is to spare a run nobody asked a risk
+  question of from paying for it. The fetch is also independent of
+  `usePortfolioSimulation`'s own — the same `Promise.allSettled`
+  independence "Comparison" below gives each comparison line — so a 503
+  here costs only this card's own tiles, never the chart or
+  `PortfolioSummary`.
 
 ## Comparison
 

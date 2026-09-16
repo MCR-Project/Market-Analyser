@@ -54,6 +54,7 @@ EXPECTED_IDS = [
     "contributed", "totalInvested", "gain", "moneyWeightedReturn",
     "dividendIncome", "dividendYield", "incomeUnknownFor",
     "diversificationRatio", "top5VarianceShare", "trackedWeightCoverage",
+    "averageCorrelation", "effectiveBets", "riskShare",
 ]
 
 
@@ -99,7 +100,7 @@ class ManifestShapeTests(unittest.TestCase):
                 self.assertTrue(manifest["formula"].strip())
                 self.assertTrue(manifest["null_rule"].strip())
                 self.assertEqual(manifest["origin"], "portfolio")
-                self.assertIn(manifest["computed_from"], ("run", "etf_id"))
+                self.assertIn(manifest["computed_from"], ("run", "etf_id", "risk"))
 
     def test_the_five_default_portfolio_tiles_are_default_enabled_tiles(self):
         """Today's five default tiles, unchanged (acceptance criterion 2)."""
@@ -121,7 +122,7 @@ class ManifestShapeTests(unittest.TestCase):
             self.assertEqual(manifest["family"], "dividend")
 
     def test_families_are_declared_data_not_frontend_layout(self):
-        for key in ("portfolio", "account", "diversification", "coverage"):
+        for key in ("portfolio", "account", "diversification", "coverage", "risk"):
             self.assertIn("label", FAMILIES[key])
             self.assertIn("note", FAMILIES[key])
 
@@ -264,6 +265,27 @@ class WorkedExampleEndpointTests(unittest.TestCase):
         body = resp.json()
         self.assertIsNone(body["value"])
         self.assertIn("reason", body)
+
+    def test_a_computed_from_risk_example_runs_the_risk_endpoint_for_real(self):
+        """averageCorrelation (issue #113) follows the "run" branch's own
+        payload shape (portfolio/run/value) rather than the etf_id one's
+        - compute_portfolio_risk runs for real against the documented
+        example portfolio, not simulate_portfolio, but the response is
+        shaped identically so PortfolioMetricWorkedExample.jsx needs no
+        branch of its own to render it."""
+        closes = _closes(
+            {"SPY": [400.0, 410.0, 420.0], "AGG": [100.0, 99.0, 98.0]},
+            ["2021-01-01", "2021-06-01", "2021-12-01"],
+        )
+        with patch("services.portfolio.get_closes", return_value=closes):
+            resp = client.get("/api/portfolio-metric-docs/averageCorrelation/example")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("portfolio", body)
+        self.assertIn("run", body)
+        self.assertIsNotNone(body["value"])
+        self.assertEqual(body["value"], body["run"]["metrics"]["averageCorrelation"])
 
 
 # ── computed_from="etf_id" support (acceptance criterion 5) ─────────────────

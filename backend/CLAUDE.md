@@ -215,13 +215,14 @@ Four things distinguish it from a price series:
   nothing has been synced for the window asked — a caller scoring a run
   against it must show a null with a reason, never an assumed zero.
 - **Overridable, not just readable.** `PortfolioIn.rate` (percent per
-  annum) lets a caller — the frontend's `?rf=`, via `useRiskFreeRate.js`,
-  or the future `POST /api/portfolio/risk`, issue #113, sharing the same
-  body shape — replace the tracked series for one run. Accepted on the
-  request today but not yet read by `simulate_portfolio`, since the
-  ratios that would use it are out of scope here; adding them is a matter
-  of reading `portfolio.rate` where #112 needs it; the field is already
-  there so that lands without a request-shape change.
+  annum) lets a caller — the frontend's `?rf=`, via `useRiskFreeRate.js`
+  — replace the tracked series for one run, read by `simulate_portfolio`
+  for Sharpe and Sortino (issue #112). `POST /api/portfolio/risk` (issue
+  #113) accepts the same `PortfolioIn` body for shape parity — a caller
+  can send it the exact request it built for `simulate` — but does not
+  read `rate` at all: what it answers (correlation, effective bet count,
+  per-holding risk share) is a property of the basket's price history,
+  not of anything scored against a risk-free rate.
 
 ## Adding an endpoint
 

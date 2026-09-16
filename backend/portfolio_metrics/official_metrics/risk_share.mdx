@@ -1,0 +1,59 @@
+---
+title: Risk Share
+summary: Each holding's own share of the basket's total variance, as a percentage that sums to 100.
+---
+
+## What it measures
+
+A holding's dollar weight says how much of the basket's *money* it is.
+Risk Share says how much of the basket's *risk* it is — and the two can
+be very different. A small, volatile position that moves against the
+rest of the basket can carry a large share of the risk on a small share
+of the money; a large position that moves opposite everything else can
+carry less risk than its weight would suggest, occasionally even a
+negative share.
+
+## How it is computed
+
+<Formula tex={String.raw`s_i = \frac{w_i \cdot \operatorname{Cov}(r_i, r_p)}{\operatorname{Var}(r_p)} \times 100`} />
+
+The Euler decomposition of the basket's total variance: each holding's
+weight times its covariance with the basket's own return, over the
+basket's total variance — the same arithmetic `services.fund_metrics.py`
+already applies to a fund's tracked holdings, applied here to a
+simulated basket instead. Every holding's share is read off one shared
+joint covariance matrix, the same one Average Correlation and Effective
+Bets are built from.
+
+<WorkedExample />
+
+## How it reads
+
+The shares sum to 100% across the basket (within rounding). A holding
+whose share is larger than its weight is contributing more risk than its
+size alone would suggest; smaller says the opposite. A negative share is
+real, not an error — it means that holding's own moves have, on net,
+offset the rest of the basket's rather than added to it.
+
+## Caveats
+
+<Note>
+A share can come out above 100% or below 0%. That is not an error: a
+holding whose own moves reliably offset the rest of the basket's carries
+negative risk, and the holdings that remain must then account for more
+than the whole between them. Two holdings that move perfectly opposite
+each other are the clearest case — one's share lands over 100%, the
+other's under 0%, and the two still sum to 100.
+</Note>
+
+This is not shown as a tile — a per-holding breakdown does not fit a
+single number, and there is no place on the summary that reads a value
+per holding today. It still has this documentation and a real worked
+example, the same "no tile, still documented" decision the dividend
+figures made.
+
+Null (for every holding at once) under the same conditions Average
+Correlation and Effective Bets are: fewer than two holdings with a
+complete price history over the window, or no measurable variance at all
+once aligned. Never null for a basket of one holding, which trivially
+carries 100% of its own risk.

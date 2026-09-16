@@ -184,6 +184,14 @@ export const api = {
   simulatePortfolio: (portfolio, { signal } = {}) =>
     fetchJson('/portfolio/simulate', { signal, body: portfolio }),
 
+  // Portfolio risk (issue #113) — average pairwise correlation, effective
+  // bet count and per-holding risk share for the same basket `simulate`
+  // takes. Its own endpoint, so a caller fetches it only when a metric
+  // that needs it is actually enabled (see usePortfolioRisk.js) rather
+  // than paying for it on every simulation.
+  getPortfolioRisk: (portfolio, { signal } = {}) =>
+    fetchJson('/portfolio/risk', { signal, body: portfolio }),
+
   // Portfolio metric registry (issue #104) — mirrors the measurement
   // manifest/doc/example endpoints below, for the summary's tiles instead
   // of the table's columns.

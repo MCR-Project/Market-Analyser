@@ -14,7 +14,13 @@
  * **The computed value is real**, the same load-bearing rule the
  * measurement version states: `simulate_portfolio` runs against the
  * documented example portfolio exactly as a normal simulation would, and
- * the value shown is read straight out of that response.
+ * the value shown is read straight out of that response. A
+ * computed_from="risk" metric (issue #113) reuses this same rendering
+ * path against `compute_portfolio_risk`'s own response instead — the
+ * backend's `examples.py` shapes that payload identically
+ * (`{portfolio, run, value, reason}`) precisely so this component needs
+ * no branch of its own beyond `isRiskExample`'s small wording tweak
+ * below (no simulated value, no contribution schedule to mention).
  */
 import { memo } from 'react';
 import { useFetch } from '../../hooks/useFetch';
@@ -28,7 +34,9 @@ const CURRENCY = new Intl.NumberFormat('en-US', {
 });
 
 /** A metric's raw value, by shape: a drawdown-style {value, peakDate,
- *  troughDate} object, a list (incomeUnknownFor), or a plain number. */
+ *  troughDate} object, a list (incomeUnknownFor), a per-holding breakdown
+ *  (riskShare, issue #113 — one percent per ticker, no "value" key of its
+ *  own to distinguish it from a drawdown object), or a plain number. */
 function formatValue(value) {
   if (value === null || value === undefined) return '—';
   if (Array.isArray(value)) return value.length ? value.join(', ') : '(none)';
@@ -37,7 +45,19 @@ function formatValue(value) {
       ? `${value.value}% (${value.peakDate} → ${value.troughDate})`
       : `${value.value}%`;
   }
+  if (typeof value === 'object') {
+    return Object.entries(value).map(([ticker, share]) => `${ticker} ${share}%`).join(', ');
+  }
   return String(value);
+}
+
+// A computed_from="risk" example (issue #113) is computed live, not
+// simulated - compute_portfolio_risk never walks the window day by day
+// the way simulate_portfolio does - so the sentence above the result
+// says so, and drops the contribution clause: a risk read pays no
+// attention to money paid in on a schedule.
+function isRiskExample(runMetrics) {
+  return 'riskShare' in (runMetrics || {}) || 'effectiveBets' in (runMetrics || {});
 }
 
 export const PortfolioMetricWorkedExample = memo(function PortfolioMetricWorkedExample({ measurementId }) {
@@ -99,13 +119,14 @@ export const PortfolioMetricWorkedExample = memo(function PortfolioMetricWorkedE
 
   const { portfolio, run, value, reason } = data;
   const holdings = portfolio.holdings || [];
-  const contribution = portfolio.contribution;
+  const risk = isRiskExample(run.metrics);
+  const contribution = !risk && portfolio.contribution;
 
   return (
     <section className="my-6">
       <SectionHeading>Worked example</SectionHeading>
       <p className="text-[13px] text-[var(--fg-2)] mt-0 mb-4">
-        Simulated live for a {CURRENCY.format(portfolio.value || 10_000)} portfolio of{' '}
+        {risk ? 'Computed live for a basket of' : `Simulated live for a ${CURRENCY.format(portfolio.value || 10_000)} portfolio of`}{' '}
         {holdings.map((h, i) => (
           <span key={h.ticker}>
             {i > 0 && ', '}

@@ -37,6 +37,13 @@ Every entry declares what it is computed from (issue #104's own words):
     `reason()` (below) to explain a null value - there is no shared
     "reasons" response to read from the way a run's own
     `metrics["reasons"]` supplies one.
+  - `computed_from = "risk"` - a completed `POST /api/portfolio/risk`
+    response (issue #113's own three: averageCorrelation, effectiveBets,
+    riskShare), the same basket shape a run is, but read from its own
+    endpoint rather than folded into `simulate`'s - see that route's own
+    docstring for why. `value()`'s default implementation (`RiskMetric`
+    below) reads `data[self.id]`, the risk-response counterpart to
+    `RunMetric` reading `data["metrics"][self.id]` out of a run.
 """
 
 import inspect
@@ -71,6 +78,15 @@ FAMILIES = {
         "label": "Coverage",
         "note": "What the 1% tracking threshold leaves out of these figures",
     },
+    # The computed_from="risk" family (issue #113) - a basket's own
+    # diversification, read from POST /api/portfolio/risk rather than a
+    # run's response, so it is a family in its own right rather than a
+    # member of "diversification" above (which is scoped to a fund's
+    # basket, not a simulated one).
+    "risk": {
+        "label": "Diversification",
+        "note": "This basket's own holdings, read from its own endpoint only when enabled",
+    },
 }
 
 
@@ -102,10 +118,19 @@ class MetricBase(ABC):
     # (incomeUnknownFor's ticker list, joined for display), "ratio"
     # (1.42×, issue #105's diversificationRatio; issue #112's own
     # Calmar/Sharpe/Sortino share it, read by PortfolioSummary.jsx rather
-    # than FundMetricsCard.jsx since they are computed_from="run"), "days"
-    # (45d, issue #112's timeUnderWater). Adding a metric whose shape
-    # already fits one of these needs no frontend change at all - not
-    # just to appear in the dialog, but to render correctly as a tile too.
+    # than FundMetricsCard.jsx since they are computed_from="run"; issue
+    # #113's own effectiveBets shares it too), "days" (45d, issue #112's
+    # timeUnderWater), "correlation" (a bare signed decimal like 0.42 or
+    # -0.15 - issue #113's own averageCorrelation - deliberately not
+    # "percent"/"percent_signed": a negative reading here is not a loss
+    # the way a negative return is, so tone-colouring it red would
+    # misstate it). Adding a metric whose shape already fits one of these
+    # needs no frontend change at all - not just to appear in the dialog,
+    # but to render correctly as a tile too - **except** a
+    # computed_from="risk" entry, which neither PortfolioSummary.jsx nor
+    # FundMetricsCard.jsx renders at all: PortfolioRiskCard.jsx is the
+    # one place "ratio" and "correlation" meet a "risk" value (see
+    # computed_from below).
     format: str = "currency"
 
     # Which set this was registered in. Set by portfolio_metrics/__init__.py
@@ -124,7 +149,7 @@ class MetricBase(ABC):
     default_enabled: bool = True
 
     # ── What this entry needs to be computed ────────────────────────────
-    computed_from: str = "run"  # "run" | "etf_id" (issue #105)
+    computed_from: str = "run"  # "run" | "etf_id" (issue #105) | "risk" (issue #113)
 
     # Overrides for the worked example, mirroring MeasurementBase's
     # example_etf/example_stock: a metric class may name its own rather
@@ -208,3 +233,19 @@ class RunMetric(MetricBase):
 
     def value(self, data):
         return (data.get("metrics") or {}).get(self.id)
+
+
+class RiskMetric(MetricBase):
+    """A metric read straight out of a completed `POST /api/portfolio/
+    risk` response (issue #113) - `RunMetric`'s counterpart for that
+    endpoint's own three entries. `value()` needs no override: `self.id`
+    is already the exact top-level key `services/portfolio.py`'s
+    `compute_portfolio_risk()` writes (averageCorrelation, effectiveBets,
+    riskShare) - there is no "metrics" wrapper to unpack the way a run's
+    response has, since the risk response *is* the metrics.
+    """
+
+    computed_from = "risk"
+
+    def value(self, data):
+        return (data or {}).get(self.id)
