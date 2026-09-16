@@ -1,0 +1,55 @@
+---
+title: Effective Bets
+summary: The number of equally weighted holdings that would concentrate risk the way this basket's actual risk contributions do.
+---
+
+## What it measures
+
+A ten-holding basket where one position carries 90% of the risk does not
+behave like ten bets — it behaves like one, with nine afterthoughts.
+Effective Bets answers "how many genuinely independent bets is this
+basket actually making", read off each holding's own share of the
+basket's *risk* rather than off its dollar weight.
+
+## How it is computed
+
+<Formula tex={String.raw`N_{\text{eff}} = \frac{1}{\sum_i p_i^2}, \quad p_i = \frac{|s_i|}{\sum_j |s_j|}`} />
+
+The inverse Herfindahl-Hirschman index of `riskShare`'s own magnitudes —
+the same concentration formula `services.stats.herfindahl`/`effective_n`
+already apply to a set of weights, applied here to each holding's own
+share of the basket's variance instead. A basket whose risk shares are
+equal (`1/n` each) scores `n`; one where a single holding carries all of
+it scores `1`, however many holdings sit beside it.
+
+<WorkedExample />
+
+## How it reads
+
+Between 1 and the holding count, always — never below 1 (all the risk in
+one holding) and never above the number of holdings (every holding
+contributing its risk independently). A basket of one holding is always
+exactly 1: one holding is one bet, by definition, regardless of how much
+price history is behind it.
+
+A number well short of the holding count says the basket's diversification
+is mostly nominal — many names, but a handful of them are doing almost
+all of the moving.
+
+## Caveats
+
+<Note>
+Computed from each holding's risk share by *magnitude*, not its signed
+value. Risk Share can go negative for a holding that reliably offsets
+the rest of the basket, and the inverse-Herfindahl formula above only
+stays between 1 and the holding count when every share it is fed is
+non-negative — using the signed shares directly would let one hedging
+holding push this figure outside that range.
+</Note>
+
+This is a property of *risk*, not of dollar weight — a basket that looks
+evenly split on the holdings table can still report a low Effective Bets
+if a few of those equal-weighted positions happen to be far more volatile
+or far more correlated with the rest than the others. Riding shotgun with
+Average Correlation and Risk Share gives the fuller picture: this number
+says how concentrated, those two say why.

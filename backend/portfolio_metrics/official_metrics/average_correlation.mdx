@@ -1,0 +1,49 @@
+---
+title: Average Correlation
+summary: The average pairwise correlation among this basket's own holdings.
+---
+
+## What it measures
+
+A basket of six holdings that all rise and fall together is one bet
+wearing six names, however different their weights look on the table.
+Average correlation is the plainest way to see that: across every pair
+of holdings in the basket, how closely did they actually move together?
+
+Lower means more diversified — the holdings are doing genuinely different
+things. A reading near 1.0 means the basket's real number of independent
+positions is much smaller than its holding count suggests.
+
+## How it is computed
+
+<Formula tex={String.raw`\bar\rho = \frac{1}{\binom{n}{2}} \sum_{i<j} \operatorname{Corr}(r_i, r_j)`} />
+
+The mean of every distinct pair's own Pearson correlation, each computed
+from the same trading-time-scaled returns `volatility` and the risk share
+below are built from, over the same joint covariance matrix
+`riskShare`/`effectiveBets` read — so all three describe the same window
+rather than three that happen to agree. A holding whose own variance is
+zero drops only its own pairs from the average rather than nulling the
+whole figure.
+
+<WorkedExample />
+
+## How it reads
+
+Close to 0 or negative is the diversified end — the holdings are
+genuinely offsetting each other's moves. Close to 1 means the basket's
+apparent breadth is mostly nominal: many names, one real exposure.
+
+## Caveats
+
+<Note>
+Negative here is not "bad" the way a negative return is — it is the more
+diversified end of the same number a positive reading is the less
+diversified end of. This tile is never tone-coloured for that reason.
+</Note>
+
+Null for a basket of one holding — there is no pair to correlate at all
+— and under the same incomplete-history or no-variance conditions
+`riskShare`/`effectiveBets` are. Averaging away every pair also hides
+which *specific* pair is driving the number up; Risk Share is the figure
+for which holdings actually carry the basket's risk.

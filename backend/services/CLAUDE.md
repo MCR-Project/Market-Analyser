@@ -10,7 +10,7 @@ decisions.
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
 | `stats.py` | Return and risk arithmetic over a plain series — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
-| `portfolio.py` | The simulation — decides what series to hand `stats.py` and assembles its answers into a portfolio's shape, no I/O of its own beyond the reads it calls |
+| `portfolio.py` | The simulation, plus its sibling risk decomposition (issue #113) — decides what series to hand `stats.py` and assembles its answers into a portfolio's or a basket's shape, no I/O of its own beyond the reads it calls |
 | `fund_metrics.py` | The fund-level metrics card's arithmetic assembly (issue #105) — `portfolio.py`'s counterpart for a fund's own basket rather than a simulated run: decides what to hand `stats.py`, assembles the answer, no arithmetic of its own |
 
 ## The pattern every `market_data` function follows
@@ -245,6 +245,19 @@ alignment step (`_aligned_covariance`, private) so both are always read
 off the exact same covariance matrix for a given basket and window,
 rather than each aligning it independently and happening to agree.
 
+`average_correlation` (issue #113) is a fourth: the mean of every
+distinct pair's own Pearson correlation among a basket's holdings, built
+on the same `_aligned_covariance` matrix `risk_contribution` and
+`diversification_ratio` already share, so a basket's average correlation,
+its risk shares and its effective bet count (`effective_n` applied to
+`risk_contribution`'s own output rather than to raw weights — see
+`services/portfolio.py`'s `compute_portfolio_risk`) are always three
+readings of one window. A pair is skipped, not the whole figure, when
+either side has no variance over the window to correlate — one flat
+holding in an otherwise-normal basket should cost the average that
+holding's pairs, not the entire reading. `None` when there are fewer than
+two tickers to begin with, or when no pair at all is computable.
+
 `average_bucketed_daily_value` (issue #111) is a third: built for a
 holding's average daily dollar volume (`days_to_liquidate.py`'s own
 `close x volume`), but stated generally over any already bucket-summed
@@ -424,6 +437,35 @@ CPU cost per request from a caller who has proven nothing about who they are.
 rounds each holding's value and sums the total from those rounded parts, so a
 stacked chart's bands add up to exactly the total line drawn above them —
 computing the total independently would leave them a cent apart.
+
+`compute_portfolio_risk` (issue #113) is `simulate_portfolio`'s sibling
+for a different question — not what the basket would have been worth,
+but how independently its holdings actually move — and deliberately its
+own function and its own route (`POST /api/portfolio/risk`) rather than
+folded into `_metrics()`: a correlation matrix over the basket is a
+second, wider price read than a value simulation needs, and every run
+paying for it would slow down every simulation for the sake of the ones
+somebody actually asked a risk question of. Shares `_normalise_holdings`
+and `_verify_absent` with `simulate_portfolio` (so it is bounded by the
+same `MAX_HOLDINGS` and tells the same three "absent from the price
+read" cases apart), and reads `stats.risk_contribution`/`effective_n`/
+`average_correlation` the same way `fund_metrics.py` reads
+`risk_contribution`/`diversification_ratio` for a fund's own basket —
+"sharing the helpers" is the point, not a coincidence. `effectiveBets` is
+`stats.effective_n` applied to each of the basket's own `riskShare`
+figures' *magnitude*, not its signed value — `risk_contribution` can
+return a genuinely negative share for a holding whose own moves offset
+the rest of the basket's (a real outcome of the Euler decomposition, not
+noise: `effectiveBets`' own test fixture is two holdings that move
+perfectly opposite each other, giving one of them a share over 100% and
+the other under 0%), and `effective_n` is built for a non-negative set of
+weights — feeding it a signed one would let that single holding push the
+result outside its guaranteed `[1, holding count]` range. A basket of exactly one
+holding is answered directly — one holding is trivially all of the
+basket's risk and the only bet in it — without needing enough price
+history to measure a variance from at all; two holdings or more follow
+`fund_metrics.py`'s own "only a holding priced for every date in the
+window joins the joint covariance matrix" rule, for the same reason.
 
 ## `fund_metrics.py` — the fund card (issue #105)
 

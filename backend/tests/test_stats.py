@@ -712,6 +712,65 @@ class DiversificationRatioTests(unittest.TestCase):
         self.assertIsNone(ratio)
 
 
+# ── Average correlation (issue #113) ────────────────────────────────────────
+
+class AverageCorrelationTests(unittest.TestCase):
+    def test_zero_covariance_pair_reads_as_zero_correlation(self):
+        """Same A/B construction as RiskContributionTests/
+        DiversificationRatioTests above: equal variance, exactly zero
+        sample covariance, so their correlation is exactly 0."""
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07", "2020-01-08"]
+        a_values = [100.0, 102.0, 104.04, 101.9592, 99.920016]
+        b_values = [100.0, 102.0, 99.96, 101.9592, 99.920016]
+
+        avg = stats.average_correlation({"A": a_values, "B": b_values}, dates)
+
+        self.assertAlmostEqual(avg, 0.0, places=6)
+
+    def test_identical_holdings_correlate_perfectly(self):
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07"]
+        values = [100.0, 103.0, 101.0, 105.0]
+
+        avg = stats.average_correlation({"A": values, "B": list(values)}, dates)
+
+        self.assertAlmostEqual(avg, 1.0, places=6)
+
+    def test_a_single_ticker_has_no_pair_to_correlate(self):
+        avg = stats.average_correlation(
+            {"A": [100.0, 102.0, 101.0]}, ["2020-01-02", "2020-01-03", "2020-01-06"]
+        )
+        self.assertIsNone(avg)
+
+    def test_a_flat_holding_drops_only_its_own_pairs(self):
+        """Three holdings: A and B move like the zero-covariance pair
+        above, C is flat throughout. C's own variance is zero, so every
+        pair involving it is skipped rather than nulling the whole
+        average - the result is exactly A-vs-B's own (zero) correlation,
+        not None."""
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07", "2020-01-08"]
+        a_values = [100.0, 102.0, 104.04, 101.9592, 99.920016]
+        b_values = [100.0, 102.0, 99.96, 101.9592, 99.920016]
+        c_values = [100.0, 100.0, 100.0, 100.0, 100.0]
+
+        avg = stats.average_correlation(
+            {"A": a_values, "B": b_values, "C": c_values}, dates
+        )
+
+        self.assertAlmostEqual(avg, 0.0, places=6)
+
+    def test_a_wholly_flat_basket_has_nothing_to_correlate(self):
+        dates = ["2020-01-02", "2020-01-03", "2020-01-06"]
+        flat = [100.0, 100.0, 100.0]
+
+        avg = stats.average_correlation({"A": flat, "B": flat}, dates)
+
+        self.assertIsNone(avg)
+
+    def test_fewer_than_two_aligned_returns_is_null(self):
+        avg = stats.average_correlation({"A": [100.0], "B": [100.0]}, ["2020-01-02"])
+        self.assertIsNone(avg)
+
+
 # ── Weighted index (issue #107) ─────────────────────────────────────────────
 
 class WeightedIndexTests(unittest.TestCase):

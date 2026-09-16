@@ -1054,6 +1054,47 @@ def diversification_ratio(
     return round(weighted_vol / math.sqrt(portfolio_variance), PERCENT_DP)
 
 
+def average_correlation(values_by_ticker: dict[str, list[float]], dates: list[str]) -> float | None:
+    """The average pairwise Pearson correlation of a basket's own
+    holdings, over every distinct pair (issue #113) - one number for "how
+    independently do these holdings move", at a coarser resolution than
+    the full matrix `risk_contribution`/`diversification_ratio` are
+    already built from.
+
+    Built on that same matrix (`_aligned_covariance`, shared rather than
+    re-aligned), so a basket's average correlation, its risk shares and
+    its effective bet count are always three readings of one window
+    rather than three that happen to agree. Lower means more diversified;
+    1.0 would mean every holding moves in perfect lockstep.
+
+    Each pair's own correlation is skipped, not just the whole figure,
+    when either side of it has no variance over the window to correlate -
+    one flat holding in an otherwise-normal basket should cost the
+    average that holding's pairs, not the entire reading. `None` when no
+    pair at all is computable this way, or when there are fewer than two
+    tickers to begin with (a single holding has no pair), matching
+    `risk_contribution`'s own "nothing to apportion" case.
+    """
+    tickers, n, covariance = _aligned_covariance(values_by_ticker, dates)
+    if len(tickers) < 2 or covariance is None:
+        return None
+
+    correlations = []
+    for i, a in enumerate(tickers):
+        variance_a = covariance(a, a)
+        if variance_a <= 0:
+            continue
+        for b in tickers[i + 1:]:
+            variance_b = covariance(b, b)
+            if variance_b <= 0:
+                continue
+            correlations.append(covariance(a, b) / math.sqrt(variance_a * variance_b))
+
+    if not correlations:
+        return None
+    return round(sum(correlations) / len(correlations), PERCENT_DP)
+
+
 def weighted_index(
     values_by_ticker: dict[str, list[float]], weights: dict[str, float], dates: list[str]
 ) -> list[float] | None:

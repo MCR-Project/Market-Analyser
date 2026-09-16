@@ -52,6 +52,7 @@ link lives in the URL, and there is only ever one copy of the answer:
 | `?window=` / `?start=&end=` (on `/portfolio/...`) | `useSimulationWindow` |
 | `?compare=` / `?benchmark=` | `useComparison` |
 | `?rf=` (on `/portfolio/...`) | `useRiskFreeRate` — an override for the risk-free rate a run is scored against (issue #103); absent or unusable falls back to the tracked series |
+| `?risk=` (on `/portfolio/...`) | `usePortfolioRisk` — which `computed_from="risk"` tiles are on, on `PortfolioRiskCard` (issue #113); its own key so it cannot collide with `?metrics=` or `?fundMetrics=` |
 | `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
 | `?fundMetrics=` (on `/etf/...`) | `useFundMetrics` — which fund metrics card tiles are on (issue #105); its own key so it cannot collide with `/portfolio/...`'s `?metrics=` |
 

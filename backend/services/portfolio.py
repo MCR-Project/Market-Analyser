@@ -112,10 +112,13 @@ from services.market_data import (
 from services.stats import (
     DAYS_PER_YEAR,
     PERCENT_DP,
+    average_correlation,
     cagr,
     calmar_ratio,
+    effective_n,
     max_drawdown,
     pain_index,
+    risk_contribution,
     sharpe_ratio,
     sortino_ratio,
     time_under_water,
@@ -549,6 +552,173 @@ def _verify_absent(tickers: list[str], window_start: str) -> None:
                 f"{ticker} has prices from {first} but none could be read for this "
                 "window - it cannot be valued right now"
             )
+
+
+_INCOMPLETE_HISTORY = (
+    "fewer than two of this basket's holdings have a complete price "
+    "history over the window"
+)
+_NO_VARIANCE = "no measurable variance across this basket's holdings over this window"
+
+
+def compute_portfolio_risk(
+    holdings,
+    period: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> dict:
+    """How independently this basket's own holdings actually move (issue
+    #113) - the same basket a caller would send `simulate_portfolio`, over
+    the same kind of window, but answering a different question: not what
+    it would have been worth, but how much diversification its weights
+    actually bought.
+
+    Its own function, and its own route (`POST /api/portfolio/risk`),
+    deliberately apart from `simulate_portfolio`: a correlation matrix
+    over the basket is a second, wider price read than a value simulation
+    needs, and folding it into every run would cost every simulation for
+    the sake of the ones somebody actually asked a risk question of.
+    Reads nothing and stores nothing, exactly as `simulate_portfolio`
+    does, and is bounded by the same `MAX_HOLDINGS` via the same
+    `_normalise_holdings`.
+
+    Three figures, all read off the exact same joint covariance matrix
+    (`services.stats._aligned_covariance`, shared with `fund_metrics.py`'s
+    own use of it for a fund's basket rather than a simulated one -
+    "sharing the risk-contribution and effective-N helpers" is the point,
+    not a coincidence):
+
+      - `averageCorrelation` - the average pairwise correlation among the
+        basket's holdings. Lower means more diversified.
+      - `effectiveBets` - the number of *equally weighted* holdings that
+        would concentrate risk the same way the basket's actual risk
+        contributions do (`stats.effective_n`, applied to `riskShare`
+        rather than to the raw weights - the same helper `fund_metrics.py`
+        never needed because it only ever asked this question of a fund's
+        dollar weights, not of its risk shares). Applied to each share's
+        *magnitude*, not its signed value: a holding whose own moves
+        offset the rest of the basket's can carry a genuinely negative
+        risk share (a real outcome of the Euler decomposition, not
+        noise), and `effective_n` is built for a non-negative set of
+        weights - feeding it a signed one would let that single holding
+        push the result outside its own guaranteed range. Between 1 (all
+        the risk sits in one holding, however many are in the basket) and
+        the holding count (every holding contributes its risk
+        independently) as a result, and exactly 1 for a basket of one
+        holding by construction - one holding is one bet, regardless of
+        whether there is even enough price history to measure its own
+        variance.
+      - `riskShare` - each holding's own share of the basket's variance,
+        as a percentage that sums to 100 (`stats.risk_contribution`, the
+        same Euler decomposition `fund_metrics.py` reads for a fund's
+        basket). Not the same thing as dollar weight - a small, volatile,
+        uncorrelated holding can carry far more of the basket's risk than
+        its weight suggests.
+
+    A basket of exactly one holding is answered directly, without needing
+    any price history to measure a variance from: one holding is trivially
+    all of the basket's risk and the only bet in it, so `effectiveBets`
+    is `1.0` and `riskShare` is `{ticker: 100.0}` unconditionally.
+    `averageCorrelation` stays null - there is no second holding to
+    correlate it against - with its own reason rather than the shared
+    "incomplete history" one below, which would misstate why.
+
+    For two holdings or more: only a holding priced for every date in the
+    window can join the joint covariance matrix, the same rule
+    `fund_metrics.py` follows and for the same reason (see that module's
+    own docstring) - a basket's variance decomposition needs one matrix
+    built from every holding's returns aligned to the *same* stretch of
+    dates at once, so narrowing the window to whatever a newly listed
+    holding has traded would silently shrink every other holding's own
+    window too. Fewer than two holdings with a complete history, or a
+    basket with no measurable variance at all once aligned, reports all
+    three null with a reason - the same two conditions
+    `risk_contribution`/`diversification_ratio` themselves report `None`
+    for.
+
+    Raises ValueError for an unusable basket (see `_normalise_holdings`
+    and `market_data.resolve_window`), SymbolNotFound for a holding that
+    does not exist, and DataUnavailable when the price read fails
+    upstream - the same three outcomes `simulate_portfolio` raises, for
+    the same reasons.
+    """
+    weights = _normalise_holdings(holdings)
+    tickers = [ticker for ticker, _ in weights]
+    weight_of = dict(weights)
+
+    closes = get_closes(tickers, period=period, start=start, end=end, min_tickers=1)
+    if closes is None or closes.empty:
+        raise ValueError(
+            "no price data in the requested window - it may contain no trading days"
+        )
+
+    absent = [ticker for ticker in tickers if ticker not in closes.columns]
+    if absent:
+        _verify_absent(absent, closes.index[0].date().isoformat())
+
+    result = {
+        "start": closes.index[0].date().isoformat(),
+        "end": closes.index[-1].date().isoformat(),
+        "averageCorrelation": None,
+        "effectiveBets": None,
+        "riskShare": None,
+        "reasons": {},
+    }
+
+    if len(tickers) == 1:
+        ticker = tickers[0]
+        result["effectiveBets"] = 1.0
+        result["riskShare"] = {ticker: 100.0}
+        result["reasons"]["averageCorrelation"] = (
+            "a basket of one holding has no pair to correlate"
+        )
+        return result
+
+    # Only a holding priced for every date in the frame can safely join a
+    # joint covariance matrix - see fund_metrics.py's own docstring for
+    # why this differs from a pairwise correlation's own approach.
+    complete = [t for t in tickers if t in closes.columns and closes[t].notna().all()]
+    if len(complete) < 2:
+        result["reasons"] = {
+            "averageCorrelation": _INCOMPLETE_HISTORY,
+            "effectiveBets": _INCOMPLETE_HISTORY,
+            "riskShare": _INCOMPLETE_HISTORY,
+        }
+        return result
+
+    dates = [idx.date().isoformat() for idx in closes.index]
+    values_by_ticker = {t: closes[t].tolist() for t in complete}
+    used_weights = {t: weight_of[t] for t in complete}
+
+    contributions = risk_contribution(values_by_ticker, dates, used_weights)
+    ranked = [v for v in contributions.values() if v is not None]
+    if not ranked:
+        result["reasons"] = {
+            "averageCorrelation": _NO_VARIANCE,
+            "effectiveBets": _NO_VARIANCE,
+            "riskShare": _NO_VARIANCE,
+        }
+        return result
+
+    # effective_n is built for a non-negative set of weights (herfindahl's
+    # own docstring: "each a fraction of the whole") and riskShare is not
+    # one - a holding whose own moves offset the rest of the basket's can
+    # carry a genuinely negative share (see compute_portfolio_risk's own
+    # docstring), which is real and expected, not noise. Applying
+    # effective_n straight to signed shares would let that one holding
+    # push the result outside [1, holding count] - magnitude is what
+    # keeps the bound a real guarantee, the same way diversification_
+    # ratio's own Cauchy-Schwarz bound is guaranteed rather than merely
+    # typical, instead of a property that happens to hold on tidy data.
+    result["effectiveBets"] = effective_n([abs(v) for v in ranked])
+    result["riskShare"] = contributions
+    avg_corr = average_correlation(values_by_ticker, dates)
+    result["averageCorrelation"] = avg_corr
+    if avg_corr is None:
+        result["reasons"]["averageCorrelation"] = (
+            "no two holdings in this basket both had measurable variance to correlate"
+        )
+    return result
 
 
 def simulate_portfolio(

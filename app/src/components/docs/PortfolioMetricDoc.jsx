@@ -61,7 +61,7 @@ const ReferencePanel = memo(function ReferencePanel({ manifest, family }) {
         rows={[
           ['Family', family ? `${family.label} — ${family.note}` : manifest.family],
           ['Shown by default', describeTile(manifest)],
-          ['Computed from', manifest.computed_from === 'etf_id' ? 'A fund' : 'A simulated run'],
+          ['Computed from', describeComputedFrom(manifest.computed_from)],
           ['Formula', manifest.formula],
           ['Null rule', manifest.null_rule],
         ]}
@@ -70,8 +70,28 @@ const ReferencePanel = memo(function ReferencePanel({ manifest, family }) {
   );
 });
 
+/** A metric reads its value from one of three places - a completed run,
+ *  a fund, or the basket's own risk endpoint (issue #113) - and this is
+ *  the one spot that turns `computed_from` into a sentence a reader who
+ *  has never seen that field can understand. */
+function describeComputedFrom(computedFrom) {
+  if (computedFrom === 'etf_id') return 'A fund';
+  if (computedFrom === 'risk') return "This basket's own risk endpoint";
+  return 'A simulated run';
+}
+
+/** "Never a tile" covers two different reasons (issue #113): the
+ *  dividend trio is prose under the tile grid instead (#68); riskShare
+ *  has nowhere on screen that reads a value per holding today (#113) - a
+ *  per-holding breakdown does not fit a single number. Naming the reason
+ *  read off `family` rather than hardcoding either keeps this honest for
+ *  either kind without this component needing to know which one it is. */
 function describeTile(manifest) {
-  if (!manifest.tile) return 'Never a tile — shown as prose instead (see the note below the summary)';
+  if (!manifest.tile) {
+    return manifest.family === 'dividend'
+      ? 'Never a tile — shown as prose instead (see the note below the summary)'
+      : 'Never a tile — see "How it reads" above for what this figure means per holding';
+  }
   return manifest.default_enabled ? 'Yes' : 'No — enable it from the metrics dialog';
 }
 
