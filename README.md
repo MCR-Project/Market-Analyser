@@ -120,6 +120,31 @@ such column names its window in its header and on its own doc page, including
 the worked example; a plugin that declares no window (every official one,
 today) is entirely unaffected and takes none.
 
+**Every column carries a cost rating** — Short, Medium, Long or Extremely
+long (issue #115) — shown as a badge in the picker, the column header and
+the doc page. It is *derived*, never hand-declared: `backend/measurements/
+cost.py` reads only what a plugin already states for other reasons — which
+`measurements/inputs/*` getters it uses (`uses_inputs`) and how each of
+those scales with holding count (a flat per-fund lookup, a read that grows
+with the basket, or a pairwise sweep across every holding), whether it can
+ever need a live upstream call, and how much price history it reads — and
+sums those into a score:
+
+| Score | Rating |
+| --- | --- |
+| 0–6 | Short |
+| 7–11 | Medium |
+| 12–17 | Long |
+| 18+ | Extremely long |
+
+A correlation-derived column rates heavier than a weight-derived one, and
+days to liquidate (which reads volume for the whole basket) rates among the
+heaviest, without either plugin declaring so itself — and because the score
+includes how much history a windowed input reads, widening the shared
+window control can visibly move a column's own rating from Short toward
+Extremely long. This issue is informational only: nothing about a rating
+gates, defers or warns before a column is enabled.
+
 Each measurement documents itself in an `.mdx` file **next to its own
 module** — `correlation.py` → `correlation.mdx` — which the app serves at
 `/docs/<measurement id>` and which every column that plugin provides shares.

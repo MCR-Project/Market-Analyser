@@ -28,4 +28,8 @@ INPUT_SPEC = {
     ),
     "defaults": {},
     "sample": _sample,
+    # Cost characteristic (issue #115) — one call for the whole fund
+    # ("per_request"), no price history ("windowed": False), and DB-first
+    # with a live fallback on a miss ("live").
+    "cost": {"scaling": "per_request", "network": "live", "windowed": False},
 }

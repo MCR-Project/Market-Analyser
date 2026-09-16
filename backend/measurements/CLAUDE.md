@@ -22,6 +22,7 @@ __init__.py                   ALL_MEASUREMENTS = official + addon, each tagged w
 official_measurements/        first-party plugins (correlation, etf_weight, value_held) + their .mdx
 addon_measurements/           plugged-in plugins; currently empty
 inputs/                       one getter per distinct piece of fetched data, each self-describing
+cost.py                       derives a Short/Medium/Long/Extremely long rating from what a plugin declares (issue #115)
 docs.py                       .mdx loading and frontmatter validation
 examples.py                   the worked example behind a doc page
 DOC_TEMPLATE.mdx              copy this to start a doc
@@ -362,6 +363,102 @@ than each getter re-resolving the fund on its own.
   history to build an index from, which is what every column reading this
   input reports as its own null case for every ticker.
 
+## Cost rating (issue #115)
+
+The metrics here differ enormously in cost: a weight column is a dictionary
+lookup over data already fetched, a correlation-derived one is a pairwise
+sweep over a price frame for every holding, days to liquidate needs volume
+for the whole basket, and widening the shared window multiplies all of it
+against upstream sources that are themselves rate-limited (issue #92).
+Nothing used to distinguish them on screen.
+
+**The rating is derived, never hand-declared.** There is no `rating` or
+`cost_rating` attribute on `MeasurementBase` for a plugin to set — grepping
+`official_measurements/` and `addon_measurements/` for one and finding
+nothing is the acceptance criterion `tests/test_cost.py` checks directly.
+`measurements/cost.py`'s `rate(measurement, window=None)` derives it instead,
+reading only what a plugin already states for other reasons: `uses_inputs`
+(already required for the documentation page to say where its numbers came
+from, issue #98) and each named input's own `cost` characteristic — a new
+field on `INPUT_SPEC` (`measurements/inputs/*.py`) alongside `description`,
+`defaults` and `sample`:
+
+```python
+"cost": {
+    "scaling": "per_request" | "per_holding" | "pairwise",
+    "network": "db" | "live",
+    "windowed": True | False,
+}
+```
+
+- **`scaling`** — how the input's own read grows with the fund's holding
+  count. `holdings`/`etf_info` describe the whole fund in one call
+  regardless of size ("per_request"); `price_frame`/`fund_index`/
+  `stock_info`/`dividend_events` grow with the basket, whether that is one
+  bulk query sized by however many tickers are in it or a genuine loop of
+  one read per ticker — this model does not distinguish the two, since
+  "per_holding" is as fine-grained a distinction as the issue asks for;
+  `correlation_matrix` sweeps every ticker against every other
+  ("pairwise") — the one input that makes a correlation-derived column rate
+  heavier than a weight-derived one without anyone saying so by hand.
+- **`network`** — whether the getter behind an input can ever need a live
+  upstream call (the DB-first, live-fallback norm here) or is answered from
+  Supabase alone with genuinely no live fallback at all. `dividend_events`
+  is the one input in this package that can honestly claim `"db"` (see
+  "Dividends" in `backend/services/CLAUDE.md`); every other input is
+  `"live"`.
+- **`windowed`** — whether the input reads a bounded stretch of price
+  history at all. `price_frame`, `fund_index` and `correlation_matrix` do;
+  everything else does not. *How much* history is what lets the same
+  column move ratings by widening the shared window: `window` for a
+  window-aware plugin (issue #101), or the input's own fixed
+  `defaults["period"]` for a plugin that never declares `window_options` at
+  all (`correlation.py`, `days_to_liquidate.py`, `dividend_income.py`) but
+  still reads a real, bounded stretch of history every time it runs.
+
+`rate()` **sums**, rather than takes the worst of, each declared input's own
+(scaling + network) weight — a plugin touching three inputs really does cost
+more than one touching a single cheap one — plus one further weight for how
+long a stretch of history the resolved window asks for, added once even
+when several of a plugin's inputs are windowed (they always share the same
+window in one call). The four labels and where each score starts:
+
+| Score | Rating |
+| --- | --- |
+| 0–6 | Short |
+| 7–11 | Medium |
+| 12–17 | Long |
+| 18+ | Extremely long |
+
+`measurements/cost.py`'s own module docstring is the source of truth for the
+weights behind these numbers if either table ever needs correcting against
+it; this one restates them for a reader who does not want to open that file.
+
+**Exposed in two places, both called `cost`, rated for two different
+moments:**
+
+- The **manifest** (`GET /api/measurements`, `_column_manifest_entries` in
+  `registry.py`) carries a rating computed once per *plugin*, at its own
+  `window_default` — the same value a doc page's worked example is always
+  computed against — and overlaid onto every column identically, the same
+  way a multi-column plugin's `author`/`author_url`/`version` (issue #114)
+  already are. This is what the picker and the doc page show, since neither
+  has a live, reader-chosen window to rate against.
+  A malformed `.mdx` never enters this calculation at all — cost is read
+  straight off `uses_inputs`, not off frontmatter — so there is nothing here
+  for `_column_manifest_entries`'s own attribution fallback to also guard.
+- Every **live run response** (`_make_handler`'s `call()`) carries a rating
+  computed against the *actual* `window` that call resolved to, which is
+  what lets the table's own column header move a column from Short to Long
+  as a reader widens the shared control — `useMeasurements.js`'s `results`
+  already holds each plugin's whole response, so `TableView.jsx` reads
+  `results[measurement_id]?.cost` with no client-side scoring logic of its
+  own to keep in sync with this file.
+
+**Informational only, on purpose (issue #115's own scope).** Nothing here
+gates a toggle, defers a fetch, or warns before enabling a heavy column —
+that is explicitly a follow-up, once real ratings exist to decide it with.
+
 ## Documentation files
 
 A measurement's doc lives beside its module, named after it: `correlation.py` →
@@ -463,6 +560,11 @@ regardless of how many columns it provides. It also serves:
   provides, so there is one `.mdx` per plugin, not per column.
 - `GET /api/measurement-docs/{id}/example` — the worked example, likewise by
   plugin id.
+
+Every route above, and every manifest row, also carries `cost` — see "Cost
+rating" above for the model and why the two are rated at different moments
+(the manifest at `window_default`, a live run at whatever `window` it was
+actually called with).
 
 The doc endpoints are **not** at `/api/measurements/{id}/doc` on purpose: plugin
 routes live under the same `/api` prefix, and

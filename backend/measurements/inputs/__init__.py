@@ -11,15 +11,22 @@ etc.) internally.
 Because those defaults are invisible everywhere else — nothing in the UI
 says a correlation is a year of daily returns — each module also declares
 an INPUT_SPEC describing itself: a one-line description, the internal
-defaults it applies, and how to sample its real value for one ETF. The
-registry below collects them so a measurement's documentation page can
-explain not just which inputs it uses, but what those inputs quietly
-assume.
+defaults it applies, how to sample its real value for one ETF, and (issue
+#115) a `cost` characteristic - how this getter's own read scales with
+holding count ("per_request", "per_holding" or "pairwise"), whether it
+reads a bounded price window at all ("windowed"), and whether it can ever
+need a live upstream call or is answered from Supabase alone with no live
+fallback ("network": "live" | "db"). The registry below collects both so
+a measurement's documentation page can explain not just which inputs it
+uses and what they quietly assume, but - via measurements/cost.py, which
+reads this same `cost` field - how expensive using them actually is.
 
 Adding a new input type:
   1. Create a new file here (e.g. stock_info.py)
   2. Wrap the relevant services.market_data function in a getter
-  3. Declare an INPUT_SPEC next to it and register it below
+  3. Declare an INPUT_SPEC next to it - including its own `cost`
+     characteristic, honestly stated rather than copied from a neighbour -
+     and register it below
   4. Import the getter from whichever measurement(s) need it, and name it
      in their `uses_inputs`
 """

@@ -65,4 +65,12 @@ INPUT_SPEC = {
     ),
     "defaults": {},
     "sample": _sample,
+    # Cost characteristic (issue #115) — the read widens with the basket
+    # ("per_holding"), reads no bounded price window (this module's own
+    # docstring: "a measurement wanting a fund's whole dividend history
+    # reads it in one call"), and, unlike every other getter here, has
+    # genuinely **no live fallback** at all (services/CLAUDE.md's own
+    # "no live fallback" rule for get_dividends) - the one getter this
+    # cost model can mark "db" rather than "live" without guessing.
+    "cost": {"scaling": "per_holding", "network": "db", "windowed": False},
 }

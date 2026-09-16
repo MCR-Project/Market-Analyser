@@ -17,18 +17,23 @@
  * carries the plugin's resolved `author`/`author_url`/`version`
  * (`backend/measurements/registry.py`'s `_column_manifest_entries`), so
  * "who wrote this and what does it provide" needs no extra fetch.
+ * `CostBadge` (issue #115) sits beside the plugin's own name for the
+ * same reason — Short/Medium/Long/Extremely long, read straight off the
+ * manifest's own `cost` (derived server-side from what the plugin
+ * declares, never hand-set), so a reader sees how expensive a column is
+ * before deciding whether to switch it on.
  *
  *  ┌─────────────────────────────────────────┐
  *  │ MEASUREMENTS                            │
  *  │ Select which metrics to compute         │
  *  ├─────────────────────────────────────────┤
- *  │ [X] Pairwise Correlation             ?  │  ← single-column plugin:
+ *  │ [X] Pairwise Correlation  [LONG]     ?  │  ← single-column plugin:
  *  │     Pearson ρ of daily returns...       │    the row is the toggle
  *  │     Inputs: etf_id, period, threshold   │
  *  │     Outputs: matrix, averages, hub...   │
  *  │     Official · Jane Doe · v1.0          │
  *  ├─────────────────────────────────────────┤
- *  │ Capture Ratio                        ?  │  ← multi-column plugin:
+ *  │ Capture Ratio  [LONG]                ?  │  ← multi-column plugin:
  *  │ How much of the benchmark's...          │    header, then one
  *  │ Official · Jane Doe · Provides 2: …     │    toggle row per column
  *  │ [X] Upside Capture                      │
@@ -39,6 +44,7 @@ import { memo, useMemo } from 'react';
 import { Overlay } from './Overlay';
 import { DocLink } from './DocLink';
 import { AttributionCard } from './AttributionCard';
+import { CostBadge } from './CostBadge';
 
 /** A plugin's shared info: name, description, and its input/output
  * schema preview — identical across every column it provides, so shown
@@ -111,7 +117,10 @@ function SingleColumnRow({ column, active, onToggle }) {
       >
         <div className="mt-0.5"><ToggleIndicator active={active} /></div>
         <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-semibold text-[var(--fg)] mb-1">{column.name}</div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="text-[15px] font-semibold text-[var(--fg)]">{column.name}</div>
+            <CostBadge cost={column.cost} />
+          </div>
           <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{column.description}</p>
           <SchemaPreview plugin={column} />
           <div className="mt-2">
@@ -141,7 +150,10 @@ function ColumnGroup({ columns, activeIds, onToggle }) {
     <div className="border-b border-[var(--divider)]">
       <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-2">
         <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-[var(--fg)] mb-1">{plugin.name}</div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="text-[15px] font-semibold text-[var(--fg)]">{plugin.name}</div>
+            <CostBadge cost={plugin.cost} />
+          </div>
           <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{plugin.description}</p>
           <SchemaPreview plugin={plugin} />
           <div className="mt-2">

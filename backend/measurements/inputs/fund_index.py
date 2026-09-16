@@ -68,4 +68,12 @@ INPUT_SPEC = {
     ),
     "defaults": {"period": DEFAULT_PERIOD},
     "sample": _sample,
+    # Cost characteristic (issue #115) — built on get_aligned_closes, the
+    # same bulk-but-basket-sized price read price_frame's own is
+    # ("per_holding", "live"), over the same bounded window ("windowed":
+    # True). The weighted-average arithmetic on top is one pass per date,
+    # not a pairwise sweep, so this does not rate as "pairwise" the way
+    # correlation_matrix's own NxN comparison does - see this module's own
+    # docstring for what it actually computes from the read.
+    "cost": {"scaling": "per_holding", "network": "live", "windowed": True},
 }

@@ -82,8 +82,19 @@ export function DocsPage() {
   // real multi-column doc page) — a single-column plugin's own array of
   // one, so ReferencePanels never needs to know which kind it's looking
   // at beyond checking this array's length.
+  //
+  // Matched on the candidate row's own `measurement_id` alone, with no
+  // `?? m.id` fallback on that side: a portfolio metric row never has a
+  // `measurement_id` of its own (only measurement rows do), so falling
+  // back to its `id` there would treat "no measurement_id at all" as
+  // equal to whatever plugin id this page happens to be showing. That
+  // silently pulled a same-named portfolio metric in as a fake sibling
+  // column for any measurement whose own id happens to collide with one
+  // (today: "volatility" exists, one word, in both registries) — inert
+  // as long as nothing read `columns` beyond its own length, until issue
+  // #115's own "Provides N" list made the extra, wrong entry visible.
   const columns = entry && !isMetric
-    ? manifest.filter(m => (m.measurement_id ?? m.id) === (entry.measurement_id ?? entry.id))
+    ? manifest.filter(m => m.measurement_id === entry.measurement_id)
     : [];
 
   // The doc endpoint is keyed by plugin id, not by any one column's

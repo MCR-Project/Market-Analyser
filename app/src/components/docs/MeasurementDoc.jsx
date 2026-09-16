@@ -16,6 +16,12 @@
  * <WorkedExample /> is appended automatically unless the doc placed it
  * itself, so an author gets it for free but can position it deliberately.
  *
+ * `CostBadge` (issue #115) sits beside the origin badge, reading
+ * `manifest.cost` — the rating computed once, server-side, at the
+ * plugin's own `window_default`, the same value a worked example is
+ * always computed against (examples.py never wires a doc to the table's
+ * live window control either).
+ *
  * `columns` (issue #107) is every manifest row this plugin provides — one
  * for a single-column measurement, several for one declaring `columns`
  * (issue #100; first shipped for real by #107's fund-relation and
@@ -29,6 +35,7 @@ import { memo } from 'react';
 import { DocMdx } from './DocMdx';
 import { WorkedExample } from './WorkedExample';
 import { AttributionCard } from '../ui/AttributionCard';
+import { CostBadge } from '../ui/CostBadge';
 
 export const MeasurementDoc = memo(function MeasurementDoc({ manifest, columns, doc }) {
   const frontmatter = doc?.frontmatter || {};
@@ -45,6 +52,7 @@ export const MeasurementDoc = memo(function MeasurementDoc({ manifest, columns, 
           <span className="font-[var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full px-2.5 py-0.5">
             {doc?.origin === 'addon' ? 'Plugged-in' : 'Official'}
           </span>
+          <CostBadge cost={manifest?.cost} />
           {manifest?.id && (
             <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)]">
               {manifest.measurement_id ?? manifest.id}
