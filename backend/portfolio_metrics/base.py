@@ -139,6 +139,19 @@ class MetricBase(ABC):
     # looks like a measurement column's own wherever the two are merged.
     origin: str = "portfolio"
 
+    # ── Attribution (issue #114) ─────────────────────────────────────────
+    # Who wrote this metric, where to read more, and which version it is -
+    # empty by default, and deliberately never defaulted to the repository
+    # owner: an unattributed metric shows as unattributed. A doc's own
+    # frontmatter (author/author_url/version - portfolio_metrics/docs.py)
+    # overrides these three, the same precedence example_etf/
+    # example_portfolio above already follow. Mirrors measurements/base.py
+    # exactly, so the same AttributionCard renders either registry's
+    # entries without needing to know which one it is looking at.
+    author: str = ""
+    author_url: str = ""
+    version: str = ""
+
     # Whether PortfolioSummary renders this as a toggleable tile at all.
     # False for dividendIncome/dividendYield/incomeUnknownFor: the dividend
     # note stays prose (issue #68), not a tile - a decision this issue
@@ -218,6 +231,13 @@ class MetricBase(ABC):
             "default_enabled": self.default_enabled,
             "computed_from": self.computed_from,
             "has_doc": self.has_doc,
+            # The class's own, unresolved declaration (issue #114) -
+            # registry.py overlays the doc-frontmatter-resolved version
+            # on top before this ever reaches a caller, mirroring
+            # measurements/base.py's own manifest() exactly.
+            "author": self.author,
+            "author_url": self.author_url,
+            "version": self.version,
         }
 
 

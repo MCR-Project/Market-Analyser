@@ -79,6 +79,26 @@ class MeasurementBase(ABC):
     # page groups its sidebar on it.
     origin: str = ""
 
+    # ── Attribution (issue #114) ─────────────────────────────────────────
+    # Who wrote this plugin, where to read more about them, and which
+    # release of it this is — empty by default, on purpose: an addon
+    # dropped in without declaring these shows up as unattributed rather
+    # than silently crediting whoever happens to own this repository.
+    # Defaulting attribution to somebody would be the same class of
+    # mistake as defaulting a null figure to zero.
+    #
+    # A doc's own frontmatter (`author`, `author_url`, `version` —
+    # measurements/docs.py) overrides these three, the same precedence
+    # `example_etf`/`example_stock` above already follow: the doc is the
+    # more specific statement, since attribution belongs to a release of
+    # the plugin's *documentation* as much as to the code. Read the
+    # resolved value from `manifest()` (or a doc payload's own
+    # `frontmatter`), never these attributes directly, so a caller is
+    # never accidentally looking at the unresolved class default.
+    author: str = ""
+    author_url: str = ""
+    version: str = ""
+
     # ── Documentation ────────────────────────────────────────────────────
     # Long-form docs live in a .mdx file next to this measurement's module
     # (correlation.py → correlation.mdx); see measurements/docs.py for the
@@ -399,6 +419,15 @@ class MeasurementBase(ABC):
             "route": self.route,
             "origin": self.origin,
             "has_doc": self.has_doc,
+            # The class's own, *unresolved* declaration (issue #114) —
+            # registry.py's _column_manifest_entries overlays the doc-
+            # frontmatter-resolved version on top of this before it ever
+            # reaches a caller; these three keys exist here mainly so a
+            # plugin with no doc at all still has something for that
+            # overlay to fall back to.
+            "author": self.author,
+            "author_url": self.author_url,
+            "version": self.version,
             "uses_inputs": self.uses_inputs,
             "column_key": self.column_key,
             "column_label": self.column_label,

@@ -23,7 +23,7 @@ plugin that actually declared support for it.
 import re
 from fastapi import APIRouter, HTTPException, Query
 from measurements import ALL_MEASUREMENTS
-from measurements.docs import DocError, load_doc
+from measurements.docs import DocError, load_doc, resolve_attribution
 from measurements.examples import build_example
 from services.market_data import DataUnavailable, SymbolNotFound
 
@@ -107,6 +107,25 @@ for m in ALL_MEASUREMENTS:
 
 # ── Manifest endpoint ────────────────────────────────────────────────────────
 
+def _resolved_attribution(measurement) -> dict:
+    """Author/author_url/version for one plugin, resolved the same way
+    its own doc page is (issue #114's `docs.resolve_attribution`) —
+    computed once per *plugin* here, not per column, so every column a
+    multi-column plugin provides carries the identical answer.
+
+    A malformed .mdx must not take the whole manifest down with it: that
+    failure belongs to this one plugin's own `/measurement-docs/{id}`
+    endpoint, which already answers a 500 naming the file. Falling back to
+    the class's own unresolved attribution here is what keeps one broken
+    doc from 500ing `GET /api/measurements` for every other plugin too.
+    """
+    try:
+        frontmatter = load_doc(measurement)["frontmatter"]
+    except DocError:
+        frontmatter = {}
+    return resolve_attribution(measurement, frontmatter)
+
+
 def _column_manifest_entries(measurement) -> list[dict]:
     """One manifest row per column this plugin provides (issue #100),
     so the frontend discovers columns to toggle rather than plugins to
@@ -118,7 +137,10 @@ def _column_manifest_entries(measurement) -> list[dict]:
     row is the plugin's manifest with that one column's fields overlaid
     on top, plus `measurement_id`, which is what tells the frontend which
     route actually computes this column and lets it group sibling
-    columns under one plugin in the picker.
+    columns under one plugin in the picker. `_resolved_attribution`
+    overlays the doc-frontmatter-resolved author/author_url/version
+    (issue #114) over `manifest()`'s own unresolved class defaults, the
+    same way every per-column field below overlays `resolved_columns`.
 
     A single-column plugin's one row keeps `id` equal to the plugin's own
     id - already unique, the same way every measurement's `id` always
@@ -133,7 +155,7 @@ def _column_manifest_entries(measurement) -> list[dict]:
     level declaration, not a per-column one, so `{**base}` alone already
     carries them onto every column a window-aware plugin provides.
     """
-    base = measurement.manifest()
+    base = {**measurement.manifest(), **_resolved_attribution(measurement)}
     columns = measurement.resolved_columns
     single = len(columns) == 1
 

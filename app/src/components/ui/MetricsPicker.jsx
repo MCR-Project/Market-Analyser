@@ -25,10 +25,17 @@
  * appear here at all — the caller's own hook (usePortfolioMetrics,
  * useFundMetrics) already filters to tile-eligible entries, since there
  * is nothing to toggle about a note that is always shown.
+ *
+ * Each row carries an `AttributionCard` (issue #114) — the same one
+ * `MeasurementPicker.jsx` shows, reading `author`/`author_url`/`version`
+ * straight off the manifest row (`portfolio_metrics/registry.py`'s
+ * `_manifest`), so a metric declaring these needs no change here to be
+ * credited.
  */
 import { memo, useMemo } from 'react';
 import { Overlay } from './Overlay';
 import { DocLink } from './DocLink';
+import { AttributionCard } from './AttributionCard';
 
 function ToggleIndicator({ active }) {
   return (
@@ -64,7 +71,14 @@ function MetricRow({ metric, active, onToggle }) {
         <div className="mt-0.5"><ToggleIndicator active={active} /></div>
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-semibold text-[var(--fg)] mb-1">{metric.name}</div>
-          <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed">{metric.description}</p>
+          <p className="text-[13px] text-[var(--fg-2)] m-0 leading-relaxed mb-2">{metric.description}</p>
+          <AttributionCard
+            author={metric.author}
+            authorUrl={metric.author_url}
+            version={metric.version}
+            origin={metric.origin}
+            metrics={[{ key: metric.id, name: metric.name }]}
+          />
         </div>
       </button>
 

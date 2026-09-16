@@ -28,6 +28,7 @@
 import { memo } from 'react';
 import { DocMdx } from './DocMdx';
 import { WorkedExample } from './WorkedExample';
+import { AttributionCard } from '../ui/AttributionCard';
 
 export const MeasurementDoc = memo(function MeasurementDoc({ manifest, columns, doc }) {
   const frontmatter = doc?.frontmatter || {};
@@ -52,6 +53,24 @@ export const MeasurementDoc = memo(function MeasurementDoc({ manifest, columns, 
         </div>
         <h1 className="text-[28px] font-extrabold text-[var(--fg)] tracking-tight m-0">{title}</h1>
         {summary && <p className="text-[15px] leading-relaxed text-[var(--fg-2)] mt-2 mb-0">{summary}</p>}
+        {/* Attribution is resolved with the doc's own frontmatter
+            already merged over the class (issue #114) - frontmatter,
+            the more specific statement about *this documentation*,
+            already won by the time it reached `doc`, so this card never
+            needs to know the class's own unresolved value. No `origin`
+            here: the badge two lines up already says Official/Plugged-in,
+            and repeating it in the card would be the same fact twice. */}
+        <div className="mt-3">
+          <AttributionCard
+            author={frontmatter.author}
+            authorUrl={frontmatter.author_url}
+            version={frontmatter.version}
+            metrics={resolvedColumns.map(c => ({
+              key: c.id,
+              name: c.column_label || c.name,
+            }))}
+          />
+        </div>
       </header>
 
       {mdx ? (

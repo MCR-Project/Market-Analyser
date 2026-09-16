@@ -18,6 +18,9 @@ File format — YAML frontmatter, then a free-form MDX body:
     summary: How closely a holding moves with the rest of the fund.
     example_etf: SMH        # optional
     example_stock: NVDA     # optional
+    author: Jane Doe        # optional (issue #114) - overrides the class
+    author_url: https://…   # optional - who wrote this plugin, and where
+    version: "1.0"           #   to read more; quoted, or YAML reads it as a number
     ---
 
     Free-form MDX body.
@@ -41,7 +44,7 @@ from config import DOCS_EXAMPLE_ETF, DOCS_EXAMPLE_STOCK
 # ── Frontmatter schema ───────────────────────────────────────────────────────
 
 REQUIRED_KEYS = ("title", "summary")
-OPTIONAL_KEYS = ("example_etf", "example_stock")
+OPTIONAL_KEYS = ("example_etf", "example_stock", "author", "author_url", "version")
 ALLOWED_KEYS = REQUIRED_KEYS + OPTIONAL_KEYS
 
 FRONTMATTER_FENCE = "---"
@@ -154,7 +157,11 @@ def load_doc(measurement) -> dict:
         "id": measurement.id,
         "origin": measurement.origin,
         "has_doc": has_doc,
-        "frontmatter": {**frontmatter, **resolve_examples(measurement, frontmatter)},
+        "frontmatter": {
+            **frontmatter,
+            **resolve_examples(measurement, frontmatter),
+            **resolve_attribution(measurement, frontmatter),
+        },
         "mdx": body,
     }
 
@@ -187,4 +194,23 @@ def resolve_examples(measurement, frontmatter: dict) -> dict:
             or measurement.example_stock
             or DOCS_EXAMPLE_STOCK
         ),
+    }
+
+
+def resolve_attribution(measurement, frontmatter: dict) -> dict:
+    """Who wrote this plugin, where to read more, and which version it is
+    (issue #114) — the doc's own frontmatter first, then the class, the
+    same precedence `resolve_examples` above follows.
+
+    Deliberately no third, repo-wide fallback the way `example_etf`/
+    `example_stock` have in `DOCS_EXAMPLE_ETF`/`DOCS_EXAMPLE_STOCK` — an
+    unattributed plugin stays unattributed (empty strings) rather than
+    defaulting to anyone. Crediting the wrong person is the same class of
+    mistake `backend/CLAUDE.md`'s invariant 7 already names for a null
+    figure defaulted to zero, not a smaller one.
+    """
+    return {
+        "author": frontmatter.get("author") or measurement.author,
+        "author_url": frontmatter.get("author_url") or measurement.author_url,
+        "version": frontmatter.get("version") or measurement.version,
     }
