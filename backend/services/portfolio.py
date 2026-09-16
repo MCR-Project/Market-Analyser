@@ -106,13 +106,19 @@ from services.market_data import (
     DataUnavailable,
     get_closes,
     get_dividends,
+    get_risk_free_rate,
     tracked_tickers,
 )
 from services.stats import (
     DAYS_PER_YEAR,
     PERCENT_DP,
     cagr,
+    calmar_ratio,
     max_drawdown,
+    pain_index,
+    sharpe_ratio,
+    sortino_ratio,
+    time_under_water,
     unit_values,
     volatility,
 )
@@ -240,6 +246,29 @@ def _money_weighted_return(flows: list[tuple[pd.Timestamp, float]]) -> float | N
     return round((low + high) / 2 * 100, PERCENT_DP)
 
 
+def _resolve_rate(
+    rate: float | None, window_start: str, window_end: str
+) -> tuple[float | None, str | None]:
+    """The annual risk-free rate Sharpe/Sortino are scored against for
+    this run (issue #112): `rate` itself if the caller supplied an
+    override, else the tracked series' own average over *this run's own
+    window* - not a single point value, since the window a rate is read
+    for should be the window it is scoring.
+
+    `(None, None)` when neither is available - `get_risk_free_rate`'s own
+    "no live fallback" rule (a number that sometimes comes from a record
+    and sometimes from a network call is a number nobody can reconcile)
+    means a caller here must show a null with a reason rather than assume
+    a rate of zero, the same as every other reader of that table does.
+    """
+    if rate is not None:
+        return float(rate), "override"
+    rows = get_risk_free_rate(start=window_start, end=window_end)
+    if not rows:
+        return None, None
+    return sum(row["rate"] for row in rows) / len(rows), "tracked"
+
+
 def _metrics(
     totals: list[float],
     dates: list[str],
@@ -248,13 +277,16 @@ def _metrics(
     contributed: float,
     income: dict[str, float],
     unknown: list[str],
+    rate: float | None,
+    rate_source: str | None,
 ) -> dict:
     """How the run did, as one object beside the series rather than
     interleaved into it - a summary is read whole, not walked date by
     date.
 
     Two families of number, and the split is the point. Total return,
-    CAGR, volatility and drawdown are read off `units` - the flow-free
+    CAGR, volatility, drawdown, time under water, pain index, Calmar,
+    Sharpe and Sortino (issue #112) are read off `units` - the flow-free
     unit value - and describe **the portfolio**: what a dollar left alone
     in it would have done. Contributed, invested, gain and the
     money-weighted return are read off the cash flows and describe **the
@@ -269,6 +301,8 @@ def _metrics(
     unpacked to its bare value here, because this response's `volatility`
     key has always been a plain number and changing that would be a
     change to the simulator's output, not to where its arithmetic lives.
+    `timeUnderWater`/`shareUnderWater` and `sharpe`/`sortino` are each
+    unpacked the same way, for the same reason.
 
     `reasons` (issue #99) is the same optional sidecar `per_ticker_reason`
     is for a measurement column, scoped to this dict instead of a
@@ -285,22 +319,28 @@ def _metrics(
     invested = round(start_value + contributed, MONEY_DP)
     cagr_value = cagr(units, dates)
     volatility_value = volatility(units, dates)["value"]
+    max_drawdown_value = max_drawdown(units, dates)
     money_weighted = _money_weighted_return(flows)
+    time_under_water_value = time_under_water(units, dates)
+    pain_index_value = pain_index(units, dates)["value"]
+    calmar_value = calmar_ratio(cagr_value, max_drawdown_value["value"])
+    sharpe_value = sharpe_ratio(units, dates, rate)["value"] if rate is not None else None
+    sortino_value = sortino_ratio(units, dates, rate)["value"] if rate is not None else None
 
     # `value` and `contribution.amount` are validated > 0 before a run ever
     # starts, so `totalReturn`/`dividendYield`'s own None branches (an
     # opening value of 0) are unreachable today and get no reason here -
     # inventing one for a state validation already forecloses would be
-    # explaining something that cannot happen. The three below are real:
+    # explaining something that cannot happen. The rest are real:
     # a single-row window leaves CAGR with no elapsed time to compound
-    # over, a window under three rows leaves volatility with fewer than
-    # the two returns it needs, and the money-weighted return can fail
-    # either the same way (no elapsed time at all) or for a window so
-    # short relative to its return that no annual rate, however large,
-    # discounts one back into the other - `_money_weighted_return`'s
-    # bracket search gives up rather than guess, so both read as one
-    # honest explanation instead of two, only one of which is exercised
-    # by the tests that reach it.
+    # over, a window under three rows leaves volatility (and, on the same
+    # returns, Sharpe/Sortino's own mean) with fewer than the two returns
+    # it needs, and the money-weighted return can fail either the same
+    # way (no elapsed time at all) or for a window so short relative to
+    # its return that no annual rate, however large, discounts one back
+    # into the other - `_money_weighted_return`'s bracket search gives up
+    # rather than guess, so both read as one honest explanation instead
+    # of two, only one of which is exercised by the tests that reach it.
     reasons = {}
     if cagr_value is None:
         reasons["cagr"] = (
@@ -315,6 +355,31 @@ def _metrics(
         reasons["moneyWeightedReturn"] = (
             "this window is too short for an internal rate of return to be found"
         )
+    if time_under_water_value["longestDays"] is None:
+        reasons["timeUnderWater"] = reasons["shareUnderWater"] = (
+            f"only {len(dates)} row(s) of price history in this window - "
+            "fewer than the two rows needed for an elapsed day to measure"
+        )
+    if calmar_value is None:
+        reasons["calmar"] = (
+            "CAGR is null for the same reason noted above"
+            if cagr_value is None
+            else "the run never fell below a prior peak, so there is no drawdown to divide by"
+        )
+    if rate is None:
+        reasons["sharpe"] = reasons["sortino"] = (
+            "no risk-free rate is available for this window, and no override was given"
+        )
+    else:
+        if sharpe_value is None:
+            reasons["sharpe"] = (
+                "fewer than two period returns to measure a mean and a volatility from"
+            )
+        if sortino_value is None:
+            reasons["sortino"] = (
+                "fewer than two period returns, or none fell short of the target to "
+                "measure a downside deviation from"
+            )
 
     result = {
         "startValue": start_value,
@@ -322,7 +387,25 @@ def _metrics(
         "totalReturn": total_return,
         "cagr": cagr_value,
         "volatility": volatility_value,
-        "maxDrawdown": max_drawdown(units, dates),
+        "maxDrawdown": max_drawdown_value,
+        # The longest single stretch below a prior peak, in calendar
+        # days, and that time as a share of the whole window - 0 for
+        # both is a real answer (the run was never under water), null
+        # only when the window itself is too short to measure at all.
+        "timeUnderWater": time_under_water_value["longestDays"],
+        "shareUnderWater": time_under_water_value["shareOfWindow"],
+        # Time-weighted average drawdown depth - 0 is a real answer here
+        # too, for the same reason.
+        "painIndex": pain_index_value,
+        "calmar": calmar_value,
+        "sharpe": sharpe_value,
+        "sortino": sortino_value,
+        # Which rate Sharpe/Sortino were actually scored against, and
+        # where it came from - an explicit `?rate=` override, or the
+        # tracked series' own average over this run's window. Null,
+        # alongside both ratios, when neither was available.
+        "riskFreeRate": rate,
+        "riskFreeRateSource": rate_source,
         # Recurring contributions only: the opening lump sum is
         # `startValue`, and adding the two is what `totalInvested` is for.
         "contributed": round(contributed, MONEY_DP),
@@ -476,6 +559,7 @@ def simulate_portfolio(
     end: str | None = None,
     rebalance: str = "none",
     contribution=None,
+    rate: float | None = None,
 ) -> dict:
     """Simulate `holdings` over a window, starting from `value` in cash.
 
@@ -492,8 +576,9 @@ def simulate_portfolio(
     once per date.
 
     Alongside the series: `metrics` scores the run as a whole (final
-    value, total return, CAGR, volatility, deepest drawdown, and - once
-    money keeps arriving - what was paid in, what was gained and the
+    value, total return, CAGR, volatility, deepest drawdown, time under
+    water, pain index, Calmar, Sharpe, Sortino - issue #112 - and, once
+    money keeps arriving, what was paid in, what was gained and the
     money-weighted return), and each holding carries its own price return,
     final value, share of the finished portfolio, and dollar contribution
     to its gain. Both are read whole rather than walked date by date, so
@@ -505,6 +590,15 @@ def simulate_portfolio(
     `invested` array beside `total` is the running sum of everything paid
     in, so a chart can draw the money against the value without having to
     reconstruct the schedule.
+
+    `rate` is optional too (issue #112, filed alongside #103): an
+    override for the annual risk-free rate Sharpe/Sortino are scored
+    against, percent per annum. Omitted, the tracked series' own average
+    over this run's actual window is used instead - not a single point
+    value, since the window a rate is read for should be the one it is
+    scoring. `metrics.riskFreeRate`/`riskFreeRateSource` echo whichever
+    one actually produced the two ratios, and both ratios are null with a
+    reason when neither is available.
 
     The `start` and `end` in the response are the window actually
     simulated, which for "max" - or for any window reaching past the data -
@@ -698,6 +792,7 @@ def simulate_portfolio(
     cash_flows.insert(0, (pd.Timestamp(dates[0]), -float(value)))
     cash_flows.append((pd.Timestamp(dates[-1]), totals[-1]))
     units = unit_values(totals, inflows)
+    resolved_rate, rate_source = _resolve_rate(rate, window_start, window_end)
 
     return {
         "start": dates[0],
@@ -724,6 +819,8 @@ def simulate_portfolio(
             totals, dates, units, cash_flows, contributed,
             income={t: v for t, v in income.items() if t in on_record},
             unknown=[t for t in tickers if t not in on_record],
+            rate=resolved_rate,
+            rate_source=rate_source,
         ),
         "holdings": [
             {

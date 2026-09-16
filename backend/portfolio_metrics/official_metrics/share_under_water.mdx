@@ -1,0 +1,42 @@
+---
+title: Share Under Water
+summary: What fraction of the whole window was spent below a prior peak.
+---
+
+## What it measures
+
+Time Under Water reports the longest single stretch the portfolio spent
+below a prior high-water mark. This is that figure's own companion: not
+the longest stretch, but the *total* time spent below a peak across the
+whole window, as a share of it. A portfolio that fell once and spent most
+of the window recovering reads very differently here than one that dipped
+and recovered repeatedly, even if their longest single stretch was the
+same length.
+
+## How it is computed
+
+Every distinct underwater stretch in the window (the same set Time Under
+Water finds its longest member from) has its own duration summed, then
+divided by the window's own elapsed days:
+
+<Formula tex={String.raw`\text{share} = \frac{\sum \text{stretch durations}}{\text{window's own elapsed days}} \times 100`} />
+
+Stretches never overlap, so summing every one double-counts nothing. A
+stretch still open at the window's last row is timed only as far as it has
+actually been observed, the same rule Time Under Water follows.
+
+<WorkedExample />
+
+## How it reads
+
+Close to 0% means the portfolio spent nearly the whole window at or near
+its own high-water mark. Close to 100% means it spent almost the entire
+window recovering from something, whatever that fall's own depth was —
+this figure says nothing about how deep, only for how long.
+
+## Caveats
+
+0% is a real, common answer — it means the portfolio never fell below a
+prior peak in this window at all. Null only when the window itself has
+fewer than two rows of price history to measure an elapsed day from, the
+same floor Time Under Water reports null for.

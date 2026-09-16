@@ -469,6 +469,133 @@ def pain_index(values: list[float], dates: list[str]) -> dict:
     return {"value": round(weighted / total_days * 100, PERCENT_DP), "granularity": granularity}
 
 
+def time_under_water(values: list[float], dates: list[str]) -> dict:
+    """How long the series spent below a prior peak (issue #112): the
+    longest single stretch, in calendar days, and that same time as a
+    share of the whole window - `max_drawdown`'s "how deep" and
+    `pain_index`'s "how deep on average" both say nothing about "for how
+    long", which is most of what a fall actually feels like to hold
+    through.
+
+    Built on `underwater_stretches` - each stretch's own duration is the
+    gap from where it started to where it recovered, or to the series'
+    own last row for one still open at the end (there is no recovery
+    date to measure to yet, so the stretch is timed only as far as it has
+    actually been observed). Stretches never overlap by construction, so
+    summing every one's duration double-counts nothing.
+
+    `{"longestDays": None, "shareOfWindow": None, ...}` for a series too
+    short to have an elapsed day between any two rows - the same
+    structural floor `pain_index` reports null for. A series that never
+    fell below its own running peak reports `0` for both, a real answer:
+    the window was never under water at all, not one this function
+    could not measure.
+    """
+    granularity = granularity_of(dates)
+    if len(values) < 2:
+        return {"longestDays": None, "shareOfWindow": None, "granularity": granularity}
+    window_days = (pd.Timestamp(dates[-1]) - pd.Timestamp(dates[0])).days
+    if window_days <= 0:
+        return {"longestDays": None, "shareOfWindow": None, "granularity": granularity}
+
+    window_end = pd.Timestamp(dates[-1])
+    longest = 0
+    total_underwater = 0
+    for stretch in underwater_stretches(values, dates)["stretches"]:
+        start = pd.Timestamp(stretch["start"])
+        end = pd.Timestamp(stretch["end"]) if stretch["end"] is not None else window_end
+        duration = (end - start).days
+        longest = max(longest, duration)
+        total_underwater += duration
+
+    return {
+        "longestDays": longest,
+        "shareOfWindow": round(total_underwater / window_days * 100, PERCENT_DP),
+        "granularity": granularity,
+    }
+
+
+def calmar_ratio(cagr_value: float | None, max_drawdown_value: float | None) -> float | None:
+    """CAGR over the depth of the worst drawdown, both already-computed
+    percentages rather than a series (issue #112) - a risk-adjusted
+    return that reads "how much I made for how deep the worst fall was",
+    the same pairing `pain_index` makes between depth and duration.
+
+    `None` when either input is itself `None`, or when there was no
+    drawdown at all to divide by (`max_drawdown_value == 0`) - a ratio
+    against an assumed zero is not a number, however good the CAGR.
+    """
+    if cagr_value is None or max_drawdown_value is None or max_drawdown_value == 0:
+        return None
+    return round(cagr_value / abs(max_drawdown_value), PERCENT_DP)
+
+
+def _annualized_mean_return(values: list[float], dates: list[str]) -> float | None:
+    """Arithmetic mean of the series' own period returns, annualised - the
+    Sharpe/Sortino numerator (issue #112), and deliberately not `cagr`:
+    the textbook ratio is built from the same arithmetic mean of period
+    returns `volatility`/`downside_deviation` already take their own
+    dispersion from, not a compounded growth rate, so the three stay
+    directly comparable with each other.
+
+    Each return is first divided by the trading days its own gap covers -
+    not by the square root, the way `scaled_returns` does for a variance -
+    since a mean annualises by simple proportion rather than by root time,
+    then multiplied by the usual 252 once averaged.
+
+    `None` with fewer than two returns, the same floor every other
+    returns-based figure in this module reports.
+    """
+    pairs = _returns_with_gaps(values, dates)
+    if len(pairs) < 2:
+        return None
+    daily_equivalents = [r / gap for r, gap in pairs]
+    return sum(daily_equivalents) / len(daily_equivalents) * TRADING_DAYS_PER_YEAR * 100
+
+
+def sharpe_ratio(values: list[float], dates: list[str], rate: float) -> dict:
+    """Annualised mean excess return over annualised volatility (issue
+    #112) - the textbook Sharpe ratio, built from the same period-return
+    arithmetic mean `volatility` already takes its own dispersion from,
+    so the two are measuring the same series the same way.
+
+    `rate` is the annual risk-free rate, percent per annum, for this
+    run's own window - a single number the caller has already resolved
+    (the tracked series' own average over the window, or an override),
+    not a per-period series, since it is being compared against one
+    already-annualised mean rather than against each raw period return.
+
+    `{"value": None, ...}` when there are fewer than two returns to take
+    a mean or a volatility from, or when volatility itself is zero - a
+    ratio against an assumed-riskless series is not a number.
+    """
+    granularity = granularity_of(dates)
+    mean = _annualized_mean_return(values, dates)
+    vol = volatility(values, dates)["value"]
+    if mean is None or vol is None or vol == 0:
+        return {"value": None, "granularity": granularity}
+    return {"value": round((mean - rate) / vol, PERCENT_DP), "granularity": granularity}
+
+
+def sortino_ratio(values: list[float], dates: list[str], rate: float) -> dict:
+    """`sharpe_ratio`'s sibling, dividing the same annualised mean excess
+    return by annualised downside deviation instead of total volatility
+    (issue #112) - a risk-adjusted return that does not penalise a series
+    for moving up.
+
+    `rate` is the same already-resolved annual risk-free rate
+    `sharpe_ratio` takes. `{"value": None, ...}` on the same terms -
+    fewer than two returns, or a downside deviation of exactly zero (a
+    series with no shortfall below the target at all to measure).
+    """
+    granularity = granularity_of(dates)
+    mean = _annualized_mean_return(values, dates)
+    downside = downside_deviation(values, dates)["value"]
+    if mean is None or downside is None or downside == 0:
+        return {"value": None, "granularity": granularity}
+    return {"value": round((mean - rate) / downside, PERCENT_DP), "granularity": granularity}
+
+
 def unit_values(values: list[float], inflows: list[float]) -> list[float]:
     """The total with the deposits taken back out of it.
 

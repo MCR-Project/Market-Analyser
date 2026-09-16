@@ -1,0 +1,40 @@
+---
+title: Calmar Ratio
+summary: CAGR divided by the depth of the worst drawdown.
+---
+
+## What it measures
+
+A portfolio that grew faster is not automatically the better one to have
+held if it fell much further to get there. Calmar is the plainest way to
+weigh the two against each other: how much the portfolio compounded,
+relative to how deep its own worst fall went.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{Calmar} = \frac{\text{CAGR}}{|\text{max drawdown}|}`} />
+
+Both figures already sit in this same `metrics` object — Calmar is not a
+second pass over the price series, only a ratio of two numbers already
+computed for the CAGR and Max Drawdown tiles.
+
+<WorkedExample />
+
+## How it reads
+
+Higher is better: more compounding for every point of depth the worst
+fall reached. A Calmar under 1 means the worst drawdown, in percentage
+terms, was actually larger than the annual growth rate that got the
+portfolio through it — a rough ride relative to the reward.
+
+## Caveats
+
+<Warning>
+Null when the run never fell below a prior peak at all — not because the
+run did badly, but because a ratio against a drawdown of exactly zero is
+not a number, however good the CAGR behind it. This is the one case where
+a strong run reports a dash rather than an exceptionally high figure.
+</Warning>
+
+Also null wherever CAGR itself is: a window with no elapsed time to
+compound a growth rate over.

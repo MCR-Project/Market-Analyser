@@ -45,19 +45,27 @@ def frame(columns: dict, dates: list[str]) -> pd.DataFrame:
     return pd.DataFrame(columns, index=pd.to_datetime(dates))
 
 
-def run(closes, holdings, value=1000.0, rebalance="none"):
+def run(closes, holdings, value=1000.0, rebalance="none", contribution=None, rate=None):
     # Dividends are read separately from the prices (#68), so patching
     # only the price read would leave the simulation reaching for Supabase
     # - slow wherever it answers, and a different run depending on whether
     # it did. Silenced here; income has its own file.
+    #
+    # get_risk_free_rate reaches Supabase too (issue #112) - patched to
+    # None (no tracked rate available) by default so every test here is
+    # deterministic regardless of whether this environment happens to
+    # have real Supabase config; a test that actually wants a tracked
+    # rate passes its own `rate` (an override, bypassing this read
+    # entirely) rather than relying on live data.
     with (
         patch("services.portfolio.get_closes", return_value=closes),
         patch("services.portfolio.get_dividends", return_value={}),
         patch("services.portfolio.tracked_tickers", return_value=set()),
+        patch("services.portfolio.get_risk_free_rate", return_value=None),
     ):
         return simulate_portfolio(
             holdings, value=value, start="2015-01-01", end="2024-12-31",
-            rebalance=rebalance,
+            rebalance=rebalance, contribution=contribution, rate=rate,
         )
 
 
@@ -240,6 +248,120 @@ class DrawdownTests(unittest.TestCase):
         self.assertEqual(drawdown["troughDate"], "2020-01-08")
 
 
+# ── Time under water, pain index, Calmar, Sharpe, Sortino (issue #112) ─────────
+
+class RiskAdjustedMetricsTests(unittest.TestCase):
+    def test_a_never_underwater_run_reports_zero_not_null(self):
+        """A run that only ever rises has nothing to be underwater from -
+        0 for both time-under-water figures and for the pain index, a
+        real answer rather than a missing one."""
+        closes = frame({"A": [100.0, 110.0, 120.0, 130.0]},
+                       ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertEqual(metrics["timeUnderWater"], 0)
+        self.assertEqual(metrics["shareUnderWater"], 0.0)
+        self.assertEqual(metrics["painIndex"], 0.0)
+        self.assertNotIn("timeUnderWater", metrics.get("reasons", {}))
+        self.assertNotIn("painIndex", metrics.get("reasons", {}))
+
+    def test_a_real_fall_reports_a_real_time_under_water_and_pain_index(self):
+        closes = frame(
+            {"A": [100.0, 80.0, 60.0, 90.0, 120.0]},
+            ["2020-01-01", "2020-02-01", "2020-03-01", "2020-04-01", "2020-05-01"],
+        )
+
+        metrics = run(closes, one())["metrics"]
+
+        # The stretch itself starts at the first row *below* the peak
+        # (2020-02-01, not the peak date itself) and ends at the first
+        # row back at or past it (2020-05-01) - 90 days, the run's only
+        # stretch and therefore also its longest.
+        self.assertEqual(metrics["timeUnderWater"], 90)
+        self.assertAlmostEqual(metrics["shareUnderWater"], 90 / 121 * 100, places=4)
+        self.assertGreater(metrics["painIndex"], 0.0)
+
+    def test_calmar_matches_cagr_over_the_absolute_drawdown(self):
+        closes = frame({"A": [100.0, 150.0, 90.0, 180.0]},
+                       ["2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertIsNotNone(metrics["cagr"])
+        self.assertLess(metrics["maxDrawdown"]["value"], 0)
+        expected = round(metrics["cagr"] / abs(metrics["maxDrawdown"]["value"]), 4)
+        self.assertAlmostEqual(metrics["calmar"], expected, places=4)
+
+    def test_calmar_is_null_when_the_run_never_drew_down(self):
+        closes = frame({"A": [100.0, 110.0, 120.0]},
+                       ["2020-01-02", "2020-01-03", "2020-01-06"])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertIsNone(metrics["calmar"])
+        self.assertIn("calmar", metrics["reasons"])
+
+    def test_a_missing_rate_leaves_sharpe_and_sortino_null_with_a_reason(self):
+        """The default `run()` helper patches get_risk_free_rate to None
+        and passes no override - the "nothing available at all" case."""
+        closes = frame({"A": [100.0, 110.0, 105.0, 115.0, 108.0, 125.0]},
+                       [f"2020-01-{d:02d}" for d in (2, 3, 6, 7, 8, 9)])
+
+        metrics = run(closes, one())["metrics"]
+
+        self.assertIsNone(metrics["sharpe"])
+        self.assertIsNone(metrics["sortino"])
+        self.assertIsNone(metrics["riskFreeRate"])
+        self.assertIsNone(metrics["riskFreeRateSource"])
+        self.assertIn("sharpe", metrics["reasons"])
+        self.assertIn("sortino", metrics["reasons"])
+
+    def test_an_override_rate_is_echoed_and_produces_real_ratios(self):
+        closes = frame({"A": [100.0, 110.0, 105.0, 115.0, 108.0, 125.0]},
+                       [f"2020-01-{d:02d}" for d in (2, 3, 6, 7, 8, 9)])
+
+        metrics = run(closes, one(), rate=2.0)["metrics"]
+
+        self.assertEqual(metrics["riskFreeRate"], 2.0)
+        self.assertEqual(metrics["riskFreeRateSource"], "override")
+        self.assertIsNotNone(metrics["sharpe"])
+        self.assertIsNotNone(metrics["sortino"])
+
+    def test_sortino_is_at_least_sharpe_when_downside_deviation_is_the_smaller_one(self):
+        """A steady rise with one dip: the one loss pulls the downside
+        deviation below the total volatility (which also counts every
+        up day), and the run's own excess return is positive, so Sortino
+        - dividing the same numerator by the smaller denominator - must
+        read at least as high as Sharpe."""
+        closes = frame(
+            {"A": [100.0, 105.0, 95.0, 112.0, 108.0, 121.0, 130.0]},
+            [f"2020-01-{d:02d}" for d in (2, 3, 6, 7, 8, 9, 10)],
+        )
+
+        metrics = run(closes, one(), rate=1.0)["metrics"]
+
+        self.assertIsNotNone(metrics["sharpe"])
+        self.assertIsNotNone(metrics["sortino"])
+        self.assertGreaterEqual(metrics["sortino"], metrics["sharpe"])
+
+    def test_contributions_do_not_move_any_of_the_five(self):
+        """All five are read off the flow-free unit value, the same
+        series total return/CAGR/volatility/drawdown already are - a
+        recurring contribution must not move any of them, the same
+        promise those four already keep."""
+        dates = [f"2020-{m:02d}-05" for m in range(1, 13)]
+        closes = frame({"A": [90.0 + 7 * m for m in range(1, 13)]}, dates)
+
+        lump_sum = run(closes, one())["metrics"]
+        contributed = run(
+            closes, one(), contribution={"amount": 200, "frequency": "monthly"},
+        )["metrics"]
+
+        for key in ("timeUnderWater", "shareUnderWater", "painIndex", "calmar"):
+            self.assertEqual(lump_sum[key], contributed[key], key)
+
+
 # ── Per-holding metrics ──────────────────────────────────────────────────────
 
 class PerHoldingTests(unittest.TestCase):
@@ -377,11 +499,14 @@ class MetricReasonTests(unittest.TestCase):
     def test_a_healthy_multi_row_run_carries_no_reasons_key_at_all(self):
         """Nothing is null, so there is nothing to explain - the key is
         absent, not present-and-empty, the same convention
-        per_ticker_reason follows for a measurement with no nulls."""
+        per_ticker_reason follows for a measurement with no nulls. A rate
+        override is required here too (issue #112): Sharpe/Sortino are
+        otherwise null whenever no tracked rate is available, which
+        would leave a "reasons" entry even on an otherwise healthy run."""
         closes = frame({"A": [100.0, 110.0, 105.0]},
                        ["2020-01-02", "2020-01-03", "2020-01-06"])
 
-        metrics = run(closes, one())["metrics"]
+        metrics = run(closes, one(), rate=2.0)["metrics"]
 
         self.assertNotIn("reasons", metrics)
 
@@ -473,7 +598,14 @@ class MetricsRouteTests(unittest.TestCase):
             "start": "2020-01-01",
             "end": "2020-12-31",
         }
-        with patch("services.market_data.get_client_optional", return_value=self._Client()):
+        with (
+            patch("services.market_data.get_client_optional", return_value=self._Client()),
+            # get_risk_free_rate also reaches get_client_optional now
+            # (issue #112) - _Client answers any table with these price
+            # rows, which have no "rate" column, so this is patched
+            # separately rather than taught to the fake.
+            patch("services.portfolio.get_risk_free_rate", return_value=None),
+        ):
             resp = client.post("/api/portfolio/simulate", json=body)
 
         self.assertEqual(resp.status_code, 200)
@@ -483,6 +615,11 @@ class MetricsRouteTests(unittest.TestCase):
         self.assertEqual(metrics["totalReturn"], 60.0)
         self.assertEqual(set(metrics), {
             "startValue", "finalValue", "totalReturn", "cagr", "volatility", "maxDrawdown",
+            # Time under water, pain index and the three risk-adjusted
+            # ratios (issue #112), present on every run the same way
+            # cagr/volatility/maxDrawdown are.
+            "timeUnderWater", "shareUnderWater", "painIndex",
+            "calmar", "sharpe", "sortino", "riskFreeRate", "riskFreeRateSource",
             # The account, as opposed to the portfolio (issue #67). Present
             # on every run, so a caller reads the same shape whether or not
             # anything was ever paid in.

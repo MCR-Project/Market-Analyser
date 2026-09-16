@@ -401,7 +401,14 @@ class SimulateRouteTests(unittest.TestCase):
 
     def test_a_portfolio_is_simulated_and_nothing_is_written(self):
         db = _WriteHostileClient(self._rows())
-        with patch("services.market_data.get_client_optional", return_value=db):
+        with (
+            patch("services.market_data.get_client_optional", return_value=db),
+            # get_risk_free_rate also reaches get_client_optional now
+            # (issue #112) - the write-hostile fake answers any table
+            # with these price rows, which have no "rate" column, so
+            # this is patched separately rather than taught to the fake.
+            patch("services.portfolio.get_risk_free_rate", return_value=None),
+        ):
             resp = client.post("/api/portfolio/simulate", json=self._body())
 
         self.assertEqual(resp.status_code, 200)
@@ -430,7 +437,10 @@ class SimulateRouteTests(unittest.TestCase):
         basket reaches is a fact about its holdings. It travels as a
         period, and the response says which window it turned out to be."""
         db = _WriteHostileClient(self._rows())
-        with patch("services.market_data.get_client_optional", return_value=db):
+        with (
+            patch("services.market_data.get_client_optional", return_value=db),
+            patch("services.portfolio.get_risk_free_rate", return_value=None),
+        ):
             resp = client.post(
                 "/api/portfolio/simulate",
                 json=self._body(start=None, end=None, period="max"),

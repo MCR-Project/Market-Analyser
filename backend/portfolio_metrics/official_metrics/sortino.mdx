@@ -1,0 +1,44 @@
+---
+title: Sortino Ratio
+summary: The same annualised mean excess return, divided by annualised downside deviation instead of total volatility.
+---
+
+## What it measures
+
+Sharpe's sibling, with one change: instead of dividing by total
+volatility - which counts an unusually good day exactly the same as an
+unusually bad one - Sortino divides by downside deviation, the dispersion
+of only the shortfalls below a target. A portfolio that moves up in
+occasional large steps and down smoothly looks riskier than it behaved
+under Sharpe; Sortino does not penalise it for that.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{Sortino} = \frac{\overline{r} \times 252 - r_f}{\sigma_{\text{downside}}}`} />
+
+The numerator is identical to Sharpe's: the arithmetic mean of the run's
+own period returns, annualised, less the risk-free rate for this run's
+own window. The denominator is downside deviation against a target of
+0% — every period at or above target contributes zero rather than being
+dropped from the sample, so a single large loss among many flat days does
+not report the same downside risk a series of frequent, similarly sized
+ones would.
+
+<WorkedExample />
+
+## How it reads
+
+The same rough scale Sharpe reads on, but Sortino is never lower than
+Sharpe for a series whose downside deviation is below its total
+volatility and whose excess return is positive - which is most series,
+since counting only the shortfalls almost always narrows the
+denominator. A Sortino meaningfully higher than the same run's Sharpe
+says the volatility Sharpe penalised it for was mostly upside.
+
+## Caveats
+
+Null on the same terms Sharpe is: no risk-free rate available and no
+override given, or fewer than two period returns. Also null when nothing
+in the window fell short of the target at all - there is no shortfall
+left to measure a downside deviation from, not because the run was
+riskless, but because everything observed was at or above it.

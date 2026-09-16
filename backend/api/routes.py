@@ -324,12 +324,9 @@ class PortfolioIn(BaseModel):
     rate: float | None = Field(
         None,
         description=(
-            "Risk-free rate override, percent per annum (e.g. 4.2), for the "
-            "ratios that need one (issue #103). Omit to use the tracked "
-            "series for the run's own window. Accepted here but not yet "
-            "read by simulate_portfolio - the ratios themselves are filed "
-            "separately - so the shared request body simulate and the "
-            "future risk endpoint (#113) both take is ready for them."
+            "Risk-free rate override, percent per annum (e.g. 4.2), for "
+            "Sharpe and Sortino (issue #112). Omit to use the tracked "
+            "series' own average over the run's window instead."
         ),
     )
 
@@ -341,10 +338,18 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
     Returns the run in columnar form - `dates`, `total`, `cash`,
     `invested`, and a `values` array per holding - alongside `metrics`
     (final value, total return, CAGR, annualised volatility, deepest
-    drawdown with the dates of both ends, what was paid in, what was
+    drawdown with the dates of both ends, time under water, pain index,
+    Calmar, Sharpe, Sortino - issue #112 - what was paid in, what was
     gained, and the money-weighted return) and, per holding, its own price
     return, final value, share of the finished portfolio and dollar
     contribution to its gain.
+
+    Sharpe and Sortino are scored against `metrics.riskFreeRate` - an
+    explicit `rate` override on the request, or the tracked risk-free
+    series' own average over this run's window - echoed alongside
+    `metrics.riskFreeRateSource` ("override" or "tracked") so a reader can
+    tell which one actually produced them. Null, with both ratios, when
+    neither is available.
 
     Dividend income is reported and never added: `prices` holds adjusted
     closes (issue #13), so every return here is already a total return and
@@ -389,6 +394,7 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
             contribution=(
                 portfolio.contribution.model_dump() if portfolio.contribution else None
             ),
+            rate=portfolio.rate,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
