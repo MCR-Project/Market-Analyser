@@ -233,3 +233,13 @@ Windows 11, PowerShell primary with Git Bash available. A local `.venv/` sits at
 the repo root and is gitignored; `app/dist/` is build output and is not tracked.
 `.claude/` is gitignored, so `settings.local.json` and `launch.json` are
 local-only — the `CLAUDE.md` files themselves are tracked and are meant to be.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for MCR-Project/Market-Analyser; the `gh` CLI handles all operations. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout: `CONTEXT.md` + `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.
