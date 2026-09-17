@@ -12,3 +12,15 @@ export function fmtMoney(b) {
 export function fmtPrice(v) {
   return '$' + v.toFixed(2);
 }
+
+const USD0 = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 0,
+});
+
+/** A dollar figure with no cents — HoldingsTable's VALUE/GAIN/INCOME
+ *  columns and HoldingChartPopup's header share this exact formatting. */
+export function fmtUSD0(v) {
+  return USD0.format(v);
+}
