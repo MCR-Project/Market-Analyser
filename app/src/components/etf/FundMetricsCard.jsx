@@ -1,7 +1,8 @@
 /**
  * FundMetricsCard — fund-level metrics: properties of the whole basket
  * rather than of any one holding (issue #105), in their own card under
- * EtfDashboard.
+ * EtfDashboard — or beside it at 2xl and up, where App puts the two in
+ * one row (issue #139).
  *
  * Issue #105's own decision: the identity card's `NET ASSETS / HOLDINGS /
  * AVG ρ` row is already tight, sits inside the fund-picker button's zone,
@@ -89,7 +90,7 @@ export const FundMetricsCard = memo(function FundMetricsCard({ fundMetrics, onOp
   const activeTiles = tileMetrics.filter(m => activeIds.includes(m.id));
 
   return (
-    <section className="flex-none bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] mb-5 animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+    <section className="flex-1 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
       <div className="flex items-center justify-between px-5 pt-4 pb-0">
         <div className="eyebrow">FUND METRICS</div>
         <button

@@ -170,6 +170,19 @@ check a server that is already up is a dead end.
 - **No text inside a stretched SVG.** The charts use
   `preserveAspectRatio="none"` and would distort any glyph; every label is HTML
   positioned over the top.
+- **Drawings size to their measured box, not a constant** (issue #139). Growing
+  a chart with CSS stretches it, so a drawing that should get *bigger* on a big
+  screen measures instead: `useElementSize` for a box that fills its panel
+  (`NetworkView` lays its nodes out in it, `MatrixView` sizes its cells to it),
+  `useFillHeight` for a plot that should end at the bottom of the first
+  screenful (`PortfolioChart`, `ComparisonChart`). Both return callback refs,
+  so a view that shows a loading state first starts measuring when the real
+  box mounts. The measured element must be sized by its container, never by
+  what is drawn in it, or the drawing and the measurement chase each other.
+- **Wide screens reflow at `2xl` (1536px), and pages cap at 2400px.** Below
+  `2xl` both the dashboard and the portfolio page keep their stacked order;
+  at `2xl` the ETF card and fund metrics card share a row (`App.jsx`) and the
+  portfolio panel splits into inputs and results (`PortfolioPanel.jsx`).
 
 ## MDX: two vocabularies, deliberately separate
 

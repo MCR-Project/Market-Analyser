@@ -29,15 +29,25 @@
  * simply begins further along is the honest way to show that.
  *
  * A benchmark is drawn dashed. It is not a portfolio anybody owns here,
- * and the eye should be able to tell without reading the legend.
+ * and the eye should be able to tell without reading the legend. *
+ * Sized like PortfolioChart, whose slot it takes: stretched horizontally
+ * (so no text inside the SVG), drawn in pixels vertically, with a height
+ * that runs to the bottom of the first screenful between 240px and 600px
+ * (issue #139, useFillHeight).
  */
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useChartBrush } from '../../hooks/useChartBrush';
+import { useFillHeight } from '../../hooks/useFillHeight';
 import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
 
 const W = 360;
 const PAD = 4;
-const H = 240;
+
+/** The plot's height range in pixels — the same range, for the same
+ *  reasons, as PortfolioChart's (issue #139): the old fixed height as
+ *  the floor, and a ceiling so a tall monitor does not make a poster. */
+const PLOT_MIN = 240;
+const PLOT_MAX = 600;
 
 const PALETTE = ['#7849ff', '#2a8aff', '#2bd47d', '#ffb547', '#ff4d6d', '#00c2c7'];
 
@@ -128,6 +138,9 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale, onSe
   const [hoverIdx, setHoverIdx] = useState(null);
 
   const { dates, series, min, max } = useMemo(() => buildSeries(runs, mode), [runs, mode]);
+  // Pixels vertically (viewBox height = on-screen height), so a taller
+  // plot is a taller drawing rather than a stretched one.
+  const { outerRef, plotRef, height: H } = useFillHeight(PLOT_MIN, PLOT_MAX);
 
 
   // Positioned by date, not by place in the merged list: a line sampled
@@ -191,7 +204,7 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale, onSe
   const zeroY = mode === 'percent' && min < 0 && max > 0 ? y(0) : null;
 
   return (
-    <div className="mb-6">
+    <div ref={outerRef} className="mb-6">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
         <div className="eyebrow">
           {mode === 'percent' ? 'RETURN, EACH FROM ITS OWN START' : 'VALUE'}
@@ -235,6 +248,7 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale, onSe
         ))}
 
         <svg
+          ref={plotRef}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
           width="100%"

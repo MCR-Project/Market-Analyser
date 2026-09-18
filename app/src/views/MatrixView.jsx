@@ -12,6 +12,14 @@
  * that stock, which highlights its row/column and updates DetailAside.
  *
  * Below the grid: a gradient legend bar (0.0 → 1.0) and explanatory label.
+ *
+ * Cells grow into the space the panel has (issue #139): the panel fills
+ * the view's height, and each cell takes an equal share of the measured
+ * grid area, between its old fixed 44×30 and a ceiling past which a cell
+ * is just a bigger coloured block. More room makes the same N tickers
+ * easier to read; it never shows more of them — the slider decides N.
+ * When the area is smaller than N minimum-size cells, the grid scrolls,
+ * as it always did.
  */
 import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveEtf } from '../hooks/useLiveEtf';
@@ -19,9 +27,19 @@ import { useLiveCorrelation } from '../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../hooks/useLiveSectors';
 import { cellColor } from '../utils/correlation';
 import { fmtCorr } from '../utils/format';
+import { useElementSize } from '../hooks/useElementSize';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
+
+/** Row-label column width and header-row height, both fixed — only the
+ *  cells grow. */
+const LABEL_W = 60;
+const HEADER_H = 26;
+const CELL_MIN_W = 44, CELL_MAX_W = 96;
+const CELL_MIN_H = 30, CELL_MAX_H = 60;
+
+const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value));
 
 export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
   const { etf, etfId, tickers, loading: etfLoading, retry: etfRetry } = useLiveEtf();
@@ -41,6 +59,14 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
   const corrFn = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
   const matrixTickers = useMemo(() => tickers.slice(0, matrixN), [tickers, matrixN]);
 
+  const [gridRef, grid] = useElementSize();
+  const cellW = clamp(Math.floor((grid.width - LABEL_W) / matrixN), CELL_MIN_W, CELL_MAX_W);
+  // Never taller than wide: a tall narrow cell reads as a bar, not a square.
+  const cellH = clamp(Math.floor((grid.height - HEADER_H) / matrixN), CELL_MIN_H, Math.min(CELL_MAX_H, cellW));
+  // Past about 60×40 a cell has room for a larger figure; below it the
+  // old 10.5px is what fits "−0.12" inside a 44px cell.
+  const roomy = cellW >= 60 && cellH >= 40;
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="flex-none flex items-center gap-3 mb-4">
@@ -57,15 +83,15 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
         <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex-1 min-h-0 flex gap-5 items-start flex-wrap">
-          <section className="flex-1 min-w-[320px] min-h-0 max-h-full flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+          <section className="self-stretch flex-1 min-w-[320px] min-h-0 max-h-full flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
             <div className="flex-1 min-h-0 flex flex-col p-[18px_20px_20px]">
-              <div className="corr-scroll flex-1 min-h-0 overflow-auto pb-1.5">
+              <div ref={gridRef} className="corr-scroll flex-1 min-h-0 overflow-auto pb-1.5">
                 <div className="inline-block min-w-full">
                   {/* Header — sticky so it stays visible while rows scroll vertically */}
                   <div className="flex sticky top-0 z-10 bg-[var(--bg-1)]">
-                    <div className="w-[60px] flex-none" />
+                    <div className="flex-none" style={{ width: LABEL_W }} />
                     {matrixTickers.map(t => (
-                      <div key={t} className="w-[44px] flex-none text-center font-[var(--font-mono)] text-[10px] font-semibold text-[var(--fg-2)] pb-2 overflow-hidden text-ellipsis">{t}</div>
+                      <div key={t} style={{ width: cellW }} className="flex-none text-center font-[var(--font-mono)] text-[10px] font-semibold text-[var(--fg-2)] pb-2 overflow-hidden text-ellipsis">{t}</div>
                     ))}
                   </div>
                   {/* Rows */}
@@ -75,8 +101,8 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
                       <div key={rt} className="flex items-center">
                         <button
                           onClick={() => onSelect(rt)}
-                          className="w-[60px] flex-none text-right pr-2 font-[var(--font-mono)] text-[11px] bg-transparent border-none cursor-pointer h-[30px]"
-                          style={{ fontWeight: inSelRow ? 700 : 500, color: inSelRow ? 'var(--accent)' : 'var(--fg-1)' }}
+                          className="flex-none text-right pr-2 font-[var(--font-mono)] text-[11px] bg-transparent border-none cursor-pointer"
+                          style={{ width: LABEL_W, height: cellH, fontWeight: inSelRow ? 700 : 500, color: inSelRow ? 'var(--accent)' : 'var(--fg-1)' }}
                         >
                           {rt}
                         </button>
@@ -90,8 +116,11 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
                               key={ct}
                               onClick={() => onSelect(ct === rt ? rt : ct)}
                               title={`${rt} ↔ ${ct}: ρ ${v == null ? 'n/a' : fmtCorr(v)}`}
-                              className="w-[44px] h-[30px] flex-none grid place-items-center cursor-pointer font-[var(--font-mono)] text-[10.5px] border border-[var(--bg-1)] rounded-[3px] transition-opacity duration-150"
+                              className="flex-none grid place-items-center cursor-pointer font-[var(--font-mono)] border border-[var(--bg-1)] rounded-[3px] transition-opacity duration-150"
                               style={{
+                                width: cellW,
+                                height: cellH,
+                                fontSize: roomy ? 12.5 : 10.5,
                                 fontWeight: isDiag ? 700 : 500,
                                 background: isDiag ? 'var(--fg-2)' : c.bg,
                                 color: isDiag ? 'var(--bg)' : c.fg,

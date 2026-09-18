@@ -22,6 +22,10 @@
  *  - **No text inside the SVG.** The chart stretches horizontally to its
  *    container (preserveAspectRatio="none"), which would distort any
  *    glyph drawn in it, so every label is HTML positioned over the top.
+ *    Vertically it is drawn in pixels, and its height follows the screen
+ *    (issue #139, useFillHeight): the plot runs to the bottom of the
+ *    first screenful, between the old fixed 240px and 600px. Where the
+ *    chart starts below that screenful it is 240px, as it always was.
  *
  *  - **Money paid in is a line, not a band** (#67). A portfolio funded
  *    monthly climbs whether or not anything went up, and a stack alone
@@ -38,13 +42,22 @@
 import { memo, useCallback, useMemo } from 'react';
 import { useChartBrush } from '../../hooks/useChartBrush';
 import { useChartHover } from '../../hooks/useChartHover';
+import { useFillHeight } from '../../hooks/useFillHeight';
 import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
 
 /** Shared with useChartHover — the hover maths reads these exact numbers,
- *  so the crosshair and the bands cannot disagree about where a date is. */
+ *  so the crosshair and the bands cannot disagree about where a date is.
+ *  Only the horizontal ones: the hover resolves a date from x alone, so
+ *  the plot's height is free to follow the screen (see useFillHeight). */
 const W = 360;
 const PAD = 4;
-const H = 240;
+
+/** The plot's height range in pixels. The minimum is the old fixed
+ *  height, so a chart that starts below the first screenful renders
+ *  exactly as it used to; the maximum keeps a tall monitor from turning
+ *  it into a poster (issue #139). */
+const PLOT_MIN = 240;
+const PLOT_MAX = 600;
 
 /** Beyond this many bands the thin ones are noise; the smallest are
  *  gathered into one. */
@@ -141,6 +154,10 @@ export const PortfolioChart = memo(function PortfolioChart({
   stale,
   onSelectWindow,
 }) {
+  // The plot is drawn in pixels vertically (viewBox height = on-screen
+  // height), so a taller plot is a taller drawing, not a stretched one.
+  const { outerRef, plotRef, height: H } = useFillHeight(PLOT_MIN, PLOT_MAX);
+
   const bands = useMemo(
     () => buildBands(simulation, groupBy, sectorOf),
     [simulation, groupBy, sectorOf]
@@ -212,13 +229,13 @@ export const PortfolioChart = memo(function PortfolioChart({
     }
 
     return { paths, ceiling, investedPath };
-  }, [bands, simulation, invested, showInvested]);
+  }, [bands, simulation, invested, showInvested, H]);
 
   const at = hoverIdx ?? simulation.dates.length - 1;
   const totalAt = simulation.total[at];
 
   return (
-    <div className="mb-6">
+    <div ref={outerRef} className="mb-6">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
         <div className="eyebrow">VALUE BY {groupBy === 'sector' ? 'SECTOR' : 'HOLDING'}</div>
         <div className="inline-flex p-[3px] bg-[var(--bg-3)] rounded-[var(--radius-md)] gap-[1px]">
@@ -270,6 +287,7 @@ export const PortfolioChart = memo(function PortfolioChart({
         ))}
 
         <svg
+          ref={plotRef}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
           width="100%"

@@ -139,8 +139,11 @@ export function PortfolioPage({ shared = false }) {
     navigate(`/portfolio/${kept.id}${query ? `?${query}` : ''}`);
   };
 
+  // Capped and centred past 2400px (issue #139): up to there the panel
+  // spreads into its two columns, beyond it a table stretched across an
+  // ultrawide monitor reads worse than a page with margins.
   return (
-    <div className="flex-1 min-h-0 flex">
+    <div className="flex-1 min-h-0 flex w-full max-w-[2400px] mx-auto">
       <aside className="flex-none w-[264px] border-r border-[var(--border)] p-4 min-h-0">
         <PortfolioSidebar
           portfolios={portfolios}

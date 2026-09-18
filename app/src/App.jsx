@@ -4,7 +4,7 @@
  * Rendered inside AppLayout, which owns the shared Header; this is
  * everything below it.
  *
- * Layout:
+ * Layout (below 2xl, 1536px):
  *  ┌────────────────────────────────────────────┐
  *  │ EtfDashboard  (identity · sector · chart)  │
  *  ├────────────────────────────────────────────┤
@@ -17,6 +17,19 @@
  *  │ MatrixView + DetailAside                   │
  *  │ NetworkView + DetailAside                  │
  *  └────────────────────────────────────────────┘
+ *
+ * At 2xl and up the two cards share one row, which hands the active
+ * view the height the metrics card used to take (issue #139):
+ *  ┌──────────────────────────────┬─────────────┐
+ *  │ EtfDashboard                 │ FundMetrics │
+ *  ├──────────────────────────────┴─────────────┤
+ *  │ ViewTabs + the active view (fills the rest)│
+ *  └────────────────────────────────────────────┘
+ * The breakpoint is where that row fits: the ETF card alone needs about
+ * 900px (two 280px-minimum panes and the 168px sector strip) and the
+ * metrics card about 400px more. The whole page grows to 2400px and is
+ * centred past that — edge to edge on an ultrawide monitor, a table
+ * reads worse than a page with margins.
  *  Overlays: StockPopup, MeasurementPicker, MetricsPicker (fund metrics)
  *  (EtfDashboard owns its own ETF-picker overlay internally)
  *
@@ -131,7 +144,7 @@ export default function App() {
 
   return (
     <>
-      <main className="max-w-[1280px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
+      <main className="max-w-[2400px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
         {/* Every child below assumes a loaded ETF (non-null etf, populated
             tickers), so the whole main area is gated on that one fetch:
             skeleton while loading, explicit error panel on failure —
@@ -152,8 +165,16 @@ export default function App() {
           )
         ) : (
           <>
-            <EtfDashboard />
-            <FundMetricsCard fundMetrics={fundMetrics} onOpenPicker={() => setFundMetricsPickerOpen(true)} />
+            <div className="flex-none flex flex-col 2xl:flex-row 2xl:items-stretch gap-5 mb-5">
+              <div className="2xl:flex-[2] min-w-0 flex flex-col">
+                <EtfDashboard />
+              </div>
+              {/* Renders nothing when no fund metric is registered, and
+                  the ETF card then takes the whole row. */}
+              <div className="2xl:flex-1 min-w-0 flex flex-col empty:hidden">
+                <FundMetricsCard fundMetrics={fundMetrics} onOpenPicker={() => setFundMetricsPickerOpen(true)} />
+              </div>
+            </div>
 
             {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
             <ViewTabs tabs={tabs} active={activeView} onSelect={selectView} />
