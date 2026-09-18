@@ -43,6 +43,7 @@ import { memo, useCallback, useMemo } from 'react';
 import { useChartBrush } from '../../hooks/useChartBrush';
 import { useChartHover } from '../../hooks/useChartHover';
 import { useFillHeight } from '../../hooks/useFillHeight';
+import { PLOT_MAX, PLOT_MIN } from './plotHeight';
 import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
 
 /** Shared with useChartHover — the hover maths reads these exact numbers,
@@ -51,13 +52,6 @@ import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
  *  the plot's height is free to follow the screen (see useFillHeight). */
 const W = 360;
 const PAD = 4;
-
-/** The plot's height range in pixels. The minimum is the old fixed
- *  height, so a chart that starts below the first screenful renders
- *  exactly as it used to; the maximum keeps a tall monitor from turning
- *  it into a poster (issue #139). */
-const PLOT_MIN = 240;
-const PLOT_MAX = 600;
 
 /** Beyond this many bands the thin ones are noise; the smallest are
  *  gathered into one. */

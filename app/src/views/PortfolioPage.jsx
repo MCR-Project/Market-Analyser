@@ -139,11 +139,8 @@ export function PortfolioPage({ shared = false }) {
     navigate(`/portfolio/${kept.id}${query ? `?${query}` : ''}`);
   };
 
-  // Capped and centred past 2400px (issue #139): up to there the panel
-  // spreads into its two columns, beyond it a table stretched across an
-  // ultrawide monitor reads worse than a page with margins.
   return (
-    <div className="flex-1 min-h-0 flex w-full max-w-[2400px] mx-auto">
+    <div className="flex-1 min-h-0 flex">
       <aside className="flex-none w-[264px] border-r border-[var(--border)] p-4 min-h-0">
         <PortfolioSidebar
           portfolios={portfolios}
@@ -156,32 +153,42 @@ export function PortfolioPage({ shared = false }) {
       </aside>
 
       <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
-        <div className="max-w-[720px]">
-          <StorageNotice status={status} />
+        {/* The content, not the page, is capped (issue #139): up to 2072px
+            — what the panel gets in a 2400px window, beside the sidebar and
+            this area's own padding — it spreads into its two columns;
+            beyond, a table stretched across an ultrawide monitor reads
+            worse than one with margins. Capping here rather than around
+            the whole page keeps the sidebar against the window's left edge
+            and this area's scrollbar against its right, where they are on
+            every other width. */}
+        <div className="max-w-[2072px] mx-auto">
+          <div className="max-w-[720px]">
+            <StorageNotice status={status} />
+          </div>
+
+          {shared && !link.error && <SharedNotice />}
+
+          {shared && link.error ? (
+            <BadLink message={link.error} />
+          ) : open ? (
+            <PortfolioPanel
+              portfolio={open}
+              readOnly={shared}
+              onSaveCopy={handleSaveCopy}
+              onRename={name => rename(open.id, name)}
+              onUpdate={changes => update(open.id, changes)}
+              compared={compared}
+              comparison={comparison}
+              onShare={() => setSharing(true)}
+              onDuplicate={handleDuplicate}
+              onDelete={() => setPendingDelete(open)}
+            />
+          ) : unknownId ? (
+            <NotFound portfolioId={portfolioId} />
+          ) : (
+            <Landing hasPortfolios={portfolios.length > 0} onCreate={() => setCreating(true)} />
+          )}
         </div>
-
-        {shared && !link.error && <SharedNotice />}
-
-        {shared && link.error ? (
-          <BadLink message={link.error} />
-        ) : open ? (
-          <PortfolioPanel
-            portfolio={open}
-            readOnly={shared}
-            onSaveCopy={handleSaveCopy}
-            onRename={name => rename(open.id, name)}
-            onUpdate={changes => update(open.id, changes)}
-            compared={compared}
-            comparison={comparison}
-            onShare={() => setSharing(true)}
-            onDuplicate={handleDuplicate}
-            onDelete={() => setPendingDelete(open)}
-          />
-        ) : unknownId ? (
-          <NotFound portfolioId={portfolioId} />
-        ) : (
-          <Landing hasPortfolios={portfolios.length > 0} onCreate={() => setCreating(true)} />
-        )}
       </main>
 
       {creating && (

@@ -20,9 +20,8 @@
  * the graph's measured box (issue #139; cached per ETF and shape in
  * utils/layout.js), then fitted into that box: the panel fills the
  * height the view has, and the nodes spread across whatever width and
- * height that is. The SVG's viewBox is
- * that same box in pixels, so a node's radius and its label are the same
- * size on any screen — a bigger box means more room between nodes, not
+ * height that is. The SVG's viewBox is that same box in pixels, so a
+ * node's radius and its label are the same size on any screen — a bigger box means more room between nodes, not
  * bigger nodes. It used to be a fixed 620×440 drawing scaled to fit,
  * which on a wide screen left a small graph in the middle of an empty
  * panel.
@@ -72,7 +71,9 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   const [boxRef, { width: W, height: H }] = useElementSize();
   const layout = useMemo(
     // Room for the largest node at the edge, plus its label below it.
-    () => computeLayout(etfId, holdings, corrMatrix, W, H, MAX_R + LABEL_ROOM),
+    // Nothing until the box is measured: a layout for a 0×0 box is a full
+    // simulation (55-140ms) whose result is thrown away a frame later.
+    () => (W > 0 && H > 0 ? computeLayout(etfId, holdings, corrMatrix, W, H, MAX_R + LABEL_ROOM) : {}),
     [etfId, holdings, corrMatrix, W, H]
   );
 

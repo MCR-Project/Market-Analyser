@@ -25,11 +25,15 @@
  *  ├──────────────────────────────┴─────────────┤
  *  │ ViewTabs + the active view (fills the rest)│
  *  └────────────────────────────────────────────┘
- * The breakpoint is where that row fits: the ETF card alone needs about
- * 900px (two 280px-minimum panes and the 168px sector strip) and the
- * metrics card about 400px more. The whole page grows to 2400px and is
- * centred past that — edge to edge on an ultrawide monitor, a table
- * reads worse than a page with margins.
+ * The breakpoint is where that row fits with room to spare: the ETF
+ * card's three panes need 728px at their minimums (two 280px panes and
+ * the 168px sector strip) and are comfortable from about 900px, which at
+ * a 2 : 1 split with the metrics card is a 1536px window (the card is
+ * 978px there). The content grows to 2352px — a 2400px window less this
+ * area's padding — and is centred past that: edge to edge on an
+ * ultrawide monitor, a table reads worse than a page with margins. The
+ * cap is on the content inside the scrolling area, not on the area
+ * itself, so the scrollbar stays at the window's edge.
  *  Overlays: StockPopup, MeasurementPicker, MetricsPicker (fund metrics)
  *  (EtfDashboard owns its own ETF-picker overlay internally)
  *
@@ -144,42 +148,44 @@ export default function App() {
 
   return (
     <>
-      <main className="max-w-[2400px] w-full mx-auto px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
-        {/* Every child below assumes a loaded ETF (non-null etf, populated
-            tickers), so the whole main area is gated on that one fetch:
-            skeleton while loading, explicit error panel on failure —
-            never stale or fabricated data. */}
-        {!etf ? (
-          etfLoading ? (
-            <div className="flex flex-col gap-5 pt-2">
-              <Loading variant="bar" />
-              <Loading variant="chart" height={180} />
-              <Loading variant="skeleton" lines={8} />
-            </div>
+      <main className="w-full px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
+        <div className="max-w-[2352px] w-full mx-auto flex-1 min-h-0 flex flex-col">
+          {/* Every child below assumes a loaded ETF (non-null etf, populated
+              tickers), so the whole main area is gated on that one fetch:
+              skeleton while loading, explicit error panel on failure —
+              never stale or fabricated data. */}
+          {!etf ? (
+            etfLoading ? (
+              <div className="flex flex-col gap-5 pt-2">
+                <Loading variant="bar" />
+                <Loading variant="chart" height={180} />
+                <Loading variant="skeleton" lines={8} />
+              </div>
+            ) : (
+              <ErrorState
+                {...describeFetchError(etfError)}
+                onRetry={() => { etfRetry(); measurements.retryManifest(); }}
+                className="mt-2"
+              />
+            )
           ) : (
-            <ErrorState
-              {...describeFetchError(etfError)}
-              onRetry={() => { etfRetry(); measurements.retryManifest(); }}
-              className="mt-2"
-            />
-          )
-        ) : (
-          <>
-            <div className="flex-none flex flex-col 2xl:flex-row 2xl:items-stretch gap-5 mb-5">
-              <div className="2xl:flex-[2] min-w-0 flex flex-col">
-                <EtfDashboard />
+            <>
+              <div className="flex-none flex flex-col 2xl:flex-row 2xl:items-stretch gap-5 mb-5">
+                <div className="2xl:flex-[2] min-w-0 flex flex-col">
+                  <EtfDashboard />
+                </div>
+                {/* Renders nothing when no fund metric is registered, and
+                    the ETF card then takes the whole row. */}
+                <div className="2xl:flex-1 min-w-0 flex flex-col empty:hidden">
+                  <FundMetricsCard fundMetrics={fundMetrics} onOpenPicker={() => setFundMetricsPickerOpen(true)} />
+                </div>
               </div>
-              {/* Renders nothing when no fund metric is registered, and
-                  the ETF card then takes the whole row. */}
-              <div className="2xl:flex-1 min-w-0 flex flex-col empty:hidden">
-                <FundMetricsCard fundMetrics={fundMetrics} onOpenPicker={() => setFundMetricsPickerOpen(true)} />
-              </div>
-            </div>
 
-            {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
-            <ViewTabs tabs={tabs} active={activeView} onSelect={selectView} />
-          </>
-        )}
+              {/* ── View tabs: each tab owns its own toolbar + content panel ── */}
+              <ViewTabs tabs={tabs} active={activeView} onSelect={selectView} />
+            </>
+          )}
+        </div>
       </main>
 
       {stockPopup && tickers.includes(stockPopup) && (

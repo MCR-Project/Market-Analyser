@@ -179,10 +179,13 @@ check a server that is already up is a dead end.
   so a view that shows a loading state first starts measuring when the real
   box mounts. The measured element must be sized by its container, never by
   what is drawn in it, or the drawing and the measurement chase each other.
-- **Wide screens reflow at `2xl` (1536px), and pages cap at 2400px.** Below
-  `2xl` both the dashboard and the portfolio page keep their stacked order;
-  at `2xl` the ETF card and fund metrics card share a row (`App.jsx`) and the
-  portfolio panel splits into inputs and results (`PortfolioPanel.jsx`).
+- **Wide screens reflow at `2xl` (1536px), and content caps at a 2400px
+  window.** Below `2xl` both the dashboard and the portfolio page keep their
+  stacked order; at `2xl` the ETF card and fund metrics card share a row
+  (`App.jsx`) and the portfolio panel puts its holdings beside its results
+  (`PortfolioPanel.jsx`). The cap goes on the content *inside* each scrolling
+  area, never on the area itself, so the sidebar stays at the window's left
+  edge and the scrollbar at its right.
 
 ## MDX: two vocabularies, deliberately separate
 

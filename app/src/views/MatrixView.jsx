@@ -33,7 +33,12 @@ import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 
 /** Row-label column width and header-row height, both fixed — only the
- *  cells grow. */
+ *  cells grow. The header is one line of 10px text plus its padding
+ *  (23px); the header labels never wrap (a long ticker is cut with an
+ *  ellipsis instead), so that holds for any ticker, and 26 leaves a few
+ *  pixels' slack. If the header could grow, a grid sized to fit exactly
+ *  would overflow, and the scrollbar that appeared would change the
+ *  width the cells are sized from. */
 const LABEL_W = 60;
 const HEADER_H = 26;
 const CELL_MIN_W = 44, CELL_MAX_W = 96;
@@ -83,15 +88,22 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
         <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex-1 min-h-0 flex gap-5 items-start flex-wrap">
-          <section className="self-stretch flex-1 min-w-[320px] min-h-0 max-h-full flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+          {/* Stretched to the view's full height, and never below the
+              smallest box the grid reads in: on a short screen the page
+              scrolls rather than squeezing the matrix into a strip one
+              row tall (issue #139 — the network view's own minimum). */}
+          <section className="self-stretch flex-1 min-w-[320px] min-h-[380px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
             <div className="flex-1 min-h-0 flex flex-col p-[18px_20px_20px]">
-              <div ref={gridRef} className="corr-scroll flex-1 min-h-0 overflow-auto pb-1.5">
+              {/* The scrollbar gutter is reserved whether or not there is
+                  a scrollbar, so one appearing cannot change the width
+                  the cells were just sized from. */}
+              <div ref={gridRef} className="corr-scroll flex-1 min-h-0 overflow-auto pb-1.5 [scrollbar-gutter:stable]">
                 <div className="inline-block min-w-full">
                   {/* Header — sticky so it stays visible while rows scroll vertically */}
                   <div className="flex sticky top-0 z-10 bg-[var(--bg-1)]">
                     <div className="flex-none" style={{ width: LABEL_W }} />
                     {matrixTickers.map(t => (
-                      <div key={t} style={{ width: cellW }} className="flex-none text-center font-[var(--font-mono)] text-[10px] font-semibold text-[var(--fg-2)] pb-2 overflow-hidden text-ellipsis">{t}</div>
+                      <div key={t} style={{ width: cellW }} className="flex-none text-center font-[var(--font-mono)] text-[10px] font-semibold text-[var(--fg-2)] pb-2 overflow-hidden text-ellipsis whitespace-nowrap" title={t}>{t}</div>
                     ))}
                   </div>
                   {/* Rows */}

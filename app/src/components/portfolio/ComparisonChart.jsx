@@ -29,7 +29,8 @@
  * simply begins further along is the honest way to show that.
  *
  * A benchmark is drawn dashed. It is not a portfolio anybody owns here,
- * and the eye should be able to tell without reading the legend. *
+ * and the eye should be able to tell without reading the legend.
+ *
  * Sized like PortfolioChart, whose slot it takes: stretched horizontally
  * (so no text inside the SVG), drawn in pixels vertically, with a height
  * that runs to the bottom of the first screenful between 240px and 600px
@@ -38,16 +39,11 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useChartBrush } from '../../hooks/useChartBrush';
 import { useFillHeight } from '../../hooks/useFillHeight';
+import { PLOT_MAX, PLOT_MIN } from './plotHeight';
 import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
 
 const W = 360;
 const PAD = 4;
-
-/** The plot's height range in pixels — the same range, for the same
- *  reasons, as PortfolioChart's (issue #139): the old fixed height as
- *  the floor, and a ceiling so a tall monitor does not make a poster. */
-const PLOT_MIN = 240;
-const PLOT_MAX = 600;
 
 const PALETTE = ['#7849ff', '#2a8aff', '#2bd47d', '#ffb547', '#ff4d6d', '#00c2c7'];
 

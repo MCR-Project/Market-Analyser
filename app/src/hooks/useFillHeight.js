@@ -13,9 +13,10 @@
  * position, so scrolling does not resize the chart under the pointer:
  * the answer is "how much of the first screenful is left", the same at
  * any scroll offset. Where the plot starts below the first screenful —
- * the stacked layout on a laptop, with the holdings table above it —
- * that is nothing, and the plot gets `min`, which is the old fixed
- * height, so a narrow screen renders exactly as it did before.
+ * typically the stacked layout on a laptop, under the settings, window
+ * controls and summary — that is nothing, and the plot gets `min`, the
+ * old fixed height. A narrow but tall window is the exception: the plot
+ * grows there too, and pushes the holdings table below it further down.
  *
  * `max` exists because a plot as tall as a 1440p monitor is a poster,
  * not a chart; past a point the extra height only stretches the bands.
