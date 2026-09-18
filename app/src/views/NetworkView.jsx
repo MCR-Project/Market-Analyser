@@ -16,8 +16,15 @@
  * to neighbors, and updates DetailAside with peer correlations.
  * Clicking the background deselects.
  *
- * Layout is computed once per ETF via a 400-iteration force simulation
- * (cached in utils/layout.js).
+ * Layout comes from a 400-iteration force simulation run in the shape of
+ * the graph's measured box (issue #139; cached per ETF and shape in
+ * utils/layout.js), then fitted into that box: the panel fills the
+ * height the view has, and the nodes spread across whatever width and
+ * height that is. The SVG's viewBox is that same box in pixels, so a
+ * node's radius and its label are the same size on any screen — a bigger box means more room between nodes, not
+ * bigger nodes. It used to be a fixed 620×440 drawing scaled to fit,
+ * which on a wide screen left a small graph in the middle of an empty
+ * panel.
  */
 import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveEtf } from '../hooks/useLiveEtf';
@@ -25,13 +32,12 @@ import { useLiveCorrelation } from '../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../hooks/useLiveSectors';
 import { useLiveStocks } from '../hooks/useLiveStocks';
 import { computeLayout } from '../utils/layout';
+import { useElementSize } from '../hooks/useElementSize';
 import { fmtCorr } from '../utils/format';
 import { logoUrl, fallbackFaviconUrl, handleSvgImageLogoError } from '../utils/logo';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
-
-const W = 620, H = 440;
 
 // Node radius bounds and reference weight (weightPct at/above which a
 // node hits MAX_R). The curve is a genuine exponential (not sqrt/linear),
@@ -39,6 +45,9 @@ const W = 620, H = 440;
 // proportionally bigger — matching how a heavier position actually
 // dominates the fund far more than its weight ratio alone suggests.
 const MIN_R = 10, MAX_R = 60, REF_WEIGHT = 10, GROWTH = 4;
+// A node's ticker sits 13px below its circle, 11px text: this much
+// under a node keeps the label inside the box.
+const LABEL_ROOM = 18;
 
 function nodeRadius(weightPct) {
   const t = Math.min(1, Math.max(0, weightPct) / REF_WEIGHT);
@@ -59,7 +68,14 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   // null and are treated as "unknown", not filled with a fake value.
   const corr = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
   const holdings = useMemo(() => etf?.holdings ?? [], [etf]);
-  const layout = useMemo(() => computeLayout(etfId, holdings, corrMatrix), [etfId, holdings, corrMatrix]);
+  const [boxRef, { width: W, height: H }] = useElementSize();
+  const layout = useMemo(
+    // Room for the largest node at the edge, plus its label below it.
+    // Nothing until the box is measured: a layout for a 0×0 box is a full
+    // simulation (55-140ms) whose result is thrown away a frame later.
+    () => (W > 0 && H > 0 ? computeLayout(etfId, holdings, corrMatrix, W, H, MAX_R + LABEL_ROOM) : {}),
+    [etfId, holdings, corrMatrix, W, H]
+  );
 
   const edges = useMemo(() => {
     const result = [];
@@ -97,71 +113,82 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
         <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex-1 min-h-0 flex gap-5 items-start flex-wrap">
-          <section className="flex-1 min-w-[320px] bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
-            <div className="p-2 pb-4 relative">
-              <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block" style={{ maxHeight: 460 }}>
-                {/* Logo patterns */}
-                <defs>
-                  {tickers.map(t => {
-                    const p = layout[t];
-                    if (!p) return null;
-                    const w = weightOf(t);
-                    const r = nodeRadius(w);
-                    const name = stockMap[t]?.name;
-                    const pid = 'lp_' + t.replace('.', '_');
-                    const pad = r * 0.14;
-                    return (
-                      <pattern key={pid} id={pid} x={p.x - r} y={p.y - r} width={r * 2} height={r * 2} patternUnits="userSpaceOnUse">
-                        <rect width={r * 2} height={r * 2} fill="var(--bg-1)" />
-                        <image
-                          href={logoUrl(t, name)}
-                          data-favicon-fallback={fallbackFaviconUrl(t, name)}
-                          onError={handleSvgImageLogoError}
-                          x={pad} y={pad} width={r * 2 - pad * 2} height={r * 2 - pad * 2} preserveAspectRatio="xMidYMid meet"
-                        />
-                      </pattern>
-                    );
-                  })}
-                </defs>
+          {/* Stretched to the view's full height, unlike DetailAside beside
+              it, which stays as tall as its own content. The minimum is
+              the smallest box the graph still reads in; below it the page
+              scrolls rather than squashing the nodes together. */}
+          <section className="self-stretch flex-1 min-w-[320px] min-h-[380px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+            <div className="flex-1 min-h-0 flex flex-col p-2 pb-4">
+              {/* Sized by the section, never by the drawing: the SVG is
+                  absolutely positioned, so drawing at the measured size
+                  cannot grow the box it was measured from. */}
+              <div ref={boxRef} className="flex-1 min-h-0 relative">
+                {W > 0 && H > 0 && (
+                  <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="absolute inset-0 block">
+                    {/* Logo patterns */}
+                    <defs>
+                      {tickers.map(t => {
+                        const p = layout[t];
+                        if (!p) return null;
+                        const w = weightOf(t);
+                        const r = nodeRadius(w);
+                        const name = stockMap[t]?.name;
+                        const pid = 'lp_' + t.replace('.', '_');
+                        const pad = r * 0.14;
+                        return (
+                          <pattern key={pid} id={pid} x={p.x - r} y={p.y - r} width={r * 2} height={r * 2} patternUnits="userSpaceOnUse">
+                            <rect width={r * 2} height={r * 2} fill="var(--bg-1)" />
+                            <image
+                              href={logoUrl(t, name)}
+                              data-favicon-fallback={fallbackFaviconUrl(t, name)}
+                              onError={handleSvgImageLogoError}
+                              x={pad} y={pad} width={r * 2 - pad * 2} height={r * 2 - pad * 2} preserveAspectRatio="xMidYMid meet"
+                            />
+                          </pattern>
+                        );
+                      })}
+                    </defs>
 
-                <rect x={0} y={0} width={W} height={H} fill="transparent" onClick={() => onSelect(null)} />
+                    <rect x={0} y={0} width={W} height={H} fill="transparent" onClick={() => onSelect(null)} />
 
-                {/* Edges */}
-                {renderableEdges.map(({ a, b, v }) => {
-                  const p1 = layout[a], p2 = layout[b];
-                  const active = selected && (a === selected || b === selected);
-                  const base = 0.10 + (v - threshold) * 0.85;
-                  const op = selected ? (active ? 0.95 : 0.04) : base;
-                  const sw = (0.7 + (v - threshold) * 5.5) * (active ? 1.5 : 1);
-                  return <line key={`${a}-${b}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--accent)" strokeOpacity={op} strokeWidth={sw} strokeLinecap="round" />;
-                })}
+                    {/* Edges */}
+                    {renderableEdges.map(({ a, b, v }) => {
+                      const p1 = layout[a], p2 = layout[b];
+                      const active = selected && (a === selected || b === selected);
+                      const base = 0.10 + (v - threshold) * 0.85;
+                      const op = selected ? (active ? 0.95 : 0.04) : base;
+                      const sw = (0.7 + (v - threshold) * 5.5) * (active ? 1.5 : 1);
+                      return <line key={`${a}-${b}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--accent)" strokeOpacity={op} strokeWidth={sw} strokeLinecap="round" />;
+                    })}
 
-                {/* Nodes */}
-                {tickers.map(t => {
-                  const p = layout[t];
-                  if (!p) return null;
-                  const w = weightOf(t);
-                  const r = nodeRadius(w);
-                  const isSel = selected === t;
-                  const peerRho = selected ? corr(selected, t) : null;
-                  const isNb = selected && selected !== t && peerRho != null && peerRho >= threshold;
-                  const dim = selected && !isSel && !isNb;
-                  const pid = 'lp_' + t.replace('.', '_');
-                  // Always a truthy pattern-url string — the SVG <pattern>
-                  // defined above always exists for this ticker, so there's
-                  // no fallback fill to fall back to.
-                  const fill = `url(#${pid})`;
-                  const stroke = isSel || isNb ? 'var(--accent)' : 'var(--border-strong)';
-                  return (
-                    <g key={t} style={{ cursor: 'pointer', opacity: dim ? 0.32 : 1, transition: 'opacity 200ms' }} onClick={e => { e.stopPropagation(); onSelect(t); }}>
-                      {isSel && <circle cx={p.x} cy={p.y} r={r + 5} fill="none" stroke="var(--accent-ring)" strokeWidth={2} />}
-                      <circle cx={p.x} cy={p.y} r={r} fill={fill} stroke={stroke} strokeWidth={isSel ? 2.2 : (isNb ? 1.8 : 1.6)} />
-                      {isSel && <circle cx={p.x} cy={p.y} r={r} fill="var(--accent)" fillOpacity={0.28} />}
-                      <text x={p.x} y={p.y + r + 13} textAnchor="middle" fill={isSel ? 'var(--accent)' : 'var(--fg-1)'} fontSize={11} fontWeight={600} fontFamily="var(--font-mono)">{t}</text>
-                    </g>
-                  );
-                })}
-              </svg>
+                    {/* Nodes */}
+                    {tickers.map(t => {
+                      const p = layout[t];
+                      if (!p) return null;
+                      const w = weightOf(t);
+                      const r = nodeRadius(w);
+                      const isSel = selected === t;
+                      const peerRho = selected ? corr(selected, t) : null;
+                      const isNb = selected && selected !== t && peerRho != null && peerRho >= threshold;
+                      const dim = selected && !isSel && !isNb;
+                      const pid = 'lp_' + t.replace('.', '_');
+                      // Always a truthy pattern-url string — the SVG <pattern>
+                      // defined above always exists for this ticker, so there's
+                      // no fallback fill to fall back to.
+                      const fill = `url(#${pid})`;
+                      const stroke = isSel || isNb ? 'var(--accent)' : 'var(--border-strong)';
+                      return (
+                        <g key={t} style={{ cursor: 'pointer', opacity: dim ? 0.32 : 1, transition: 'opacity 200ms' }} onClick={e => { e.stopPropagation(); onSelect(t); }}>
+                          {isSel && <circle cx={p.x} cy={p.y} r={r + 5} fill="none" stroke="var(--accent-ring)" strokeWidth={2} />}
+                          <circle cx={p.x} cy={p.y} r={r} fill={fill} stroke={stroke} strokeWidth={isSel ? 2.2 : (isNb ? 1.8 : 1.6)} />
+                          {isSel && <circle cx={p.x} cy={p.y} r={r} fill="var(--accent)" fillOpacity={0.28} />}
+                          <text x={p.x} y={p.y + r + 13} textAnchor="middle" fill={isSel ? 'var(--accent)' : 'var(--fg-1)'} fontSize={11} fontWeight={600} fontFamily="var(--font-mono)">{t}</text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                )}
+              </div>
 
               {/* Legend */}
               <div className="flex items-center gap-10 px-4 pt-3 flex-wrap">

@@ -33,6 +33,31 @@
  * something is gone rather than disabled: a disabled row of buttons
  * invites a reader to work out why they cannot use them, when the answer
  * is that this portfolio is not theirs yet.
+ *
+ * **Layout** (issue #139). Below 2xl (1536px) everything stacks in one
+ * 860px column: header, settings, window, results, holdings. At 2xl the
+ * settings grid spreads into a single full-width row and the last two
+ * sections sit side by side, so a weight can be edited with its effect
+ * in view rather than a scroll away:
+ *
+ *  ┌ title · actions · provenance                        ┐
+ *  │ settings (one row) · window · status · benchmarks   │
+ *  ├──────────────────────┬──────────────────────────────┤
+ *  │ holdings table       │ summary · risk               │
+ *  │                      │ chart (fills the screen)     │
+ *  └──────────────────────┴──────────────────────────────┘
+ *
+ * The settings grid is full width rather than heading the holdings
+ * column (the layout first tried) so that the markup order, the stacked
+ * order and the keyboard order stay one order: with settings in the
+ * left column, focus went down to the settings, back up to the window
+ * controls above them, then down again. Only the two columns are placed
+ * out of markup order — results first in the markup, as in the stacked
+ * layout, drawn on the right — so focus reads results then holdings.
+ *
+ * Results get the wider share (3 : 2): the chart is what benefits from
+ * width, and the holdings table reads fine at around 600px. Comparison
+ * mode takes the same results column.
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
@@ -524,7 +549,7 @@ export function PortfolioPanel({
   };
 
   return (
-    <div className="max-w-[860px]">
+    <div className="max-w-[860px] 2xl:max-w-none">
       <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
         <Title portfolio={portfolio} onRename={onRename} readOnly={readOnly} />
         <div className="flex items-center gap-2 flex-none">
@@ -572,7 +597,9 @@ export function PortfolioPanel({
           because it is two controls. Read-only drops CREATED: a portfolio
           that came out of a link has no created date to show, since the
           copy is created when somebody keeps it. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)]">
+      {/* At 2xl, six columns make it one row: amount, the two-column
+          contribution, method, holdings, created. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 2xl:grid-cols-6 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)]">
         <Field label="AMOUNT">
           {readOnly ? (
             <Stated>{CURRENCY.format(portfolio.value)}</Stated>
@@ -651,57 +678,66 @@ export function PortfolioPanel({
         />
       )}
 
-      {/* One portfolio and nothing beside it is a question about its
-          composition, which the stacked chart answers. The moment there is
-          something to compare it with, the question becomes which grew
-          faster - and a stack of one portfolio's holdings cannot answer
-          that. */}
-      {comparison?.comparing ? (
-        comparisonRuns.runs ? (
-          <>
-            <ComparisonChart
-              runs={comparisonRuns.runs}
-              stale={comparisonRuns.stale}
-              onSelectWindow={selectByDrag}
-            />
-            <ComparisonSummary runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
-          </>
-        ) : (
-          <p className="text-[12px] text-[var(--fg-2)] m-0 mb-4">Simulating each line…</p>
-        )
-      ) : simulation && (
-        <>
-          <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} portfolioMetrics={portfolioMetrics} />
-          <PortfolioRiskCard portfolioRisk={portfolioRisk} onOpenPicker={() => setRiskPickerOpen(true)} />
-          <PortfolioChart
-            simulation={simulation}
-            groupBy={groupBy}
-            onGroupByChange={setGroupBy}
-            sectorOf={sectorOf}
-            sectorsReady={!!stocks}
-            stale={stale || loading}
-            onSelectWindow={selectByDrag}
-          />
-        </>
-      )}
+      {/* The two columns (2xl only). Results come first in the markup, as
+          they do stacked, and are drawn on the right; both sit in row 1
+          so neither is auto-placed below the other. */}
+      <div className="2xl:grid 2xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] 2xl:gap-x-8 2xl:items-start">
+        {/* One portfolio and nothing beside it is a question about its
+            composition, which the stacked chart answers. The moment there is
+            something to compare it with, the question becomes which grew
+            faster - and a stack of one portfolio's holdings cannot answer
+            that. */}
+        <div className="2xl:col-start-2 2xl:row-start-1 min-w-0">
+          {comparison?.comparing ? (
+            comparisonRuns.runs ? (
+              <>
+                <ComparisonChart
+                  runs={comparisonRuns.runs}
+                  stale={comparisonRuns.stale}
+                  onSelectWindow={selectByDrag}
+                />
+                <ComparisonSummary runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
+              </>
+            ) : (
+              <p className="text-[12px] text-[var(--fg-2)] m-0 mb-4">Simulating each line…</p>
+            )
+          ) : simulation && (
+            <>
+              <PortfolioSummary metrics={simulation.metrics} stale={stale || loading} portfolioMetrics={portfolioMetrics} />
+              <PortfolioRiskCard portfolioRisk={portfolioRisk} onOpenPicker={() => setRiskPickerOpen(true)} />
+              <PortfolioChart
+                simulation={simulation}
+                groupBy={groupBy}
+                onGroupByChange={setGroupBy}
+                sectorOf={sectorOf}
+                sectorsReady={!!stocks}
+                stale={stale || loading}
+                onSelectWindow={selectByDrag}
+              />
+            </>
+          )}
+        </div>
 
-      <HoldingsTable
-        portfolioId={portfolio.id}
-        holdings={holdings}
-        simulation={simulation}
-        stale={stale || loading}
-        readOnly={readOnly}
-        onChange={next => onUpdate({ holdings: next })}
-        addControl={
-          readOnly ? null : (
-            <AddHolding
-              existing={holdings}
-              windowStart={simulation?.start || null}
-              onAdd={addHolding}
-            />
-          )
-        }
-      />
+        <div className="2xl:col-start-1 2xl:row-start-1 min-w-0">
+          <HoldingsTable
+            portfolioId={portfolio.id}
+            holdings={holdings}
+            simulation={simulation}
+            stale={stale || loading}
+            readOnly={readOnly}
+            onChange={next => onUpdate({ holdings: next })}
+            addControl={
+              readOnly ? null : (
+                <AddHolding
+                  existing={holdings}
+                  windowStart={simulation?.start || null}
+                  onAdd={addHolding}
+                />
+              )
+            }
+          />
+        </div>
+      </div>
 
       {metricsPickerOpen && (
         <MetricsPicker

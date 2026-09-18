@@ -73,17 +73,17 @@ export const EtfDashboard = memo(function EtfDashboard() {
   // it can render before/without data even when a parent's copy resolved.
   if (!etf) {
     return etfLoading ? (
-      <section className="flex-none bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-6 mb-5">
+      <section className="flex-1 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-6">
         <Loading variant="skeleton" lines={5} />
       </section>
     ) : (
-      <ErrorState onRetry={etfRetry} className="flex-none mb-5" />
+      <ErrorState onRetry={etfRetry} className="flex-1" />
     );
   }
 
   return (
     <>
-      <section className="flex-none flex gap-0 items-stretch flex-wrap bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden mb-5 animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+      <section className="flex-1 flex gap-0 items-stretch flex-wrap bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
         {/* Identity + Description */}
         <div className="flex-[1.5] min-w-[280px] flex flex-col p-5 gap-3.5 border-r border-[var(--divider)]" style={{ padding: '20px 22px' }}>
           <div className="flex items-stretch gap-2">
