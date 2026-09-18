@@ -26,7 +26,7 @@ It is spread across four directories, so a change often touches all of them:
 | `components/portfolio/*` | everything below |
 
 Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar`,
-`HoldingsTable`, `AddHolding`, `TickerSearchField`, `PortfolioChart`,
+`HoldingsTable`, `HoldingChartPopup` (issue #137), `AddHolding`, `TickerSearchField`, `PortfolioChart`,
 `ComparisonChart`, `PortfolioSummary`, `PortfolioRiskCard` (issue #113),
 `ComparisonSummary`, `WindowControls`,
 `BenchmarkBar`, and the dialogs/notices (`CreatePortfolioDialog`,
@@ -35,6 +35,18 @@ Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar
 dialog, lives in `components/ui/` (issue #105 moved it there once the ETF
 dashboard's fund metrics card needed the same dialog PortfolioSummary
 already had).
+
+**`HoldingChartPopup`** (issue #137) is a Holding's own price chart, opened
+by clicking its ticker in `HoldingsTable`. It deliberately does not reuse
+`components/stock/StockPopup` — that component's correlation-explorer pane
+needs an ETF's correlation matrix and full constituent list, and a Holding
+has neither (it may not belong to any ETF at all). It duplicates StockPopup's
+timeframe-tabs-plus-`AreaChart` pattern rather than sharing it, trading a
+little duplication for zero regression risk to the ETF analyzer. Its header
+shows the Holding's own WEIGHT/VALUE from the current Run, dimmed under the
+same `stale` condition the table's own columns use — no correlation pane, no
+income figure, and available identically on read-only (shared) portfolios
+since it writes nothing.
 
 ## Three principles
 

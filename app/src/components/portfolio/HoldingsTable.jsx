@@ -54,16 +54,16 @@
  * were never editable and are the reason somebody was sent the link
  * (#66). What is gone is gone rather than disabled — a greyed-out
  * Recompute is an invitation to work out why it will not work.
+ *
+ * A ticker opens HoldingChartPopup — its own price chart plus this row's
+ * WEIGHT/VALUE, dimmed the same way the row itself is (#137). That popup
+ * stays even in read-only, since it writes nothing.
  */
 import { memo, useState } from 'react';
 import { normaliseWeights, totalWeight } from '../../utils/weights';
+import { fmtUSD0 } from '../../utils/format';
 import { ApplyWeightsDialog } from './ApplyWeightsDialog';
-
-const CURRENCY = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 0,
-});
+import { HoldingChartPopup } from './HoldingChartPopup';
 
 /** A total this close to 100 is 100 — a hundredth adrift after rounding
  *  is not something to warn anybody about. */
@@ -110,6 +110,7 @@ export const HoldingsTable = memo(function HoldingsTable({
   const [drafts, setDrafts] = useState({});
   const [refused, setRefused] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [chartTicker, setChartTicker] = useState(null);
 
   // Switching portfolio with edits in flight would otherwise apply one
   // portfolio's weights to another. Adjusted during render rather than in
@@ -121,6 +122,7 @@ export const HoldingsTable = memo(function HoldingsTable({
     setDrafts({});
     setRefused(null);
     setConfirming(false);
+    setChartTicker(null);
   }
 
   // The basket as typed. Text that is not a usable number leaves that
@@ -306,9 +308,13 @@ export const HoldingsTable = memo(function HoldingsTable({
                 return (
                   <tr key={holding.ticker} className="border-b border-[var(--divider)] last:border-b-0">
                     <td className="px-3 py-2.5">
-                      <span className="font-[var(--font-mono)] text-[13px] font-bold text-[var(--fg)]">
+                      <button
+                        type="button"
+                        onClick={() => setChartTicker(holding.ticker)}
+                        className="font-[var(--font-mono)] text-[13px] font-bold text-[var(--fg)] bg-transparent border-none p-0 cursor-pointer hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                      >
                         {holding.ticker}
-                      </span>
+                      </button>
                       {(late || never) && (
                         <span
                           className="block text-[11px] text-[var(--warning)] leading-snug mt-0.5"
@@ -351,7 +357,7 @@ export const HoldingsTable = memo(function HoldingsTable({
                         while somebody is still typing. */}
                     <Cell className="text-[var(--fg-1)]" >
                       <span style={{ opacity: stale ? 0.5 : 1 }}>
-                        {run ? CURRENCY.format(run.finalValue) : '—'}
+                        {run ? fmtUSD0(run.finalValue) : '—'}
                       </span>
                     </Cell>
                     <Cell>
@@ -361,7 +367,7 @@ export const HoldingsTable = memo(function HoldingsTable({
                     </Cell>
                     <Cell>
                       <span style={{ color: toneOf(run?.contribution), opacity: stale ? 0.5 : 1 }}>
-                        {run ? signed(run.contribution, v => CURRENCY.format(v)) : '—'}
+                        {run ? signed(run.contribution, v => fmtUSD0(v)) : '—'}
                       </span>
                     </Cell>
                     {showIncome && (
@@ -376,7 +382,7 @@ export const HoldingsTable = memo(function HoldingsTable({
                           }
                         >
                           {run && run.income !== null && run.income !== undefined
-                            ? CURRENCY.format(run.income)
+                            ? fmtUSD0(run.income)
                             : '—'}
                         </span>
                       </Cell>
@@ -416,6 +422,16 @@ export const HoldingsTable = memo(function HoldingsTable({
           totalAfter={total}
           onConfirm={apply}
           onCancel={() => setConfirming(false)}
+        />
+      )}
+
+      {chartTicker && (
+        <HoldingChartPopup
+          ticker={chartTicker}
+          weight={holdings.find(h => h.ticker === chartTicker)?.weight}
+          value={byTicker.get(chartTicker)?.finalValue ?? null}
+          stale={stale}
+          onClose={() => setChartTicker(null)}
         />
       )}
     </div>
