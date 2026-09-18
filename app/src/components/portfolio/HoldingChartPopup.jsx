@@ -63,8 +63,13 @@ export const HoldingChartPopup = memo(function HoldingChartPopup({ ticker, weigh
                 <span className="text-[15px] font-semibold text-[var(--fg)] tracking-tight">{stockInfo?.name || ticker}</span>
               )}
             </span>
-            {!stockLoading && stockInfo?.sector && (
-              <span className="text-xs text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full py-[3px] px-2.5 w-fit">{stockInfo.sector}</span>
+            {!stockLoading && (
+              <div className="flex items-center gap-[7px] flex-wrap">
+                <span className="text-xs text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full py-[3px] px-2.5">{stockInfo?.sector || 'Unknown'}</span>
+                {stockInfo?.exchange && (
+                  <span className="text-[11px] text-[var(--fg-3)] bg-[var(--bg-3)] rounded-full py-0.5 px-2.5 font-[var(--font-mono)]">{stockInfo.exchange}</span>
+                )}
+              </div>
             )}
           </div>
         </div>
