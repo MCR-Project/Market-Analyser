@@ -1,4 +1,4 @@
-name: Backend tests
+name: Tests
 
 on:
   push:
@@ -22,3 +22,19 @@ jobs:
 
       - name: Run pytest
         run: pytest
+
+      # The frontend's own unit tests (Vitest, issue #148). Kept in this
+      # job rather than a second one: `npm ci` is the only extra cost, and
+      # one red/green answer for "do the tests pass" is worth more than the
+      # parallelism.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix app
+
+      - name: Run frontend tests
+        run: npm --prefix app test

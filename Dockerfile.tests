@@ -1,5 +1,6 @@
 # Runs every automated check the repo has: pytest across backend/tests and
-# tests/ (fetcher fixtures), plus `npm run lint` on app/. Built from the repo
+# tests/ (fetcher fixtures), plus `npm run lint` and `npm test` (Vitest) on
+# app/. Built from the repo
 # root - not from backend/ or fetcher/ - because pytest.ini's testpaths span
 # both trees and the suite needs all three requirements files at once (see
 # requirements-dev.txt). No Chromium and no Supabase credentials: fetcher
@@ -7,7 +8,7 @@
 # patch their network/Supabase seams instead of reaching a real service.
 FROM python:3.12-slim
 
-# Node, for `npm run lint` - installed via NodeSource so the version matches
+# Node, for `npm run lint` and `npm test` - installed via NodeSource so the version matches
 # what app/package.json's tooling (ESLint 10, Vite 8) expects rather than
 # whatever Debian slim ships.
 RUN apt-get update && apt-get install -y --no-install-recommends \

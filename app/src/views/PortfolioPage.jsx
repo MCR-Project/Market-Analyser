@@ -6,9 +6,10 @@
  *
  *  ┌────────────────┬─────────────────────────────┐
  *  │ + New portfolio│                             │
- *  │ Semis, equal…  │  PortfolioPanel:            │
- *  │ Copy of SPY    │   name, amount, method,     │
- *  │ …              │   composition, actions      │
+ *  │ Export · Import│  PortfolioPanel:            │
+ *  │ Semis, equal…  │   name, amount, method,     │
+ *  │ Copy of SPY    │   composition, actions      │
+ *  │ …              │                             │
  *  └────────────────┴─────────────────────────────┘
  *
  * Which portfolio is open lives in the URL (/portfolio/:portfolioId), the
@@ -25,17 +26,26 @@
  * that behaved differently from a saved one would be a worse answer to
  * "what did they build". It is read-only until somebody keeps it, and
  * nothing about it touches storage before then.
+ *
+ * A library can also leave and re-enter the browser as a Backup file
+ * (#148): Export from the sidebar or the open portfolio, Import from the
+ * sidebar or the empty landing state, always answered by a result dialog.
+ * Importing only ever adds, and it is `usePortfolios` that applies it.
  */
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useComparison } from '../hooks/useComparison';
 import { usePortfolios } from '../hooks/usePortfolios';
+import { exportLibrary, exportOne } from '../store/portfolioBackup';
 import { SHARE_PARAM, decodePortfolio, encodePortfolio } from '../store/portfolioLink';
 import { PRESETS } from '../hooks/useSimulationWindow';
+import { downloadFile } from '../utils/downloadFile';
 import { PortfolioSidebar } from '../components/portfolio/PortfolioSidebar';
 import { PortfolioPanel } from '../components/portfolio/PortfolioPanel';
 import { CreatePortfolioDialog } from '../components/portfolio/CreatePortfolioDialog';
 import { DeletePortfolioDialog } from '../components/portfolio/DeletePortfolioDialog';
+import { ImportBackupButton } from '../components/portfolio/ImportBackupButton';
+import { ImportResultDialog } from '../components/portfolio/ImportResultDialog';
 import { SharePortfolioDialog } from '../components/portfolio/SharePortfolioDialog';
 import { SharedNotice } from '../components/portfolio/SharedNotice';
 import { StorageNotice } from '../components/portfolio/StorageNotice';
@@ -65,8 +75,9 @@ export function PortfolioPage({ shared = false }) {
   const { portfolioId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { portfolios, status, create, update, rename, duplicate, remove } = usePortfolios();
+  const { portfolios, status, create, update, rename, duplicate, remove, importFile } = usePortfolios();
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [importResult, setImportResult] = useState(null);
   const [creating, setCreating] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -101,6 +112,27 @@ export function PortfolioPage({ shared = false }) {
   const handleDuplicate = () => {
     const copy = duplicate(open.id);
     if (copy) navigate(`/portfolio/${copy.id}`);
+  };
+
+  // Export writes nothing and reads only what the session holds, so it
+  // works when storage refused to keep it - which is when it matters most.
+  const handleExportLibrary = () => downloadFile(exportLibrary(portfolios));
+  const handleExportOne = () => downloadFile(exportOne(open));
+
+  // Importing shows what it did, always (issue #148): nothing is asked
+  // beforehand because it only ever adds, so this dialog is the record.
+  const handleImport = async (file) => {
+    setImportResult(await importFile(file));
+  };
+
+  // Exactly one portfolio added is the one to look at, the way creating
+  // one opens it; several have no single "result", so the page stays put
+  // and the sidebar shows the new rows. Done on close rather than on
+  // import, so the dialog is read before the page moves under it.
+  const handleImportClose = () => {
+    const { added } = importResult.plan;
+    setImportResult(null);
+    if (added.length === 1) navigate(`/portfolio/${added[0].id}`);
   };
 
   const handleDelete = () => {
@@ -145,6 +177,8 @@ export function PortfolioPage({ shared = false }) {
         <PortfolioSidebar
           portfolios={portfolios}
           onCreate={() => setCreating(true)}
+          onExportLibrary={handleExportLibrary}
+          onImport={handleImport}
           openId={portfolioId}
           comparedIds={comparison.compareIds}
           onToggleCompare={open ? comparison.toggleCompare : undefined}
@@ -163,7 +197,7 @@ export function PortfolioPage({ shared = false }) {
             every other width. */}
         <div className="max-w-[2072px] mx-auto">
           <div className="max-w-[720px]">
-            <StorageNotice status={status} />
+            <StorageNotice status={status} canExport={portfolios.length > 0} />
           </div>
 
           {shared && !link.error && <SharedNotice />}
@@ -180,13 +214,18 @@ export function PortfolioPage({ shared = false }) {
               compared={compared}
               comparison={comparison}
               onShare={() => setSharing(true)}
+              onExport={handleExportOne}
               onDuplicate={handleDuplicate}
               onDelete={() => setPendingDelete(open)}
             />
           ) : unknownId ? (
             <NotFound portfolioId={portfolioId} />
           ) : (
-            <Landing hasPortfolios={portfolios.length > 0} onCreate={() => setCreating(true)} />
+            <Landing
+              hasPortfolios={portfolios.length > 0}
+              onCreate={() => setCreating(true)}
+              onImport={handleImport}
+            />
           )}
         </div>
       </main>
@@ -208,6 +247,10 @@ export function PortfolioPage({ shared = false }) {
         />
       )}
 
+      {importResult && (
+        <ImportResultDialog result={importResult} onClose={handleImportClose} />
+      )}
+
       {pendingDelete && (
         <DeletePortfolioDialog
           portfolio={pendingDelete}
@@ -219,7 +262,7 @@ export function PortfolioPage({ shared = false }) {
   );
 }
 
-function Landing({ hasPortfolios, onCreate }) {
+function Landing({ hasPortfolios, onCreate, onImport }) {
   return (
     <div className="max-w-[600px]">
       <h1 className="text-[26px] font-extrabold text-[var(--fg)] tracking-tight mt-0 mb-3">
@@ -236,13 +279,24 @@ function Landing({ hasPortfolios, onCreate }) {
           ? 'Pick one from the list to see it, or start another.'
           : 'They are saved in this browser and nowhere else — there is no account to sign in to, and no copy on a server.'}
       </p>
+      {/* A fresh browser is where a Backup is needed most (issue #148), so
+          getting one back is offered where somebody with nothing yet is
+          already looking, beside starting from scratch. */}
       {!hasPortfolios && (
-        <button
-          onClick={onCreate}
-          className="px-4 py-2 text-sm font-semibold text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent-ring)] rounded-[var(--radius-md)] cursor-pointer transition-colors duration-150 hover:bg-[var(--accent-ring)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-        >
-          Create your first portfolio
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={onCreate}
+            className="px-4 py-2 text-sm font-semibold text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent-ring)] rounded-[var(--radius-md)] cursor-pointer transition-colors duration-150 hover:bg-[var(--accent-ring)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+          >
+            Create your first portfolio
+          </button>
+          <ImportBackupButton
+            onFile={onImport}
+            className="px-4 py-2 text-sm font-semibold text-[var(--fg-1)] bg-[var(--bg-2)] border border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-3)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+          >
+            Import a backup
+          </ImportBackupButton>
+        </div>
       )}
     </div>
   );

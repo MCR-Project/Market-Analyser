@@ -418,10 +418,13 @@ itself is stateless, so nothing else needs to know.
 The trade is stated plainly in the UI: portfolios do not follow you to
 another browser or another machine, deleting one cannot be undone, and a
 private window keeps nothing. [Share links](#sharing-a-portfolio) are the
-way one travels.
+way one travels to somebody else, and a
+[Backup file](#exporting-and-importing-a-backup) is the way your own library
+travels, or is kept safe.
 
 `app/src/store/portfolioStorage.js` is the whole storage layer. Every read
-is normalised through one migration function and every failure — storage
+is normalised through one migration function (a share link and a Backup go
+through it too) and every failure — storage
 blocked, quota full, a half-written value — is returned as a state the UI
 can explain rather than thrown, because none of those may white-screen a
 page over a feature the visitor has not opened yet.
@@ -715,6 +718,75 @@ portfolio with its own id and timestamps and opens it on the window that
 was on screen. It is a snapshot: the portfolio is in the link, not behind
 it, so there is nothing on a server for the sender to update and it will
 not follow their later changes. The UI says so.
+
+### Exporting and importing a backup
+
+A share link shows somebody a portfolio. A **Backup** keeps yours: a JSON
+file holding your whole library, or one portfolio, that you **Export** from
+one browser and **Import** into any other. It exists because everything
+else here is browser-only — clearing site data, changing browser or
+changing machine loses every portfolio at once, and deleting one cannot be
+undone.
+
+It is not a share link, and the differences are the point. A link is a
+*definition* for someone else to look at: no id, no dates, read-only until
+they keep a copy. A Backup is your own library at full fidelity — each
+portfolio's id, its created and updated dates, its origin note, its
+contribution schedule, and any fields a newer build of the app added that
+this one does not know about — and what an import produces is ordinary
+saved portfolios. It carries no view state: the window, benchmark and
+comparison live in the URL because they belong to how you were looking at
+a portfolio, not to the portfolio.
+
+**Export library** and **Import** sit under **New portfolio** in the
+sidebar; **Export** sits with Share, Duplicate and Delete on an open
+portfolio; and the empty landing page offers **Import a backup**, because a
+fresh browser is where one is needed most. A shared portfolio has no
+Export — it is not yours to back up until you have kept a copy. When the
+browser cannot save (storage full, or unavailable in a private window), the
+notice says so and points at Export library, since the file is the only
+place what is on screen can go.
+
+Files are `ma-portfolios-<date>.json` for the library and
+`ma-<portfolio name>-<date>.json` for one, and both have the same shape: a
+`format` marker, an `exportedAt` time and a `portfolios` list, so a single
+portfolio is a Backup of one and there is exactly one way in. Import also
+accepts a bare list of portfolios, which is what `localStorage` holds. The
+file has no version of its own; each portfolio carries its schema version
+and the same migration that reads storage upgrades it.
+
+**Import only ever adds.** It never replaces or deletes anything you
+already have, because deleting cannot be undone here and an import that
+overwrote could let an old file erase newer work in silence. A portfolio is
+identified by its id:
+
+- the same id with every field equal is **identical** and skipped;
+- the same id with different content is another version of it, and is added
+  under a new id so both survive;
+- a different id is a different portfolio however alike it looks — a
+  Duplicate is not a repeat.
+
+A name that is taken gets `-2`, `-3` and so on added to it (`Semis`
+becomes `Semis-2`). The check runs against the library *and* the rest of the
+file, so a file cannot collide with itself. Imported portfolios keep the
+dates in the file.
+
+A file is somebody's to choose but not necessarily to trust, so import sits
+between the other two readers: each entry is salvaged through
+`migratePortfolio`, then held to the limits migration deliberately does not
+enforce — at most 50 holdings, no ticker twice, every ticker a ticker — so
+that a portfolio never imports happily and then fails to simulate. An entry
+that fails is skipped and named with its reason, never quietly trimmed. Only
+a file that is not a Backup, is over 2 MB (checked before it is read), or
+has nothing in it that can be imported is refused whole, and then nothing is
+written.
+
+There is no confirmation beforehand, because there is nothing to undo.
+After every import a dialog says what happened: what was added, what was
+renamed and to what, what was skipped as already there, what could not be
+imported and why, and whether the browser could save the result. If exactly
+one portfolio was added it opens when you close the dialog. The reasoning
+is recorded in `docs/adr/0001-portfolio-import-only-adds.md`.
 
 ### The endpoints
 
@@ -1193,6 +1265,9 @@ docker compose run --rm tests -k portfolio
 
 # The frontend's ESLint, in the same image
 docker compose run --rm tests lint
+
+# The frontend's unit tests (Vitest), in the same image
+docker compose run --rm tests frontend
 ```
 
 The fetcher image needs no Supabase credentials — it only writes holdings

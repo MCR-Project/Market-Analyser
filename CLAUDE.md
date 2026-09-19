@@ -21,7 +21,7 @@ a courtesy.
 | `app/` | React 19 + Vite 8 + Tailwind 4 frontend |
 | `tests/` | Tests for `fetcher/` only (fixture-driven, no network) |
 | `backend/tests/` | Tests for `backend/` (service + scripts + measurements) |
-| `.github/workflows/` | Daily price refresh (cron), manual holdings fetch + DB completion, pytest on push/PR, Docker image build check |
+| `.github/workflows/` | Daily price refresh (cron), manual holdings fetch + DB completion, pytest and the frontend's Vitest on push/PR, Docker image build check |
 | `.claude/launch.json` | Dev-server definitions for the Browser pane (`backend` on :8000, `app` on :5173) |
 | `docker-compose.yml` | Alternative way to run the stack — see "Running it with Docker" in the README. Not what `preview_start` drives. |
 | `render.yaml` | Render Blueprint that deploys `backend/Dockerfile`'s `prod` target and `app/`'s static build — see "Deploying on Render" in the README. |
@@ -89,13 +89,19 @@ need (`services.portfolio.get_closes`, `services.market_data.get_client_optional
 `tests/fixtures/`. A test that got slower or flakier because it reached a real
 service is a bug in the test.
 
-There are no frontend tests. `npm run lint` (ESLint with react-hooks and
-react-refresh rules) is the only automated check on `app/`.
+The frontend has two automated checks: `npm run lint` (ESLint with react-hooks
+and react-refresh rules) and `npm test` (Vitest, run from `app/`). The suite is
+deliberately small — plain functions over pure logic, no DOM environment, no
+component tests — and today covers only `store/portfolioBackup.js` (issue
+#148). Logic that is worth testing goes in a pure module and is tested through
+its public function, the way `planImport` is; components, hooks and dialogs are
+checked by using the running app.
 
 `docker compose run --rm tests` (with pytest args passed through, or
-`docker compose run --rm tests lint` for the ESLint check) runs the same two
-checks in a container built from the repo root — see `Dockerfile.tests`. It
-exists for parity with CI, not to replace running pytest directly.
+`docker compose run --rm tests lint` for the ESLint check, `... tests frontend`
+for Vitest) runs the same checks in a container built from the repo root — see
+`Dockerfile.tests`. It exists for parity with CI, not to replace running pytest
+directly.
 
 ## Environment and secrets
 
@@ -214,6 +220,9 @@ scripts fill in the rest. Do not introduce a constant list of symbols.
 be one: with only a service key and no sign-in, a server-side table would be one
 shared, world-editable list. `POST /api/portfolio/simulate` reads nothing and
 stores nothing — the portfolio arrives in the request and leaves in the response.
+The one way out of the browser is a file the *owner* holds: a Backup (export/import,
+issue #148) or a Share Link. Neither is a server-side store, and importing one only
+ever adds — it never replaces or deletes a saved portfolio (`docs/adr/0001-*`).
 
 **6. Backend-authored MDX executes as real JSX in the browser.** Measurement
 cells (`render_cell`) and measurement docs (`.mdx`) are compiled and run by

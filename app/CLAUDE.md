@@ -1,12 +1,13 @@
 # app — React frontend
 
-React 19, Vite 8, Tailwind 4, `react-router` 8. No state library, no component
-library, no test runner.
+React 19, Vite 8, Tailwind 4, `react-router` 8, Vitest for the little that is
+unit-tested. No state library, no component library.
 
 ```bash
 npm install
 npm run dev      # or preview_start {name: "app"} — prefer that
-npm run lint     # ESLint: react-hooks + react-refresh. The only automated check here.
+npm run lint     # ESLint: react-hooks + react-refresh
+npm test         # Vitest, once (`vitest run`) - pure logic only, see "Tests" below
 npm run build
 ```
 
@@ -16,7 +17,8 @@ Talks to `http://localhost:8000/api` unless `VITE_API_BASE` is set (see
 Alternatively, `docker compose up` from the repo root runs this with HMR in a
 container (`app/` bind-mounted, `node_modules` a separate named volume — see
 the README's "Running it with Docker"); `docker compose run --rm tests lint`
-runs the ESLint check the same way `tests`'s other CLAUDE.md documents.
+and `... tests frontend` run the ESLint and Vitest checks the same way
+`tests`'s other CLAUDE.md documents.
 
 ## Layout
 
@@ -26,7 +28,7 @@ src/App.jsx                  the dashboard shell (/etf/:etfId/:view)
 src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
 src/hooks/                   data fetching and view state
-src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink
+src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup (+ its test)
 src/views/                   one file per route or tab panel
 src/components/
   layout/    AppLayout, Header
@@ -279,6 +281,22 @@ inverse correlation always reads as visually distinct from a positive one.
 Dark is the `:root` default; light is opt-in via `data-theme="light"` on `<html>`,
 which `index.html` sets and `useTheme` maintains. `useTheme` resolves an explicit
 stored choice first, then `prefers-color-scheme`, then the passed default.
+
+## Tests
+
+`npm test` runs Vitest over `src/**/*.test.js`, and the suite is small on
+purpose: **pure logic only**, plain `test()` functions over inline data, no DOM
+environment, no component or hook tests. The first (and so far only) file is
+`store/portfolioBackup.test.js`, which exercises `planImport` — the function that
+decides what importing a Backup does — through its public interface and
+round-trips Export back through it (issue #148).
+
+The pattern to follow: put the rules in a module that touches no storage, no
+network and no DOM, give it one public function, and test behaviour through that
+function alone — never generated ids by value, only that a fresh one differs from
+every existing one. Like the backend's, a test here may not touch the network.
+Hooks, dialogs and pages stay thin and are checked by using the running app.
+`npm run lint` still covers everything, tests included.
 
 ## Accessibility
 

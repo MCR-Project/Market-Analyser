@@ -9,6 +9,7 @@
 #   docker compose run --rm fetcher vaneck --tickers SMH --limit 5
 #   docker compose run --rm tests -k portfolio
 #   docker compose run --rm tests lint
+#   docker compose run --rm tests frontend
 
 services:
   backend:

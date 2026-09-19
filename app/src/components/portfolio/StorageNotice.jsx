@@ -12,6 +12,12 @@
  *  - no room left: the last change is on screen but not on disk
  *
  * Each says what happened and what still works, rather than an apology.
+ *
+ * Where nothing more can be kept - unreachable, or no room - it also says
+ * how to get the session's work out (issue #148): Export library saves
+ * what the page holds, which is exactly what storage would not. Not for
+ * `corrupt`, which describes what was in storage when the page loaded and
+ * says nothing about what the session holds.
  */
 import { memo } from 'react';
 import { STORAGE_CORRUPT, STORAGE_FULL, STORAGE_UNAVAILABLE } from '../../store/portfolioStorage';
@@ -22,6 +28,7 @@ const NOTICES = {
     title: 'Portfolios cannot be saved in this browser',
     message:
       'Site data is unavailable here — usually a private window, or storage blocked for this site. You can still build a portfolio and simulate it; it will be gone when the tab closes.',
+    exportable: true,
   },
   [STORAGE_CORRUPT]: {
     tone: 'warning',
@@ -34,10 +41,13 @@ const NOTICES = {
     title: 'The last change was not saved',
     message:
       'This browser’s storage is full. The change is still on screen, but it will not survive a reload until there is room — deleting a portfolio you no longer need is usually enough.',
+    exportable: true,
   },
 };
 
-export const StorageNotice = memo(function StorageNotice({ status }) {
+/** `canExport` is whether there is anything to export: the pointer to an
+ *  action that has nothing to act on would be a dead end. */
+export const StorageNotice = memo(function StorageNotice({ status, canExport = false }) {
   const notice = NOTICES[status];
   if (!notice) return null;
 
@@ -58,6 +68,11 @@ export const StorageNotice = memo(function StorageNotice({ status }) {
       <div className="min-w-0">
         <div className="text-[13.5px] font-bold text-[var(--fg)]">{notice.title}</div>
         <p className="text-[13px] text-[var(--fg-1)] leading-relaxed m-0 mt-1">{notice.message}</p>
+        {notice.exportable && canExport && (
+          <p className="text-[13px] text-[var(--fg-1)] leading-relaxed m-0 mt-1">
+            <strong className="font-semibold">Export library</strong>, in the sidebar, saves everything here as a file you can import again later.
+          </p>
+        )}
       </div>
     </div>
   );

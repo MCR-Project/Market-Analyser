@@ -9,6 +9,7 @@
  *
  *  ┌────────────────────┐
  *  │ + New portfolio    │  ← pinned, never scrolls away
+ *  │ Export · Import    │  ← pinned too (issue #148)
  *  ├────────────────────┤
  *  │ Semis, equal weight│  ↕ scrolls
  *  │ 12 holdings        │
@@ -26,6 +27,7 @@
  */
 import { memo } from 'react';
 import { NavLink } from 'react-router';
+import { ImportBackupButton } from './ImportBackupButton';
 
 const CURRENCY = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -39,9 +41,14 @@ function describe(portfolio) {
   return `${holdings} · ${CURRENCY.format(portfolio.value)}`;
 }
 
+const LIBRARY_ACTION_CLASS =
+  'flex-1 h-[30px] px-2 text-[12px] font-semibold text-[var(--fg-1)] bg-transparent border border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-2)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
+
 export const PortfolioSidebar = memo(function PortfolioSidebar({
   portfolios,
   onCreate,
+  onExportLibrary,
+  onImport,
   openId,
   comparedIds,
   onToggleCompare,
@@ -61,6 +68,34 @@ export const PortfolioSidebar = memo(function PortfolioSidebar({
         </svg>
         New portfolio
       </button>
+
+      {/* The whole library, to a file and back (issue #148). Small and
+          grouped under the button that matters, and pinned with it: they
+          are rare actions, and must neither compete with New portfolio
+          nor scroll away with the list. Export has nothing to write from
+          an empty library, so it is off rather than producing a file that
+          looks like a backup and holds nothing. */}
+      <div className="flex-none flex gap-2 -mt-2">
+        <button
+          onClick={onExportLibrary}
+          disabled={portfolios.length === 0}
+          title={
+            portfolios.length === 0
+              ? 'There are no portfolios to export'
+              : 'Save every portfolio to a file'
+          }
+          className={LIBRARY_ACTION_CLASS}
+        >
+          Export library
+        </button>
+        <ImportBackupButton
+          onFile={onImport}
+          title="Add the portfolios in a backup file to this library"
+          className={LIBRARY_ACTION_CLASS}
+        >
+          Import
+        </ImportBackupButton>
+      </div>
 
       {portfolios.length === 0 ? (
         <p className="text-[13px] text-[var(--fg-2)] m-0 px-1 leading-relaxed">

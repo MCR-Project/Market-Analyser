@@ -2,7 +2,9 @@
 
 This directory tests **`fetcher/` only**. The backend has its own suite at
 `backend/tests/`; `pytest.ini` lists both as `testpaths`, so a bare `pytest` from
-the repo root runs everything.
+the repo root runs everything. The frontend's own (small) Vitest suite lives
+beside the code it tests, under `app/src/`, and is run with `npm test` from
+`app/` — it is not part of pytest.
 
 `docker compose run --rm tests` (from the repo root) runs the same `pytest`
 across both trees in a container built by `Dockerfile.tests` — for parity

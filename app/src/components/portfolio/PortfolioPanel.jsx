@@ -416,6 +416,7 @@ export function PortfolioPanel({
   onRename,
   onUpdate,
   onShare,
+  onExport,
   onDuplicate,
   onDelete,
   compared = [],
@@ -573,6 +574,17 @@ export function PortfolioPanel({
                 className={`${ACTION_CLASS} text-[var(--fg-1)] bg-[var(--bg-2)] border-[var(--border)] hover:bg-[var(--bg-3)] focus-visible:outline-[var(--accent)]`}
               >
                 Share
+              </button>
+              {/* A file rather than a link (issue #148): this portfolio as
+                  it is saved, to keep or to import somewhere else. Absent on
+                  a shared one with the rest of the write side - it is not
+                  yours to back up until it is kept. */}
+              <button
+                onClick={onExport}
+                title="Save this portfolio to a file"
+                className={`${ACTION_CLASS} text-[var(--fg-1)] bg-[var(--bg-2)] border-[var(--border)] hover:bg-[var(--bg-3)] focus-visible:outline-[var(--accent)]`}
+              >
+                Export
               </button>
               <button
                 onClick={onDuplicate}

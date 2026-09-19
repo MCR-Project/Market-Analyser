@@ -20,8 +20,9 @@
 
 /** The stored shape's version, carried by each portfolio rather than by
  *  the library, so a portfolio stays self-describing when it travels on
- *  its own — a share link (#66) is the same object out of the same
- *  migration. */
+ *  its own — a Backup file (#148) is a list of the same objects, out of
+ *  the same migration, and a share link (#66) is one of them without its
+ *  identity. */
 export const SCHEMA_VERSION = 1;
 
 export const STORAGE_KEY = 'market-analyser.portfolios';

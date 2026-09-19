@@ -3,7 +3,8 @@
 # a -k/-x flag, or a bare path, since pytest.ini's testpaths already cover
 # both trees so no path is required. `docker compose run --rm tests lint`
 # runs the frontend's ESLint instead, since app/package.json's lint script
-# only makes sense run from app/. `bash`/`sh` are an escape hatch to poke
+# only makes sense run from app/, and `frontend` runs its Vitest suite (issue
+# #148) the same way. `bash`/`sh` are an escape hatch to poke
 # around in the image. Anything else defaults to pytest too, on the
 # assumption that an unrecognized first word is a pytest arg (a test id, a
 # marker expression, a plugin flag) rather than a command to exec - the
@@ -19,6 +20,10 @@ case "$1" in
     lint)
         shift
         exec npm --prefix app run lint -- "$@"
+        ;;
+    frontend)
+        shift
+        exec npm --prefix app test -- "$@"
         ;;
     bash|sh)
         exec "$@"

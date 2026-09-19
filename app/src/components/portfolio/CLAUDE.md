@@ -14,6 +14,7 @@ It is spread across four directories, so a change often touches all of them:
 | `views/PortfolioPage.jsx` | the route: sidebar + panel, saved vs shared, dialogs |
 | `store/portfolioStorage.js` | the whole storage layer — read, migrate, write, name |
 | `store/portfolioLink.js` | encode/decode a portfolio into a share link |
+| `store/portfolioBackup.js` | export a library or one portfolio to a Backup file, and `planImport` — what importing one would do (issue #148); the one unit-tested module |
 | `hooks/usePortfolios.js` | the library as React state, write-through |
 | `hooks/usePortfolioSimulation.js` | the open portfolio's run |
 | `hooks/useComparisonRuns.js` | one run per line on the comparison chart |
@@ -31,7 +32,8 @@ Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar
 `ComparisonSummary`, `WindowControls`,
 `BenchmarkBar`, and the dialogs/notices (`CreatePortfolioDialog`,
 `ApplyWeightsDialog`, `DeletePortfolioDialog`, `SharePortfolioDialog`,
-`SharedNotice`, `StorageNotice`). `MetricsPicker`, the tile enable/disable
+`SharedNotice`, `StorageNotice`) and, for Backups (issue #148),
+`ImportBackupButton` and `ImportResultDialog`. `MetricsPicker`, the tile enable/disable
 dialog, lives in `components/ui/` (issue #105 moved it there once the ETF
 dashboard's fund metrics card needed the same dialog PortfolioSummary
 already had).
@@ -68,7 +70,7 @@ inside a `try`, because that access is itself what throws when site data is
 blocked. A refused write does **not** roll the change back: the session keeps
 working with what it has and the page says it is not being saved.
 
-## Migration vs decoding — opposite rules on purpose
+## Three readers of a portfolio — different rules on purpose
 
 - `migratePortfolio` (storage) **salvages what it can.** The alternative is
   silently losing work somebody did. Unknown fields are preserved, so a portfolio
@@ -78,10 +80,59 @@ working with what it has and the page says it is not being saved.
   duplicate ticker, size — with the size ceiling checked *before* anything is
   decoded. A link is untrusted input whoever sent it, and showing three quarters
   of somebody's portfolio under their name is worse than an error message.
+- `planImport` (Backup, issue #148) **sits between the two**: the file is the
+  owner's own choice but may have been edited or passed on. It salvages *per
+  entry* through `migratePortfolio`, unchanged, then holds each result to the
+  limits migration deliberately does not enforce — 50 holdings
+  (`MAX_LINK_HOLDINGS`), no ticker twice, every ticker matching `TICKER_PATTERN` —
+  so a portfolio never imports happily and then fails to simulate. A failing entry
+  is skipped and *named with its reason*, never quietly trimmed. Only a file that
+  is not a Backup, is over 2 MB (checked before it is read), or has nothing
+  importable in it is refused whole, and then nothing is written.
 
-Both return a *definition*, never something stored. Nothing about a shared link
-touches storage until **Save a copy**, which mints an ordinary new portfolio
-through `makePortfolio`.
+The link's readers return a *definition*, never something stored: nothing about a
+shared link touches storage until **Save a copy**, which mints an ordinary new
+portfolio through `makePortfolio`. A Backup is the opposite in kind — the owner's
+own portfolios at full fidelity (id, dates, `source`, unknown fields), which become
+ordinary saved portfolios as they are.
+
+### Backups: export, and an import that only adds
+
+`ADR 0001` records the decision; the rules are in `portfolioBackup.js`'s docstring.
+
+- **One envelope**, `{ format, exportedAt, portfolios }`, for the whole library or
+  one portfolio (a list of one), so there is one way in. A bare list is also
+  accepted — it is what `localStorage` holds. **No envelope version:** each
+  portfolio has its own `schemaVersion` and the migration upgrades it, so a second
+  number could only disagree with the first. That is the opposite of
+  `LINK_VERSION`, which exists because *other people's browsers* read a link.
+- **Import never replaces or deletes** — deleting cannot be undone here, and an
+  overwrite would let a stale file erase newer work silently. Same id and every
+  field equal → skipped and reported. Same id, different content → added under a
+  fresh id, so no two rows share a URL. Different id → a different portfolio,
+  however alike (a Duplicate is not a repeat). A taken name gets `-2`, `-3`, …
+  appended as it stands; the check runs against the library *plus everything
+  already added from the same file*.
+- **Nothing about view state travels** — window, benchmark, comparison and metrics
+  live in the URL, not on the portfolio.
+- **The plan is pure; the hook applies it.** `usePortfolios.importFile` reads the
+  file, plans against the library as it stands *after* the read, and writes once
+  through `mutate`. A refused write keeps the portfolios in the session like any
+  other change (principle 3), and the result dialog says they are not being saved.
+- **No confirmation before an import** (it only adds), but **always a result
+  dialog after one** — added, renamed, skipped-as-identical, failed with reasons —
+  because otherwise a successful import looks like nothing happened. Exactly one
+  portfolio added opens it, on close; several stay put.
+- **Where the controls are:** *Export library* and *Import* pinned under New
+  portfolio in the sidebar (Export is off for an empty library); *Export* beside
+  Share on an open portfolio; *Import a backup* on the empty landing page. A
+  shared portfolio has no Export — it is not yours to back up until it is kept.
+  `StorageNotice` points at Export library in `full` and `unavailable` only, when
+  the file is the only place what is on screen can go — never in `corrupt`, which
+  says nothing about what the session holds.
+- **Text only:** a name or reason from a file is rendered as text and never built
+  into anything, and the simulation request is built field by field, so an unknown
+  field kept in the library never reaches the backend.
 
 The link payload carries **its own version** (`LINK_VERSION`, currently 2),
 independent of `SCHEMA_VERSION` — it is a wire format other people's browsers
@@ -298,6 +349,12 @@ Each names the specific thing being decided rather than asking "are you sure?"
 about nothing in particular — `DeletePortfolioDialog` names the portfolio and says
 the delete cannot be undone; `ApplyWeightsDialog` shows old → new per row with the
 total before and after.
+
+`ImportResultDialog` (issue #148) is shown after *every* import and lists only the
+groups that apply. It names what was skipped rather than counting it — "3 skipped"
+would leave somebody unsure whether the one they wanted was among them — and it
+says when the write was refused, since "Added 3 portfolios" is a promise the next
+reload would break.
 
 `SharePortfolioDialog` **shows** the link rather than only copying it: clipboard
 writes fail for reasons unrelated to this app (permission, an insecure origin),
