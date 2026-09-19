@@ -9,7 +9,7 @@ decisions.
 | `cache.py` | Process-local TTL dict, one shared singleton |
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
-| `stats.py` | Return and risk arithmetic over a plain series — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
+| `stats.py` | Return and risk arithmetic over a plain series, and the correlation matrix's clustering (`cluster_correlation`, issue #143) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
 | `portfolio.py` | The simulation, plus its sibling risk decomposition (issue #113) — decides what series to hand `stats.py` and assembles its answers into a portfolio's or a basket's shape, no I/O of its own beyond the reads it calls |
 | `fund_metrics.py` | The fund-level metrics card's arithmetic assembly (issue #105) — `portfolio.py`'s counterpart for a fund's own basket rather than a simulated run: decides what to hand `stats.py`, assembles the answer, no arithmetic of its own |
 
@@ -232,6 +232,23 @@ coarsely that stretch of the window is bucketed. Both are read directly by
 `measurements/official_measurements/return_momentum.py`, one plugin
 declaring both as columns (issue #100's mechanism) so the two share one
 `price_frame` read per holding instead of two.
+
+`cluster_correlation(matrix, tickers, min_avg_correlation)` (issue #143) is
+the one function here that takes a correlation matrix rather than a series:
+average-linkage clustering on 1 − ρ, stopping when the best remaining pair of
+groups averages below the threshold (`config.CLUSTER_MIN_AVG_CORRELATION`,
+0.4 — a *level*, not a cluster count, so a fund whose holdings all move
+together is not forced into invented structure). `_correlation_summary` calls
+it, so the DB path and the live path share it, and its result rides in the
+cached `/api/correlation` response as `clusters`. Two rules, both invariant 7:
+a `None` pair is **skipped** when averaging (never counted as ρ = 0, which
+would claim "unrelated" where nothing is known), and two groups with **no
+computed pair between them are never joined**, whatever the threshold. It
+returns only groups of two or more, in `tickers` order, with ties broken by
+position in that list — never hash order or float noise (averages are compared
+at 12 decimals). It clusters whatever `tickers` it is given, which is the whole
+fund, not a view's top-N: the frontend picks what to show, so a holding's
+cluster does not change with the "stocks" slider.
 
 `herfindahl`/`effective_n` (concentration of a set of weights),
 `risk_contribution` (each holding's share of portfolio variance, an Euler

@@ -31,11 +31,13 @@ import pandas as pd
 import numpy as np
 from yfinance.exceptions import YFException, YFRateLimitError
 from services.cache import cache
+from services.stats import cluster_correlation
 from services.supabase_client import get_client_optional, paginated_select
 from config import (
     CACHE_TTL_SECONDS,
     CACHE_TTL_HOLDINGS,
     CACHE_TTL_HOLDINGS_FALLBACK,
+    CLUSTER_MIN_AVG_CORRELATION,
     CORRELATION_PERIOD,
     CORRELATION_INTERVAL,
     FORCE_REFRESH_THROTTLE_SECONDS,
@@ -877,7 +879,9 @@ def _correlation_summary(returns: pd.DataFrame, tickers: list[str]) -> dict:
     Averages, strongest/weakest, and hub are all computed over the pairs
     that exist: a null pair contributes to none of them, and a ticker with
     no usable peer (or fewer than two available tickers overall) reports a
-    null average rather than 0, and cannot become the hub.
+    null average rather than 0, and cannot become the hub. `clusters`
+    follows the same rule - see `stats.cluster_correlation`: a null pair is
+    skipped, never counted as an unrelated pair.
 
     Shared by both the DB path and the live yfinance path - the only thing
     that differs between them is how `returns` was derived.
@@ -941,6 +945,7 @@ def _correlation_summary(returns: pd.DataFrame, tickers: list[str]) -> dict:
         "strongest": strongest,
         "weakest": weakest,
         "hub": hub,
+        "clusters": cluster_correlation(matrix, available, CLUSTER_MIN_AVG_CORRELATION),
     }
 
 
@@ -1541,8 +1546,15 @@ def compute_correlation_matrix(
       3. Build the NxN Pearson correlation matrix via DataFrame.corr()
       4. Extract summary statistics: per-ticker averages, strongest/weakest
          pairs, and the "hub" ticker (highest average ρ to all peers)
+      5. Group the tickers into clusters of holdings that move together
+         (`stats.cluster_correlation`, issue #143), over every ticker
+         passed in - not just the few a view happens to display, so a
+         holding's cluster does not change with how many are shown
 
-    Returns a dict with: matrix, tickers, averages, strongest, weakest, hub.
+    Returns a dict with: matrix, tickers, averages, strongest, weakest, hub,
+    clusters. `clusters` is a list of groups of two or more tickers; a
+    ticker in none of them either has no computed pair to anyone (its
+    `averages` entry is null) or simply joined nobody.
     """
     key = f"corr_matrix:{'_'.join(sorted(tickers))}:{period}:{interval}"
     cached = cache.get(key)
@@ -1555,7 +1567,7 @@ def compute_correlation_matrix(
     )["close"]
 
     if closes is None:
-        return {"matrix": {}, "tickers": tickers}
+        return {"matrix": {}, "tickers": tickers, "clusters": []}
 
     # Daily returns. Deliberately not `.dropna()`'d here - that would drop
     # every row where *any* column is still NaN (a holding that hasn't

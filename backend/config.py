@@ -50,6 +50,27 @@ CORRELATION_INTERVAL = "1d"  # granularity of return observations
 # exclude a holding that listed only two or three weeks ago.
 MIN_OVERLAPPING_RETURNS = 30
 
+# Where the correlation matrix's clustering (issue #143) stops joining
+# groups: two groups are joined while their members average at least this ρ
+# to each other (`stats.cluster_correlation`). It is a level of correlation,
+# not a number of clusters, on purpose: a fixed count would always find
+# structure, including in a fund whose holdings all move together and have
+# none to find. The price is that the same level reads differently across
+# funds - a tightly-knit sector fund groups into fewer, larger blocks than a
+# broad one - which is what the matrix's own numbers are there to show.
+#
+# 0.4 is a deliberate choice, made after sweeping 0.3-0.7 over the eight
+# funds tracked when this was written. At 0.4 the other six funds split into
+# 5-12 groups (the largest holds 9-24 names) but a tightly-knit fund barely
+# splits at all: the two semiconductor funds (mean pair ρ about 0.5) come out
+# as one group of all 23 holdings (SOXX) and one of 21 plus a pair (SMH) - a
+# fair reading of holdings that really do move together, if a coarse one. The
+# trade is the other way at 0.6, which splits those two into blocks of 5-10
+# but leaves more of a broad fund in no group (SPY: 20 of 46 grouped, against
+# 37 at 0.4); at 0.7 those six fragment into pairs. Move this constant
+# to trade one against the other - nothing else depends on the value.
+CLUSTER_MIN_AVG_CORRELATION = 0.4
+
 # Which fund/ticker a measurement's documentation computes its worked
 # example against, when neither the measurement class nor its doc's
 # frontmatter names one of its own. A fixed default (rather than whatever

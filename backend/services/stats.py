@@ -7,7 +7,11 @@ whole portfolio (issue #98).
 No I/O of any kind. Every function here takes a plain series - a list of
 values and, wherever time matters, a list of ISO-8601 dates the same
 length - and returns a number, a small dict, or `None` when the series
-cannot support the question being asked of it. This module imports
+cannot support the question being asked of it. The one exception is
+`cluster_correlation` (issue #143), which takes a finished ticker-by-ticker
+correlation matrix rather than a series and returns groups of tickers: it
+sits under its own banner at the bottom because it groups what the
+series-level functions above measure. This module imports
 nothing from `services.market_data`, `services.supabase_client` or
 `yfinance`, and never will: that is what lets `measurements/*` call it
 directly, the way `backend/CLAUDE.md`'s layering table forbids it from
@@ -59,6 +63,7 @@ every call site that depends on them:
 
 import math
 
+import numpy as np
 import pandas as pd
 
 # Annualisation constants - the single source every consumer of this
@@ -1143,3 +1148,116 @@ def weighted_index(
         )
         index.append(index[-1] * (1 + step_return))
     return index
+
+
+# ── Grouping (which holdings move together) ───────────────────────────────────
+
+def cluster_correlation(
+    matrix: dict[str, dict[str, float | None]],
+    tickers: list[str],
+    min_avg_correlation: float,
+) -> list[list[str]]:
+    """Group `tickers` by how their returns co-move (issue #143): the
+    holdings the correlation matrix tab keeps next to each other and
+    outlines as one block.
+
+    `matrix` is the shape `/api/correlation` returns - ticker -> ticker ->
+    Pearson ρ, or `None` for a pair with too little shared history to
+    correlate (issue #97). Only the upper triangle is read, so a matrix
+    that is not exactly symmetric cannot make the answer depend on which
+    order a pair happens to be looked up in.
+
+    Method: agglomerative clustering, average linkage, on the distance
+    1 - ρ. Start with every ticker alone; repeatedly join the two groups
+    whose members are, on average, the most correlated; stop as soon as
+    the best available pair averages below `min_avg_correlation`. Read
+    the threshold as "groups are joined while their members average at
+    least this ρ to each other" - an *average*, so a group can contain a
+    pair below the threshold; it says nothing about every pair. Average
+    linkage rather than single (one stray link chains everything into a
+    blob) or complete (one weak pair keeps two obvious neighbours apart).
+
+    **A missing pair is skipped, never defaulted** (CLAUDE.md invariant 7).
+    Two groups are compared over the pairs that exist between them, so a
+    `None` neither drags an average toward 0 - which would claim the two
+    holdings are unrelated when nothing is known - nor is it counted as
+    a link. Two groups with no computed pair between them at all are
+    never joined, whatever the threshold: no evidence is not evidence of
+    correlation. A ticker with no computed pair to anyone therefore ends
+    up in no group.
+
+    Returns only groups of two or more, each in `tickers` order, and the
+    groups themselves ordered by their first member's position in
+    `tickers`. A ticker in no group is not "its own cluster": the caller
+    can tell a lone ticker with history from one with none by its own
+    average correlation. Deterministic: ties are broken by position in
+    `tickers`, never by hash or float noise (averages are compared at 12
+    decimal places, far past the four the matrix carries).
+
+    Cost is one O(n^2) numpy pass per join, so O(n^3) for n tickers at
+    worst - about a tenth of a second for a 500-holding fund on synthetic
+    returns, and about a millisecond for the 20-70 holdings the tracked
+    funds carry. It runs once per matrix and is cached with it.
+
+    A cluster is a statement about the past window the matrix was
+    computed over - not a sector, and not a forecast.
+    """
+    n = len(tickers)
+    if n < 2:
+        return []
+
+    # Sum of ρ over the *known* pairs between two groups, and how many
+    # pairs that is. A group's average ρ to another is sum / count, so a
+    # pair that isn't known changes neither.
+    total = np.zeros((n, n))
+    known = np.zeros((n, n))
+    for i, a in enumerate(tickers):
+        for j in range(i + 1, n):
+            value = matrix[a][tickers[j]]
+            if value is not None:
+                total[i, j] = total[j, i] = value
+                known[i, j] = known[j, i] = 1.0
+
+    alive = np.ones(n, dtype=bool)
+
+    def average_row(i: int) -> np.ndarray:
+        """Group i's average ρ to every other live group; -inf where that
+        group is dead, is i itself, or shares no computed pair with i."""
+        with np.errstate(divide="ignore", invalid="ignore"):
+            row = np.where(known[i] > 0, total[i] / known[i], -np.inf)
+        row = np.round(row, 12)
+        row[~alive] = -np.inf
+        row[i] = -np.inf
+        return row
+
+    average = np.empty((n, n))
+    for i in range(n):
+        average[i] = average_row(i)
+    members = {i: [i] for i in range(n)}
+
+    while True:
+        # argmax over a symmetric matrix returns the first maximum in
+        # row-major order: the lowest row, then the lowest column - a tie
+        # is broken by position in `tickers`.
+        flat = int(np.argmax(average))
+        i, j = divmod(flat, n)
+        best = average[i, j]
+        if best == -np.inf or best < min_avg_correlation:
+            break
+
+        # Join j into i (i < j, so a group keeps its first member's slot).
+        total[i] += total[j]
+        known[i] += known[j]
+        total[:, i] = total[i]
+        known[:, i] = known[i]
+        alive[j] = False
+        members[i] += members.pop(j)
+        row = average_row(i)
+        average[i, :] = row
+        average[:, i] = row
+        average[j, :] = -np.inf
+        average[:, j] = -np.inf
+
+    groups = [sorted(m) for m in members.values() if len(m) > 1]
+    groups.sort(key=lambda m: m[0])
+    return [[tickers[i] for i in g] for g in groups]
