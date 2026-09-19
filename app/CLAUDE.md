@@ -152,7 +152,12 @@ on its own") from 5xx, and within 5xx, whether it's still auto-retrying
 ("the backend is running, the source behind it did not answer, retrying") or
 has given up (`error.retriesExhausted` — points at the Retry button instead of
 promising a recovery the schedule has stopped chasing). Sending someone to
-check a server that is already up is a dead end.
+check a server that is already up is a dead end. A network-level failure has
+no status and gets `ErrorState`'s own defaults, which are worded for the
+dashboard ("Live market data could not be loaded"); a page whose content is
+not market data passes `{ unreachable: { title, message } }` as the second
+argument to say what it actually needs the backend for — `DocsPage` does
+(issue #141). Only that case is overridable; the 404 and 5xx wording is not.
 
 ## Rendering conventions
 

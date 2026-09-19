@@ -33,6 +33,16 @@ import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 import { describeFetchError } from '../utils/errorCopy';
 
+// What a refused connection says on this page (issue #141). ErrorState's own
+// default is worded for the dashboard — "Live market data could not be
+// loaded" — and docs are not market data: the manifest, every doc's prose and
+// every worked example are written and served by the backend, which is the
+// one thing worth telling a reader who opened this page without it running.
+const DOCS_UNREACHABLE = {
+  title: 'Documentation unavailable',
+  message: 'The documentation is written and served by the backend, and the backend could not be reached. Check that the API server is running, then try again.',
+};
+
 export function DocsPage() {
   const { measurementId } = useParams();
   const [query, setQuery] = useState('');
@@ -125,7 +135,7 @@ export function DocsPage() {
     return (
       <main className="flex-1 min-h-0 overflow-auto px-6 py-8">
         <div className="max-w-[720px] mx-auto">
-          <ErrorState {...describeFetchError(measurementsError || metricsError)} onRetry={retryManifest} />
+          <ErrorState {...describeFetchError(measurementsError || metricsError, { unreachable: DOCS_UNREACHABLE })} onRetry={retryManifest} />
         </div>
       </main>
     );
@@ -166,7 +176,7 @@ function Content({ measurementId, entry, columns, isMetric, families, unknownId,
   if (error) {
     return (
       <div className="max-w-[720px]">
-        <ErrorState {...describeFetchError(error)} onRetry={onRetry} />
+        <ErrorState {...describeFetchError(error, { unreachable: DOCS_UNREACHABLE })} onRetry={onRetry} />
       </div>
     );
   }
