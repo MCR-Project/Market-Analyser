@@ -1130,6 +1130,15 @@ The choice lives in the URL: `?matrixOrder=cluster|alpha|weight` and
 `?matrixWithin=weight|alpha`, each omitted at its default, an unrecognised value
 read as the default.
 
+**In the network view** (issue #144) the same clusters can be drawn as outlines: a
+`clusters Off | On` control beside the edge slider, off by default and kept in the
+URL as `?networkClusters=on`. Each cluster gets a dashed, neutral outline around
+its nodes and their ticker labels, named after its heaviest holding as in the
+matrix. The graph's layout is not told about clusters, so the outline is the
+convex hull of a cluster's nodes: it always contains every member, but where
+members sit apart it can also contain, or overlap the outline of, nodes that are
+not members. Read it as "these are in it", not "only these are here".
+
 ## Running both
 
 Start the backend and frontend in separate terminals, in either order, then

@@ -43,6 +43,8 @@
  * be left unlabelled.
  */
 
+import { describeClusters } from './clusters';
+
 export const MATRIX_ORDERS = ['cluster', 'alpha', 'weight'];
 export const MATRIX_WITHIN = ['weight', 'alpha'];
 export const DEFAULT_ORDER = 'cluster';
@@ -63,8 +65,10 @@ const byAlpha = (a, b) => a.localeCompare(b);
  *   sections: null | Array<{ key: string, kind: 'cluster'|'others'|'nohistory', label: string, start: number, count: number, size: number }>,
  *   clusterOf: Record<string, { name: string, size: number }>,
  * }}
- *   (each `clusterOf` entry also carries the fields the ordering itself
- *   uses — `key`, `total`, `lead` — which callers should ignore.)
+ *   (each `clusterOf` entry is `describeClusters`' entry for that cluster
+ *   — see utils/clusters.js, which also names it after its heaviest
+ *   holding — and so carries the fields the ordering itself uses: `key`,
+ *   `total`, `lead`, `members`. Callers should read only `name` and `size`.)
  *   `tickers` is the drawing order for rows and columns alike. `sections`
  *   partitions it (`start` indexes into `tickers`); `size` is the cluster's
  *   full-fund size, so a section can say "4 of 6" when part of it is off
@@ -73,22 +77,11 @@ const byAlpha = (a, b) => a.localeCompare(b);
  */
 export function orderMatrix({ holdings, clusters, averages, n, order, within }) {
   const rank = new Map(holdings.map((h, i) => [h[0], i]));
-  const weightOf = new Map(holdings.map(h => [h[0], h[1]]));
   const byWeight = (a, b) => rank.get(a) - rank.get(b);
   const inGroup = within === 'alpha' ? byAlpha : byWeight;
 
   // Every cluster in the whole fund, named after its heaviest holding.
-  const clusterOf = {};
-  const info = new Map();
-  clusters.forEach(members => {
-    const known = members.filter(t => weightOf.has(t));
-    if (known.length < 2) return;
-    const heaviest = known.reduce((best, t) => (weightOf.get(t) > weightOf.get(best) ? t : best), known[0]);
-    const total = known.reduce((sum, t) => sum + weightOf.get(t), 0);
-    const entry = { key: heaviest, name: `${heaviest} group`, size: known.length, total, lead: rank.get(heaviest) };
-    info.set(heaviest, entry);
-    known.forEach(t => { clusterOf[t] = entry; });
-  });
+  const { byKey: info, clusterOf } = describeClusters(holdings, clusters);
 
   const shown = holdings.slice(0, n).map(h => h[0]);
 

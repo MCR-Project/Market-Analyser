@@ -25,6 +25,18 @@
  * bigger nodes. It used to be a fixed 620×440 drawing scaled to fit,
  * which on a wide screen left a small graph in the middle of an empty
  * panel.
+ *
+ * Cluster outlines (issue #144), off by default (`?networkClusters=on`,
+ * see useNetworkClusters): a soft dashed outline around each cluster the
+ * backend found (issue #143), named after its heaviest holding exactly as
+ * in the matrix (utils/clusters.js). Neutral tones, never a hue, so colour
+ * keeps meaning correlation. The outline is a convex hull around the
+ * members' circles and ticker labels (utils/clusterOutline.js); the layout
+ * knows nothing about clusters, so a cluster whose members sit apart can
+ * enclose a node that is not one of them — the outline says "these are
+ * in it", not "only these are here". Each name is an HTML label over the
+ * SVG, not SVG text, like the matrix's. With the toggle off none of this is
+ * computed and the graph draws exactly as it always did.
  */
 import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveEtf } from '../hooks/useLiveEtf';
@@ -32,12 +44,16 @@ import { useLiveCorrelation } from '../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../hooks/useLiveSectors';
 import { useLiveStocks } from '../hooks/useLiveStocks';
 import { computeLayout } from '../utils/layout';
+import { describeClusters } from '../utils/clusters';
+import { clusterOutline } from '../utils/clusterOutline';
 import { useElementSize } from '../hooks/useElementSize';
+import { useNetworkClusters } from '../hooks/useNetworkClusters';
 import { fmtCorr } from '../utils/format';
 import { logoUrl, fallbackFaviconUrl, handleSvgImageLogoError } from '../utils/logo';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
 
 // Node radius bounds and reference weight (weightPct at/above which a
 // node hits MAX_R). The curve is a genuine exponential (not sqrt/linear),
@@ -48,6 +64,23 @@ const MIN_R = 10, MAX_R = 60, REF_WEIGHT = 10, GROWTH = 4;
 // A node's ticker sits 13px below its circle, 11px text: this much
 // under a node keeps the label inside the box.
 const LABEL_ROOM = 18;
+// The ticker label's geometry, stated once for the <text> that draws it and
+// the cluster outline that has to enclose it: 11px mono is about 6.6px a
+// character, its baseline is 13px under the node's circle, and descenders
+// take its bottom edge to about 16px under it.
+const LABEL_FONT_SIZE = 11, LABEL_BASELINE = 13, LABEL_CHAR_W = 6.6;
+const LABEL_BELOW = LABEL_BASELINE + 3;
+// A cluster outline stands this far outside its members' circles and ticker
+// labels.
+const OUTLINE_PAD = 10;
+// A cluster's name sits this far above its outline: the label's own height
+// (10.5px text plus padding, about 17px) and a few pixels of air.
+const NAME_ABOVE = 20;
+
+const CLUSTER_OPTIONS = [
+  { value: 'off', label: 'Off' },
+  { value: 'on', label: 'On' },
+];
 
 function nodeRadius(weightPct) {
   const t = Math.min(1, Math.max(0, weightPct) / REF_WEIGHT);
@@ -58,6 +91,7 @@ function nodeRadius(weightPct) {
 export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   const [threshold, setThreshold] = useState(0.5);
+  const { showClusters, setShowClusters } = useNetworkClusters();
   const corrData = useLiveCorrelation(etfId);
   const sectors = useLiveSectors(etfId);
   const { stockMap } = useLiveStocks(tickers);
@@ -96,13 +130,34 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
     [edges, layout]
   );
 
+  // One outline per cluster, only when asked for. A member with no layout
+  // position yet is left out for the same reason as above, and a cluster
+  // left with fewer than two drawn members gets no outline at all.
+  const outlines = useMemo(() => {
+    if (!showClusters) return [];
+    return describeClusters(holdings, corrData.clusters).list.flatMap(cluster => {
+      const nodes = cluster.members.filter(t => layout[t]).map(t => {
+        const r = nodeRadius(weightOf(t));
+        return {
+          x: layout[t].x, y: layout[t].y, r,
+          labelHalfWidth: (LABEL_CHAR_W * t.length) / 2, labelDepth: r + LABEL_BELOW,
+        };
+      });
+      // Bounded by the box: the layout leaves room for a node and its label
+      // but not for the outline's padding around a very heavy node at the edge.
+      const outline = clusterOutline(nodes, OUTLINE_PAD, { minX: 1, minY: 1, maxX: W - 1, maxY: H - 1 });
+      return outline ? [{ key: cluster.key, name: cluster.name, count: nodes.length, ...outline }] : [];
+    });
+  }, [showClusters, holdings, corrData.clusters, layout, weightOf, W, H]);
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex-none flex items-center gap-3 mb-4">
+      <div className="flex-none flex items-center gap-x-3 gap-y-2 mb-4 flex-wrap">
         <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">edge ρ ≥</span>
         <input type="range" className="corr-range flex-1 max-w-[300px]" min={0.2} max={0.9} step={0.01} value={threshold} onInput={e => setThreshold(parseFloat(e.target.value))} />
         <span className="font-[var(--font-mono)] text-[13px] font-semibold text-[var(--fg)] w-9 tabular-nums">{fmtCorr(threshold)}</span>
         <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">· {corrData.loading ? '…' : edges.length} links</span>
+        <SegmentedControl label="clusters" options={CLUSTER_OPTIONS} value={showClusters ? 'on' : 'off'} onChange={value => setShowClusters(value === 'on')} />
       </div>
 
       {/* This view fetches its own copy of the ETF (see useLiveEtf), so it
@@ -151,6 +206,23 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
 
                     <rect x={0} y={0} width={W} height={H} fill="transparent" onClick={() => onSelect(null)} />
 
+                    {/* Cluster outlines — under the edges and nodes, and inert
+                        so a click on one still deselects like the background. */}
+                    {outlines.map(o => (
+                      <path
+                        key={o.key}
+                        d={o.path}
+                        fill="var(--fg-3)"
+                        fillOpacity={0.07}
+                        stroke="var(--fg-3)"
+                        strokeOpacity={0.55}
+                        strokeWidth={1.25}
+                        strokeDasharray="5 4"
+                        strokeLinejoin="round"
+                        pointerEvents="none"
+                      />
+                    ))}
+
                     {/* Edges */}
                     {renderableEdges.map(({ a, b, v }) => {
                       const p1 = layout[a], p2 = layout[b];
@@ -182,18 +254,31 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
                           {isSel && <circle cx={p.x} cy={p.y} r={r + 5} fill="none" stroke="var(--accent-ring)" strokeWidth={2} />}
                           <circle cx={p.x} cy={p.y} r={r} fill={fill} stroke={stroke} strokeWidth={isSel ? 2.2 : (isNb ? 1.8 : 1.6)} />
                           {isSel && <circle cx={p.x} cy={p.y} r={r} fill="var(--accent)" fillOpacity={0.28} />}
-                          <text x={p.x} y={p.y + r + 13} textAnchor="middle" fill={isSel ? 'var(--accent)' : 'var(--fg-1)'} fontSize={11} fontWeight={600} fontFamily="var(--font-mono)">{t}</text>
+                          <text x={p.x} y={p.y + r + LABEL_BASELINE} textAnchor="middle" fill={isSel ? 'var(--accent)' : 'var(--fg-1)'} fontSize={LABEL_FONT_SIZE} fontWeight={600} fontFamily="var(--font-mono)">{t}</text>
                         </g>
                       );
                     })}
                   </svg>
                 )}
+                {/* Cluster names: HTML over the SVG, like the matrix's labels. */}
+                {outlines.map(o => (
+                  <div
+                    key={o.key}
+                    className="absolute pointer-events-none -translate-x-1/2 whitespace-nowrap rounded-[4px] px-1.5 py-px font-[var(--font-mono)] text-[10.5px] font-semibold text-[var(--fg-2)]"
+                    style={{ left: o.centerX, top: Math.max(2, o.top - NAME_ABOVE), background: 'color-mix(in oklab, var(--bg-1) 82%, transparent)' }}
+                  >
+                    {o.name} <span className="font-medium text-[var(--fg-3)]">· {o.count}</span>
+                  </div>
+                ))}
               </div>
 
               {/* Legend */}
               <div className="flex items-center gap-10 px-4 pt-3 flex-wrap">
                 <span className="flex items-center gap-[7px] text-xs text-[var(--fg-2)]"><span className="w-3.5 h-3.5 rounded-full bg-[var(--bg-1)] border-[1.5px] border-[var(--border-strong)]" />node size = weight in fund</span>
                 <span className="flex items-center gap-[7px] text-xs text-[var(--fg-2)]"><span className="w-[22px] h-[3px] rounded-full bg-[var(--accent)]" />line = correlation strength</span>
+                {showClusters && (
+                  <span className="flex items-center gap-[7px] text-xs text-[var(--fg-2)]"><span className="w-[22px] h-3 rounded-[4px] border-[1.5px] border-dashed border-[var(--fg-3)]" />outline = cluster: moved together over the past year, not a sector</span>
+                )}
                 <span className="text-xs text-[var(--fg-3)]">click a node to isolate its links</span>
               </div>
             </div>

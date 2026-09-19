@@ -55,6 +55,7 @@ link lives in the URL, and there is only ever one copy of the answer:
 | `?risk=` (on `/portfolio/...`) | `usePortfolioRisk` — which `computed_from="risk"` tiles are on, on `PortfolioRiskCard` (issue #113); its own key so it cannot collide with `?metrics=` or `?fundMetrics=` |
 | `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
 | `?fundMetrics=` (on `/etf/...`) | `useFundMetrics` — which fund metrics card tiles are on (issue #105); its own key so it cannot collide with `/portfolio/...`'s `?metrics=` |
+| `?networkClusters=` (on `/etf/...`) | `useNetworkClusters` — whether the network view outlines its clusters (issue #144): `on`, absent when off (the default); anything other than `on` reads as off |
 | `?matrixOrder=` / `?matrixWithin=` (on `/etf/...`) | `useMatrixOrder` — the Matrix tab's order (`cluster` default, `alpha`, `weight`) and, inside a cluster, `weight` (default) or `alpha` (issue #143); each omitted at its default, an unrecognised value read as the default via `readChoice` |
 
 `useEtfStore` used to be a zustand store; moving it into the route param removed
