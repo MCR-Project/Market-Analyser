@@ -69,6 +69,37 @@ reads.
 _Avoid_: Benchmark (reserved for the portfolio-simulator sense, below — a
 fund index is never user-chosen)
 
+**Cluster**:
+A group of two or more Holdings of one ETF whose returns moved together over
+the Window: groups are joined while their members average at least the Cluster
+Level in ρ to each other. A statement about how prices moved, not about what
+the companies do, and not a forecast. A holding in no Cluster is simply in
+none; it is not a "cluster of one".
+_Avoid_: Group (bare), Segment; Sector, which classifies what a company does,
+not how its price moved
+
+**Cluster Level**:
+The average ρ two groups of holdings must reach for the clustering to join
+them into one Cluster. A level of correlation, not a number of clusters, so a
+fund whose holdings all move together is not forced to split.
+_Avoid_: Threshold (bare — the network view's user-set "edge ρ ≥" threshold is
+a different number, deciding which *pairs* draw a line), Cutoff
+
+**Others**:
+In the correlation matrix's cluster order, the holdings that have history but
+no Cluster block to sit in *on screen*: they joined no Cluster, or their
+Cluster has only this one member among the holdings shown. A display grouping
+only — the holding's real Cluster is unchanged.
+_Avoid_: Unclustered (it would say the holding is in no Cluster, which is not
+always true), Singletons
+
+**No History**:
+A holding whose ρ against every peer is unknown, because it shares too little
+overlapping history with any of them. Not the same as uncorrelated: a low ρ
+says something, no history says nothing. Kept apart from Others for exactly
+that reason.
+_Avoid_: Uncorrelated, Unclustered
+
 ### Measurements and metrics
 
 **Measurement**:
