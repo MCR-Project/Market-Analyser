@@ -28,3 +28,14 @@ export function readList(params, key) {
   if (!raw) return [];
   return [...new Set(raw.split(',').map(item => item.trim()).filter(Boolean))];
 }
+
+/**
+ * A single-choice parameter: the value if it is one of `allowed`, else
+ * `fallback`. An unrecognised value is canonicalised to the default rather
+ * than treated as an error — a hand-edited or stale link should still open
+ * the page, not complain about itself.
+ */
+export function readChoice(params, key, allowed, fallback) {
+  const raw = params.get(key);
+  return allowed.includes(raw) ? raw : fallback;
+}

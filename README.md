@@ -1076,6 +1076,60 @@ Runs at http://localhost:5173 (or the port Vite reports) and talks to the
 backend at `http://localhost:8000` by default. Set `VITE_API_BASE` in
 `app/.env` to point a build at a different backend — see `.env.example`.
 
+### The correlation matrix and its clusters
+
+The Matrix tab draws the pairwise correlation of a fund's top holdings
+(Pearson ρ of daily returns over the past year, `GET /api/correlation/{etf}`),
+and groups the holdings that moved together (issue #143). The tab always asks
+for the past year; the endpoint's `period` parameter would move the window the
+clusters are computed over along with the matrix.
+
+**How the groups are found.** Every holding in the fund is clustered once, by
+the backend, on the distance 1 − ρ: start with each holding alone, keep joining
+the two groups whose members are on average the most correlated, and stop when
+the best remaining pair averages below **ρ 0.4** (`CLUSTER_MIN_AVG_CORRELATION`
+in `backend/config.py`). Average linkage rather than nearest-pair, so one stray
+link cannot chain two unrelated groups into one. The response carries the
+result as `clusters`: a list of groups of two or more tickers. The level is a
+judgement call, set at 0.4 after sweeping 0.3–0.7 over the tracked funds. At 0.4
+the other six funds split into 5–12 groups, but a tightly-knit fund barely splits:
+the two semiconductor funds come out as one group holding all (SOXX) or nearly
+all (SMH) of their holdings, which is a fair reading of holdings that move
+together, if a coarse one. A higher level (0.6) splits those into blocks of 5–10
+at the cost of leaving more of a broad fund in no group at all.
+
+**What a cluster does not mean.**
+
+- **It is not a sector.** It is a statement about how prices moved over the past
+  year, not about what the companies do; two software firms can sit in different
+  clusters and a chipmaker and a lender in the same one.
+- **It is not a forecast.** The groups are recomputed from the last year of
+  returns and can shift as that window rolls forward.
+- **"On average" is not "every pair".** Groups are joined by their *average* ρ, so
+  a cluster can contain one pair below the cluster level.
+- **A missing pair is not a zero.** A pair with too little shared history has no
+  correlation (issue #97), and clustering skips it rather than treating it as
+  unrelated. Two groups with no computed pair between them are never joined; a
+  holding with no computed pair to anyone is in no cluster and is labelled *No
+  history*.
+
+**How it is drawn.** The clusters come from the whole fund, but the matrix shows
+only the top *N* holdings by weight (the "stocks" slider), so a holding's cluster
+never changes as the slider moves. In the default *cluster* order each cluster is
+a labelled, outlined block on the diagonal — named after its heaviest holding
+("NVDA group"), with "4 of 6" when part of it is off screen — ordered by the
+cluster's total fund weight, and within a block by weight or A–Z. A holding
+whose cluster has no other member on screen goes into an *Others* band instead of
+a block of one; that is a display rule only, and hovering its label still names
+its real cluster. Colour keeps meaning ρ and nothing else, so blocks are marked
+with neutral outlines and labels, never a hue. The *A–Z* and *Weight* orders draw
+no blocks, so a clustered holding carries a small dot on its labels instead
+(accented when it shares a cluster with the selected stock).
+
+The choice lives in the URL: `?matrixOrder=cluster|alpha|weight` and
+`?matrixWithin=weight|alpha`, each omitted at its default, an unrecognised value
+read as the default.
+
 ## Running both
 
 Start the backend and frontend in separate terminals, in either order, then

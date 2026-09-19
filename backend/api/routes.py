@@ -15,7 +15,7 @@ Endpoints:
   GET /api/tickers/{symbol}      — resolve one symbol, tracked or not
   GET /api/series/{ticker}       — historical price series, by period or
                                    by explicit start/end window
-  GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings
+  GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings, plus clusters
   GET /api/sectors/{etf_id}      — sector weight breakdown
   POST /api/portfolio/simulate   — value a basket of tickers over a window,
                                    with optional rebalancing and recurring
@@ -199,6 +199,15 @@ def get_correlation(
     When `threshold` > 0, also counts the number of pairs (edges) whose
     correlation exceeds the threshold — used by the network view to show
     "17 links" in the toolbar.
+
+    `clusters` groups the holdings that moved together over the window
+    (issue #143): a list of groups of two or more tickers, computed over the
+    whole fund rather than any one view's top-N, so a holding's group is the
+    same however many are displayed. It is not a sector and not a forecast,
+    and it does not depend on `threshold` - that only counts edges. A ticker
+    in no group joined nobody; one with no computed correlations at all
+    reports a null entry in `averages`. An empty matrix (no usable price
+    history) answers `clusters: []` alongside `matrix: {}`, still a 200.
     """
     etf_id = etf_id.upper()
     holdings, _ = get_etf_holdings(etf_id)
