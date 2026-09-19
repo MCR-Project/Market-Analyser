@@ -71,10 +71,12 @@ fund index is never user-chosen)
 
 **Cluster**:
 A group of two or more Holdings of one ETF whose returns moved together over
-the Window: groups are joined while their members average at least the Cluster
-Level in ρ to each other. A statement about how prices moved, not about what
-the companies do, and not a forecast. A holding in no Cluster is simply in
-none; it is not a "cluster of one".
+the correlation matrix's fixed one-year lookback — not a Window the user picks:
+groups are joined while their members average at least the Cluster Level in ρ
+to each other. A statement about how prices moved, not about what the
+companies do, and not a forecast. A holding in no Cluster is simply in none;
+it is not a "cluster of one". Named after its heaviest Holding by fund weight
+("NVDA group"), the same in every view that shows it.
 _Avoid_: Group (bare), Segment; Sector, which classifies what a company does,
 not how its price moved
 
@@ -82,8 +84,22 @@ not how its price moved
 The average ρ two groups of holdings must reach for the clustering to join
 them into one Cluster. A level of correlation, not a number of clusters, so a
 fund whose holdings all move together is not forced to split.
-_Avoid_: Threshold (bare — the network view's user-set "edge ρ ≥" threshold is
-a different number, deciding which *pairs* draw a line), Cutoff
+_Avoid_: Threshold (bare — see Link Threshold, a different number that
+decides which *pairs* connect, not which groups merge), Cutoff
+
+**Link**:
+A pair of holdings drawn joined in the network view because their ρ is at
+least the Link Threshold. It says only that the pair's ρ cleared a bar the
+user set — not that either holding is in a Cluster, or that the two share one.
+_Avoid_: Edge, Line (the wire field `edgeCount` and the code say "edge", and
+the legend says "line"; neither is the term)
+
+**Link Threshold**:
+The minimum ρ a pair of holdings needs for the network view to draw a Link
+between them, set by the user with a slider. The only number in this app
+called a threshold; not the Cluster Level, which decides which *groups* of
+holdings merge.
+_Avoid_: Edge threshold, Cutoff
 
 **Others**:
 In the correlation matrix's cluster order, the holdings that have history but
