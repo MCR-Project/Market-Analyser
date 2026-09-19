@@ -48,10 +48,12 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 
 /** Row-label column width and header-row height, both fixed — only the
- *  cells grow. The header is one line of 10px text plus its padding
- *  (23px); the header labels never wrap (a long ticker is cut with an
- *  ellipsis instead), so that holds for any ticker, and 26 leaves a few
- *  pixels' slack. If the header could grow, a grid sized to fit exactly
+ *  cells grow. The header row is given exactly HEADER_H (style below), not
+ *  left to be as tall as its text: its content is one line of 10px text plus
+ *  padding, 23px, and the cluster frames are positioned from HEADER_H — when
+ *  this was only an upper bound the frames sat 3px low (issue #143). The
+ *  labels never wrap (a long ticker is cut with an ellipsis instead), so 26
+ *  always holds. If the header could grow, a grid sized to fit exactly
  *  would overflow, and the scrollbar that appeared would change the
  *  width the cells are sized from. */
 const LABEL_W = 60;
@@ -168,7 +170,7 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
               <div ref={gridRef} className="corr-scroll flex-1 min-h-0 overflow-auto pb-1.5 [scrollbar-gutter:stable]">
                 <div className="relative inline-block min-w-full">
                   {/* Header — sticky so it stays visible while rows scroll vertically */}
-                  <div className="flex sticky top-0 z-10 bg-[var(--bg-1)]">
+                  <div className="flex sticky top-0 z-10 bg-[var(--bg-1)]" style={{ height: HEADER_H }}>
                     <div className="flex-none" style={{ width: LABEL_W }} />
                     {matrixTickers.map((t, i) => (
                       <div
