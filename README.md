@@ -1106,7 +1106,7 @@ at the cost of leaving more of a broad fund in no group at all.
 - **It is not a forecast.** The groups are recomputed from the last year of
   returns and can shift as that window rolls forward.
 - **"On average" is not "every pair".** Groups are joined by their *average* ρ, so
-  a cluster can contain one pair below the threshold.
+  a cluster can contain one pair below the cluster level.
 - **A missing pair is not a zero.** A pair with too little shared history has no
   correlation (issue #97), and clustering skips it rather than treating it as
   unrelated. Two groups with no computed pair between them are never joined; a

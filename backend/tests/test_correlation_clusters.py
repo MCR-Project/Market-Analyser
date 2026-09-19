@@ -83,7 +83,7 @@ class NullPairTests(unittest.TestCase):
 
     def test_groups_with_no_computed_pair_between_them_never_merge(self):
         # Nothing is known about how {A, B} and {C, D} relate, so no
-        # threshold - not even the loosest a caller could pass - may join
+        # cluster level - not even the loosest a caller could pass - may join
         # them: "no evidence" is not "on average correlated enough".
         tickers = ["A", "B", "C", "D"]
         matrix = _matrix(tickers, {("A", "B"): 0.9, ("C", "D"): 0.9})
@@ -110,7 +110,7 @@ class MethodTests(unittest.TestCase):
 
         self.assertEqual(stats.cluster_correlation(matrix, tickers, 0.6), [["A", "B"]])
 
-    def test_a_pair_exactly_at_the_threshold_joins_and_just_below_does_not(self):
+    def test_a_pair_exactly_at_the_cluster_level_joins_and_just_below_does_not(self):
         tickers = ["A", "B"]
         matrix = _matrix(tickers, {("A", "B"): 0.5})
 

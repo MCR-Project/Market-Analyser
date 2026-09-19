@@ -236,14 +236,14 @@ declaring both as columns (issue #100's mechanism) so the two share one
 `cluster_correlation(matrix, tickers, min_avg_correlation)` (issue #143) is
 the one function here that takes a correlation matrix rather than a series:
 average-linkage clustering on 1 − ρ, stopping when the best remaining pair of
-groups averages below the threshold (`config.CLUSTER_MIN_AVG_CORRELATION`,
+groups averages below the cluster level (`config.CLUSTER_MIN_AVG_CORRELATION`,
 0.4 — a *level*, not a cluster count, so a fund whose holdings all move
 together is not forced into invented structure). `_correlation_summary` calls
 it, so the DB path and the live path share it, and its result rides in the
 cached `/api/correlation` response as `clusters`. Two rules, both invariant 7:
 a `None` pair is **skipped** when averaging (never counted as ρ = 0, which
 would claim "unrelated" where nothing is known), and two groups with **no
-computed pair between them are never joined**, whatever the threshold. It
+computed pair between them are never joined**, whatever the cluster level. It
 returns only groups of two or more, in `tickers` order, with ties broken by
 position in that list — never hash order or float noise (averages are compared
 at 12 decimals). It clusters whatever `tickers` it is given, which is the whole

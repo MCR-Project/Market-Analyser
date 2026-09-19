@@ -1170,10 +1170,10 @@ def cluster_correlation(
     Method: agglomerative clustering, average linkage, on the distance
     1 - ρ. Start with every ticker alone; repeatedly join the two groups
     whose members are, on average, the most correlated; stop as soon as
-    the best available pair averages below `min_avg_correlation`. Read
-    the threshold as "groups are joined while their members average at
-    least this ρ to each other" - an *average*, so a group can contain a
-    pair below the threshold; it says nothing about every pair. Average
+    the best available pair averages below `min_avg_correlation`, the
+    cluster level. Read it as "groups are joined while their members
+    average at least this ρ to each other" - an *average*, so a group can
+    contain a pair below the level; it says nothing about every pair. Average
     linkage rather than single (one stray link chains everything into a
     blob) or complete (one weak pair keeps two obvious neighbours apart).
 
@@ -1182,7 +1182,7 @@ def cluster_correlation(
     `None` neither drags an average toward 0 - which would claim the two
     holdings are unrelated when nothing is known - nor is it counted as
     a link. Two groups with no computed pair between them at all are
-    never joined, whatever the threshold: no evidence is not evidence of
+    never joined, whatever the cluster level: no evidence is not evidence of
     correlation. A ticker with no computed pair to anyone therefore ends
     up in no group.
 
