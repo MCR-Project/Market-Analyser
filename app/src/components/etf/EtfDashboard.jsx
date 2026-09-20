@@ -24,9 +24,8 @@ import { useLiveEtf } from '../../hooks/useLiveEtf';
 import { useLiveCorrelation } from '../../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../../hooks/useLiveSectors';
 import { useLiveSeries } from '../../hooks/useLiveSeries';
-import { useChartHover } from '../../hooks/useChartHover';
-import { AreaChart } from '../charts/AreaChart';
-import { ChartTooltip } from '../charts/ChartTooltip';
+import { PriceChart } from '../charts/PriceChart';
+import { CandleToggle } from '../charts/CandleToggle';
 import { TimeframeTabs } from '../ui/TimeframeTabs';
 import { SectorZone } from './SectorZone';
 import { Loading } from '../ui/Loading';
@@ -58,11 +57,9 @@ export const EtfDashboard = memo(function EtfDashboard() {
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [corrData.averages]);
 
-  const { arr, dates, loading } = useLiveSeries(etfId, timeframe);
+  const { arr, dates, candles, loading } = useLiveSeries(etfId, timeframe);
   const pct = arr && arr.length > 1 ? ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100 : 0;
   const positive = pct >= 0;
-
-  const { hoverIdx, onMouseMove, onMouseLeave, tooltip } = useChartHover(arr, timeframe, dates);
 
   const handlePickerSelect = (id) => {
     switchEtf(id);
@@ -157,7 +154,7 @@ export const EtfDashboard = memo(function EtfDashboard() {
 
         {/* Market chart */}
         <div className="flex-[1.2] min-w-[280px] flex flex-col" style={{ padding: '20px 22px' }}>
-          <div className="flex items-start justify-between gap-3 mb-1.5">
+          <div className="flex items-start justify-between gap-3 mb-1.5 flex-wrap">
             <div>
               <div className="eyebrow mb-[7px]">MARKET VALUE</div>
               <div className="flex items-baseline gap-2">
@@ -170,15 +167,15 @@ export const EtfDashboard = memo(function EtfDashboard() {
                 }
               </div>
             </div>
-            <TimeframeTabs active={timeframe} onChange={setTimeframe} />
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <CandleToggle />
+              <TimeframeTabs active={timeframe} onChange={setTimeframe} />
+            </div>
           </div>
           <div className="flex-1 min-h-[140px] flex items-end relative">
             {loading || !arr
               ? <Loading variant="chart" height={140} className="self-stretch" />
-              : <>
-                  <AreaChart data={arr} pct={pct} hoverIdx={hoverIdx} onMouseMove={onMouseMove} onMouseLeave={onMouseLeave} gradientId="mainChart" height={140} />
-                  <ChartTooltip tooltip={tooltip} />
-                </>
+              : <PriceChart arr={arr} dates={dates} candles={candles} pct={pct} timeframe={timeframe} gradientId="mainChart" height={140} />
             }
           </div>
         </div>

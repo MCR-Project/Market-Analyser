@@ -63,8 +63,10 @@ class _FakeQuery:
         self._start = 0
         self._end = None
         self.filters = []
+        self.selected = None
 
     def select(self, *a, **k):
+        self.selected = a[0] if a else None
         return self
 
     def order(self, *a, **k):
@@ -212,6 +214,51 @@ class LiveWindowTests(unittest.TestCase):
         self.assertEqual(daily[0]["granularity"], "D")
         self.assertEqual(monthly[0]["granularity"], "M")
 
+    def test_series_rows_carry_open_high_low(self):
+        """A candle needs all four prices, not just where it closed (issue
+        #152): the live path hands back open/high/low beside close, rounded
+        the way close is, so a chart drawing candles reads the same shape
+        from either path."""
+        history = pd.DataFrame(
+            {
+                "Open": [118.456], "High": [122.999], "Low": [117.001],
+                "Close": [120.5], "Volume": [1_000_000],
+            },
+            index=pd.to_datetime(["2024-06-07"]),
+        )
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = history
+        with patch("services.market_data.yf.Ticker", return_value=mock_ticker):
+            row = _get_price_series_live("NVDA", "1y", "1d")[0]
+
+        self.assertEqual(
+            (row["open"], row["high"], row["low"], row["close"]),
+            (118.46, 123.0, 117.0, 120.5),
+        )
+
+    def test_a_missing_open_high_low_is_null_not_zero_and_not_nan(self):
+        """Absence is interpreted, never defaulted (invariant 7): a NaN
+        would crash JSON serialisation and a 0 would state the stock traded
+        at nothing. A frame with no such columns at all reads the same way."""
+        with_nan = pd.DataFrame(
+            {
+                "Open": [float("nan")], "High": [float("nan")], "Low": [float("nan")],
+                "Close": [120.5], "Volume": [1_000_000],
+            },
+            index=pd.to_datetime(["2024-06-07"]),
+        )
+        without = self._fake_history()
+        for label, history in (("nan", with_nan), ("absent", without)):
+            with self.subTest(label):
+                mock_ticker = MagicMock()
+                mock_ticker.history.return_value = history
+                with patch("services.market_data.yf.Ticker", return_value=mock_ticker):
+                    row = _get_price_series_live("NVDA", "1y", "1d")[0]
+                self.assertEqual(
+                    (row["open"], row["high"], row["low"]), (None, None, None)
+                )
+                self.assertEqual(row["close"], 120.5)
+
     def test_closes_shifts_the_exclusive_end_by_a_day(self):
         """Same shift for the multi-ticker download the basket reads go
         through."""
@@ -250,6 +297,37 @@ class DbWindowTests(unittest.TestCase):
             rows = _get_price_series_db("NVDA", None, start="2019-01-01", end="2024-06-07")
 
         self.assertEqual([r["granularity"] for r in rows], ["M", "M", "D", "D"])
+
+    def test_the_series_read_selects_open_high_low(self):
+        """The columns are stored (adjusted, resampled with the bucket) and
+        the read used to throw them away - the whole reason a candle could
+        not be drawn (issue #152)."""
+        db = _FakeClient(_price_rows())
+        with patch("services.market_data.get_client_optional", return_value=db):
+            _get_price_series_db("NVDA", None, start="2024-06-06", end="2024-06-07")
+
+        selected = set(db.queries[0].selected.split(","))
+        self.assertTrue({"open", "high", "low", "close"} <= selected)
+
+    def test_rows_carry_open_high_low_and_a_null_stays_null(self):
+        rows = [
+            {"ticker": "NVDA", "date": "2024-06-06", "open": 118.456, "high": 122.999,
+             "low": 117.001, "close": 120.0, "volume": 30, "granularity": "D"},
+            {"ticker": "NVDA", "date": "2024-06-07", "open": None, "high": 123.0,
+             "low": None, "close": 121.0, "volume": 40, "granularity": "D"},
+        ]
+        db = _FakeClient(rows)
+        with patch("services.market_data.get_client_optional", return_value=db):
+            got = _get_price_series_db("NVDA", None, start="2024-06-06", end="2024-06-07")
+
+        self.assertEqual(
+            (got[0]["open"], got[0]["high"], got[0]["low"]), (118.46, 123.0, 117.0)
+        )
+        # A 0 here would claim the stock opened at nothing.
+        self.assertEqual(
+            (got[1]["open"], got[1]["high"], got[1]["low"]), (None, 123.0, None)
+        )
+        self.assertEqual(got[1]["close"], 121.0)
 
     def test_a_period_still_reads_a_lookback_from_today(self):
         """The window parameters are additive: a period read must keep

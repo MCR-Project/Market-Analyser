@@ -708,6 +708,24 @@ def _window_filtered(query, start: str | None, end: str | None):
 
 # ── Price series ──────────────────────────────────────────────────────────────
 
+def _price_or_none(value) -> float | None:
+    """One side of a candle: the price rounded to the cent, or None.
+
+    None - never 0, never NaN - for a price the source did not give (issue
+    #152). `prices` stores open/high/low as nullable, and yfinance leaves NaN
+    where it has none; a NaN would crash JSON serialisation and a 0 would say
+    the stock traded at nothing, so absence stays absence all the way to the
+    chart, which draws it as a gap (invariant 7).
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(number) else round(number, 2)
+
+
 def _get_price_series_live(
     ticker_symbol: str,
     period: str | None,
@@ -737,6 +755,9 @@ def _get_price_series_live(
     return [
         {
             "date": idx.strftime("%Y-%m-%d"),
+            "open": _price_or_none(row.get("Open")),
+            "high": _price_or_none(row.get("High")),
+            "low": _price_or_none(row.get("Low")),
             "close": round(float(row["Close"]), 2),
             "volume": int(row.get("Volume", 0) if not np.isnan(row.get("Volume", 0)) else 0),
             "granularity": granularity,
@@ -761,7 +782,7 @@ def _get_price_series_db(
     def build_query():
         q = (
             db.table("prices")
-            .select("date,close,volume,granularity")
+            .select("date,open,high,low,close,volume,granularity")
             .eq("ticker", ticker_symbol)
             .order("date")
             .order("granularity")
@@ -778,6 +799,9 @@ def _get_price_series_db(
     return [
         {
             "date": row["date"],
+            "open": _price_or_none(row.get("open")),
+            "high": _price_or_none(row.get("high")),
+            "low": _price_or_none(row.get("low")),
             "close": round(float(row["close"]), 2),
             "volume": int(row["volume"] or 0),
             "granularity": row.get("granularity") or "D",
@@ -793,8 +817,16 @@ def get_price_series(
     start: str | None = None,
     end: str | None = None,
 ) -> list[dict]:
-    """Fetch historical close prices as a list of
-    {date, close, volume, granularity} dicts, oldest first.
+    """Fetch historical prices as a list of
+    {date, open, high, low, close, volume, granularity} dicts, oldest first.
+
+    `open`/`high`/`low` are a row's other three prices (issue #152), so a
+    chart can draw a candle rather than only a line. They are adjusted like
+    `close` and, for a coarse row, are the bucket's own first open / highest
+    high / lowest low (scripts/fetch_daily.py's `_resample`). Each is `None`
+    - never 0 - where the source has no value: a candle with a missing side
+    is a gap for the reader to draw as one, not a flat candle. Only additive:
+    every consumer that reads `close` reads it exactly as before.
 
     The stretch of history is named either as a `period` (a lookback from
     today) or as an explicit `start`/`end` window - see resolve_window,

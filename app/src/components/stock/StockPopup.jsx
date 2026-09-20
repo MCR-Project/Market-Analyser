@@ -8,7 +8,7 @@
  *  │ Left: Performance      │ Right: Correlation    │
  *  │  • 1W/1M/1Y/5Y tabs    │ Explorer              │
  *  │    with return %       │ • min ρ slider        │
- *  │  • AreaChart sparkline │ • combined ETF weight │
+ *  │  • line or candles     │ • combined ETF weight │
  *  │    with hover tooltip  │ • scrollable peer list│
  *  │                        │    with ρ bars + logos│
  *  └────────────────────────┴───────────────────────┘
@@ -22,10 +22,9 @@
 import { memo, useState, useMemo, useCallback, useEffect } from 'react';
 import { fmtCorr, fmtMoney } from '../../utils/format';
 import { useLiveSeries } from '../../hooks/useLiveSeries';
-import { useChartHover } from '../../hooks/useChartHover';
 import { useFetch } from '../../hooks/useFetch';
-import { AreaChart } from '../charts/AreaChart';
-import { ChartTooltip } from '../charts/ChartTooltip';
+import { PriceChart } from '../charts/PriceChart';
+import { CandleToggle } from '../charts/CandleToggle';
 import { Logo } from '../ui/Logo';
 import { Loading } from '../ui/Loading';
 import { Overlay } from '../ui/Overlay';
@@ -48,9 +47,8 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
   const weight = weightOf(ticker);
 
   // Chart data for the selected timeframe
-  const { arr, dates, loading: chartLoading } = useLiveSeries(ticker, chartTf);
+  const { arr, dates, candles, loading: chartLoading } = useLiveSeries(ticker, chartTf);
   const pct = arr && arr.length > 1 ? ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100 : 0;
-  const { hoverIdx, onMouseMove, onMouseLeave, tooltip } = useChartHover(arr, chartTf, dates);
 
   const corrFn = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
 
@@ -192,7 +190,10 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
         <div className="flex h-[560px] overflow-hidden">
           {/* LEFT: performance */}
           <div className="flex-1 min-w-0 p-[22px_28px] overflow-y-auto flex flex-col gap-4 border-r border-[var(--divider)]">
-            <div className="eyebrow">PERFORMANCE</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="eyebrow">PERFORMANCE</div>
+              <CandleToggle />
+            </div>
             <div className="grid grid-cols-4 gap-2.5">
               {perfs.map(p => (
                 <button key={p.tf} onClick={() => setChartTf(p.tf)}
@@ -209,10 +210,7 @@ export const StockPopup = memo(function StockPopup({ ticker, etf, tickers, weigh
             <div className="relative mt-20">
               {chartLoading || !arr
                 ? <Loading variant="chart" height={180} />
-                : <>
-                    <AreaChart data={arr} pct={pct} hoverIdx={hoverIdx} onMouseMove={onMouseMove} onMouseLeave={onMouseLeave} gradientId="spChart" height={180} />
-                    <ChartTooltip tooltip={tooltip} />
-                  </>
+                : <PriceChart arr={arr} dates={dates} candles={candles} pct={pct} timeframe={chartTf} gradientId="spChart" height={180} />
               }
             </div>
           </div>

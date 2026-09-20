@@ -162,10 +162,14 @@ def get_series(
 ):
     """Historical price series for charting and backtesting.
 
-    Returns an array of {date, close, volume, granularity} objects, oldest
-    first. The frontend maps the `close` values into the AreaChart
-    sparkline; `granularity` says whether a row is a day, a week or a month
-    of history, since `prices` tiers older rows into coarser buckets.
+    Returns an array of {date, open, high, low, close, volume, granularity}
+    objects, oldest first. The frontend maps the `close` values into the
+    AreaChart sparkline, or - when the reader has switched to candles
+    (issue #152) - resamples a row's prices into one candle per span.
+    `open`/`high`/`low` are `null`, never 0, where the source has no value,
+    and the chart draws that as a gap; `granularity` says whether a row is a
+    day, a week or a month of history, since `prices` tiers older rows into
+    coarser buckets.
 
     The stretch of history is either a `period` (a lookback from today) or
     an explicit `start`/`end` window - the two are mutually exclusive, and

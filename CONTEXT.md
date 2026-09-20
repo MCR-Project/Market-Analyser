@@ -116,6 +116,20 @@ says something, no history says nothing. Kept apart from Others for exactly
 that reason.
 _Avoid_: Uncorrelated, Unclustered
 
+### Price charts
+
+**Candle**:
+One stretch of a price chart's timeframe drawn as the price it opened at, its
+highest, its lowest and where it closed. Every candle on one chart covers the
+same span, so what a candle means never changes along the axis — unlike a
+stored price row, whose span depends on how old it is. Prices are adjusted for
+splits and dividends, so an older candle's open, high, low and close are not
+the figures the stock printed that day. A stretch missing any of the four is a
+gap in the chart, never a flat candle: a flat one would claim the price did not
+move. Shown instead of the line by a display switch, not a different chart.
+_Avoid_: Bar (a `<Bar>` cell and every bar chart already use it), Bucket (the
+storage tiers' word for a coarse row), Row
+
 ### Measurements and metrics
 
 **Measurement**:

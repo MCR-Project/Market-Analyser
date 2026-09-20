@@ -27,13 +27,14 @@ src/main.jsx                 router; every route wrapped in one AppLayout
 src/App.jsx                  the dashboard shell (/etf/:etfId/:view)
 src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
+src/utils/candles.js         rows -> candles, and where a candle sits; chartTooltip.js builds the hover readout (both pure, both tested)
 src/hooks/                   data fetching and view state
-src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup (+ its test)
+src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup, candlePreference (+ their tests)
 src/views/                   one file per route or tab panel
 src/components/
   layout/    AppLayout, Header
   ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, SegmentedControl, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
-  charts/    AreaChart, BrushOverlay, ChartTooltip
+  charts/    PriceChart (line or candles), AreaChart, CandleChart, CandleToggle, BrushOverlay, ChartTooltip
   etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard
   stock/     StockPopup
   docs/      DocsSidebar, MeasurementDoc, DocMdx, WorkedExample
@@ -42,8 +43,10 @@ src/components/
 
 ## The URL is the state
 
-There is no global store. Anything that should survive a reload or travel in a
-link lives in the URL, and there is only ever one copy of the answer:
+There is no global store of what is on screen. Anything that should survive a
+reload or travel in a link lives in the URL, and there is only ever one copy of
+the answer (the one exception is a display preference that is neither a view of
+the data nor worth a link: see "Price charts and candles"):
 
 | In the URL | Read by |
 | --- | --- |
@@ -196,6 +199,41 @@ argument to say what it actually needs the backend for — `DocsPage` does
   area, never on the area itself, so the sidebar stays at the window's left
   edge and the scrollbar at its right.
 
+## Price charts and candles (issue #152)
+
+The three charts that draw one ticker's price — `EtfDashboard`, `StockPopup` and
+`portfolio/HoldingChartPopup` — all render `charts/PriceChart`, which is the one
+place that picks between the line (`AreaChart`) and candles (`CandleChart`) and
+owns the hover that goes with each. A host passes what `useLiveSeries` returns
+(`arr`, `dates`, `candles`) and the timeframe; it does not touch `useChartHover`
+or `ChartTooltip` itself. The portfolio's own charts are not price charts and do
+not take part: a simulated value has no open, high or low.
+
+- **One switch, one store.** `store/candlePreference.js` holds whether candles are
+  on; `hooks/useCandles` subscribes to it; `charts/CandleToggle` is the button,
+  the same one beside all three timeframe controls. Do not copy the value into a
+  component's state — a popup opening over the fund card has to change the card
+  behind it, and that only works because both read the store. It is deliberately
+  **not in the URL** (it is a way of looking, not a view of the data, and would
+  only clutter a Share Link), unlike `?networkClusters=`. `localStorage` access is
+  inside a `try` and a refused write still holds for the session, the same rule as
+  `portfolioStorage`. The button stays on a read-only portfolio's popup: it writes
+  nothing.
+- **A candle is not a row.** `utils/candles.js`'s module docstring states the model:
+  one span per timeframe (day for 1W/1M, week for 1Y, month for 5Y), coarse stored
+  rows covering their whole bucket, edge candles drawn with the days they actually
+  hold, and a gap — never a flat candle — wherever an open, high or low is missing.
+  Change the rules there and in the README's "Candles on the price charts" together.
+- **The line and the figures never change with the switch.** `arr`/`dates` are one
+  entry per row the API answered and everything that is not a candle reads only
+  those: the header return %, the line, its colour. `buildTooltip` measures a
+  candle's return since the start from the first *row's* close for the same reason.
+  `candles` comes from the same request as `arr`, so the switch costs no fetch.
+- **`CandleChart` and `AreaChart` are interchangeable in a slot**: same 360-unit
+  plot, same hover surface, no text inside the SVG. The chart draws candles at
+  `candleCentre(i, count)` and the hover finds them with `candleIndexAt` — both from
+  `utils/candles.js`, so they cannot disagree about which candle is where.
+
 ## MDX: two vocabularies, deliberately separate
 
 Both compile backend-authored source into real React components at runtime, which
@@ -294,7 +332,10 @@ round-trips Export back through it (issue #148). Issue #150 added
 `scheduleFields`: what a saved portfolio's money-flow schedule may be) and
 `store/portfolioLink.test.js` (`encodePortfolio` / `decodePortfolio`: a Share
 Link's payload versions, and what a payload with both schedules does) — the first
-tests the link module had.
+tests the link module had. Issue #152 added `utils/candles.test.js` (`toCandles`,
+`candleLabel` and where a candle sits), `utils/chartTooltip.test.js`
+(`buildTooltip`: what hovering a line, a candle and a gap says) and
+`store/candlePreference.test.js` (the one switch, including storage that throws).
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that
