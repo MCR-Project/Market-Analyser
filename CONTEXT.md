@@ -141,7 +141,7 @@ other one, never leave "Dividend Yield" to mean it by default
 
 **Portfolio Dividend Yield**:
 A portfolio metric (`metrics.dividendYield`): dividend income earned during a
-Run ÷ that Run's totalInvested. Computed over the simulation's own window,
+Run ÷ that Run's Paid In. Computed over the simulation's own window,
 not a fixed trailing twelve months.
 _Avoid_: Dividend Yield (bare — ambiguous with the measurement above)
 
@@ -157,7 +157,8 @@ why that word alone is never safe here
 
 **Portfolio**:
 A saved, named basket: tickers, weights, an amount, a rebalance method, and
-an optional Recurring Contribution schedule. Lives only in the browser
+an optional Recurring Contribution or Recurring Withdrawal schedule (never
+both). Lives only in the browser
 (`localStorage`, key `market-analyser.portfolios`) — there is no server-side
 portfolio and never will be: with only a Supabase service key and no
 sign-in, a server-side table would be one shared, world-editable list.
@@ -167,28 +168,64 @@ _Avoid_: Account
 One execution of a Portfolio (or a Benchmark, or a Share Link's payload)
 against a window, priced and scored by `POST /api/portfolio/simulate`.
 Non-durable — exists only in the response. A Portfolio produces a different
-Run every time its window, rate, or contribution schedule changes.
+Run every time its window, rate, or Recurring Contribution or Recurring
+Withdrawal changes.
 _Avoid_: Simulation (used loosely elsewhere in prose; "Run" is the noun for
 one concrete result)
 
 **Benchmark**:
 A ticker plotted alongside Portfolios for comparison (`?benchmark=`).
 Deliberately not a Portfolio: it's simulated as a basket of one, given the
-open portfolio's own amount and contribution schedule, and never touches the
-portfolio library.
+open portfolio's own amount and Money Flow (whichever schedule it has), and
+never touches the portfolio library.
 _Avoid_: Fund Index (reserved for the ETF-side benchmark series, above)
 
 **Recurring Contribution**:
 A schedule (`{amount, frequency}`) that pays money into a Portfolio's Run
 periodically, on the first row of each new period after the start. Off by
 default — an absent, null, or zero contribution simulates identically to a
-single lump sum.
-_Avoid_: bare "Contribution" — always say "recurring"
+single lump sum. A Portfolio has this or a Recurring Withdrawal, never both.
+_Avoid_: bare "Contribution" — always say "recurring"; Increment,
+Incrementation
+
+**Recurring Withdrawal**:
+A schedule (`{amount, frequency}`) that takes a fixed dollar amount out of a
+Portfolio's Run periodically, on the first row of each new period after the
+start — the same timing rule as a Recurring Contribution, with no way to
+start it later. Each withdrawal comes out of every holding (and any cash still
+waiting for a holding to list) in proportion to what each is worth at that
+moment, so it changes how much the Portfolio holds and leaves its drifted mix
+alone. When the Portfolio cannot cover a withdrawal it gives up whatever is
+left and pays nothing after that; the Run says when it ran out. Off by
+default. Not a sale of the Portfolio and not a Rebalance — money leaves the
+Portfolio rather than moving between its holdings.
+_Avoid_: Scheduled Withdrawal, Decumulation; bare "Withdrawal" when it could
+be read as a one-off
+
+**Money Flow**:
+The one choice a Portfolio makes about money after its opening amount: pay in
+on a schedule (a Recurring Contribution), draw out on a schedule (a Recurring
+Withdrawal), or neither — never both. It is what the editing control is called;
+the two schedules are the terms everything else uses.
+_Avoid_: Cash flow (a return-arithmetic word for every signed payment in a Run,
+the opening amount and the closing value included), bare "Schedule"
+
+**Paid In**:
+Every dollar that ever went into a Run: the opening amount plus every Recurring
+Contribution (API field `totalInvested`, labelled PAID IN in the UI). Never
+reduced by a Recurring Withdrawal — money taken out is its own figure,
+Withdrawn — so it only ever grows, and a Portfolio drawn on for longer than it
+was funded does not report a negative amount paid in. What a Run's Gain and
+Portfolio Dividend Yield are measured against.
+_Avoid_: Total Invested (that's the wire field name, not the glossary term), Net
+invested (it would let the figure go negative)
 
 **Gain**:
 The dollar amount of a Run's total gain attributable to one holding (API
-field `contribution`, labelled GAIN in the UI) — that holding's final value
-less every dollar put into it. Per-holding gains sum to the portfolio's own.
+field `contribution`, labelled GAIN in the UI) — that holding's final value,
+plus every dollar a Recurring Withdrawal took out of it, less every dollar put
+into it. Money spent is still money earned, so a withdrawal never shrinks a
+Gain. Per-holding gains sum to the portfolio's own.
 _Avoid_: Contribution (that's the wire field name, not the glossary term)
 
 **Share**:

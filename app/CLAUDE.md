@@ -286,10 +286,15 @@ stored choice first, then `prefers-color-scheme`, then the passed default.
 
 `npm test` runs Vitest over `src/**/*.test.js`, and the suite is small on
 purpose: **pure logic only**, plain `test()` functions over inline data, no DOM
-environment, no component or hook tests. The first (and so far only) file is
+environment, no component or hook tests. The first file is
 `store/portfolioBackup.test.js`, which exercises `planImport` — the function that
 decides what importing a Backup does — through its public interface and
-round-trips Export back through it (issue #148).
+round-trips Export back through it (issue #148). Issue #150 added
+`store/portfolioStorage.test.js` (`migratePortfolio`, `makePortfolio` and
+`scheduleFields`: what a saved portfolio's money-flow schedule may be) and
+`store/portfolioLink.test.js` (`encodePortfolio` / `decodePortfolio`: a Share
+Link's payload versions, and what a payload with both schedules does) — the first
+tests the link module had.
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that

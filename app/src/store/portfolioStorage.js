@@ -40,10 +40,18 @@ export const REBALANCE_FREQUENCIES = ['none', 'monthly', 'quarterly', 'yearly'];
  *  `contribution` at all, rather than one that is switched off. */
 export const CONTRIBUTION_FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
 
+/** Mirrors WITHDRAWAL_FREQUENCIES in backend/services/portfolio.py (#150).
+ *  The same three periods, kept as its own list for the reason the backend
+ *  does: two schedules that agree today are still two schedules. */
+export const WITHDRAWAL_FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
+
 /** What the amount starts at when somebody first turns contributions on,
  *  in USD. A round number that is obviously a placeholder to be changed,
  *  rather than one that looks like a considered choice. */
 export const DEFAULT_CONTRIBUTION = 100;
+
+/** The same, for a withdrawal (#150). */
+export const DEFAULT_WITHDRAWAL = 100;
 
 /**
  * How a read went, beyond the portfolios themselves:
@@ -110,10 +118,52 @@ function normaliseSource(raw) {
  *  alternative is guessing at a frequency and putting money in on dates
  *  nobody chose. */
 function normaliseContribution(raw) {
+  return normaliseSchedule(raw, CONTRIBUTION_FREQUENCIES);
+}
+
+/** An optional recurring withdrawal (#150), read by the same rule as a
+ *  contribution and for the same reason: one that cannot be read is no
+ *  schedule, never a guess at a frequency that would take money out on
+ *  dates nobody chose. */
+function normaliseWithdrawal(raw) {
+  return normaliseSchedule(raw, WITHDRAWAL_FREQUENCIES);
+}
+
+/** The one rule both schedules are read by, as the backend's
+ *  `_normalise_schedule` is: an object with a frequency this build has and a
+ *  positive amount, or nothing. Each kind passes its own frequencies, so a
+ *  frequency added to one is not silently accepted on the other. */
+function normaliseSchedule(raw, frequencies) {
   if (!raw || typeof raw !== 'object') return undefined;
-  if (!CONTRIBUTION_FREQUENCIES.includes(raw.frequency)) return undefined;
+  if (!frequencies.includes(raw.frequency)) return undefined;
   if (!Number.isFinite(raw.amount) || raw.amount <= 0) return undefined;
   return { amount: raw.amount, frequency: raw.frequency };
+}
+
+/** Whether a record, as it was written, carries a usable schedule of both
+ *  kinds. A portfolio pays in or draws out, never both (ADR 0002), so this
+ *  is a record no reader of the library can take at its word.
+ *
+ *  Exported because migration answers it by dropping both, which leaves
+ *  nothing behind to tell the two apart afterwards - and the Backup import
+ *  wants to *say* an entry had both, not import it quietly without a
+ *  schedule. Asked of the raw entry, before it is migrated. */
+export function hasBothSchedules(raw) {
+  if (!raw || typeof raw !== 'object') return false;
+  return Boolean(normaliseContribution(raw.contribution) && normaliseWithdrawal(raw.withdrawal));
+}
+
+/** The one money-flow schedule a portfolio may have, as `{ contribution,
+ *  withdrawal }` with at most one set. Both usable at once is a portfolio
+ *  nobody can have authored here - the library salvages what it can, and
+ *  preferring either would change the numbers of a portfolio whose owner
+ *  never chose to - so both are dropped, which is what any schedule that
+ *  cannot be read already means. */
+function normaliseMoneyFlow(rawContribution, rawWithdrawal) {
+  const contribution = normaliseContribution(rawContribution);
+  const withdrawal = normaliseWithdrawal(rawWithdrawal);
+  if (contribution && withdrawal) return { contribution: undefined, withdrawal: undefined };
+  return { contribution, withdrawal };
 }
 
 function normaliseHoldings(raw) {
@@ -124,6 +174,20 @@ function normaliseHoldings(raw) {
       ticker: h.ticker.trim().toUpperCase(),
       weight: Number.isFinite(h.weight) && h.weight >= 0 ? h.weight : 0,
     }));
+}
+
+/** The fields of a simulate request that carry a portfolio's money-flow
+ *  schedule (#67, #150): the one it has, and nothing at all when it has none.
+ *
+ *  Omitted rather than sent as null, so a portfolio that never had a schedule
+ *  keys the same request it always did and reuses the same cached run. Built
+ *  field by field from what the portfolio holds, so an unknown field kept in
+ *  the library never reaches the backend - and never both, whatever the
+ *  record says, because the backend refuses that with a 400. */
+export function scheduleFields(portfolio) {
+  if (portfolio?.contribution) return { contribution: portfolio.contribution };
+  if (portfolio?.withdrawal) return { withdrawal: portfolio.withdrawal };
+  return {};
 }
 
 /**
@@ -155,8 +219,9 @@ export function migratePortfolio(raw) {
     rebalance: REBALANCE_FREQUENCIES.includes(raw.rebalance) ? raw.rebalance : 'none',
     // Added after version 1 was already in people's browsers, and
     // optional, so an older record simply has none - which is exactly
-    // what "off by default" has to look like on read.
-    contribution: normaliseContribution(raw.contribution),
+    // what "off by default" has to look like on read. A withdrawal (#150)
+    // is the same, and at most one of the two survives.
+    ...normaliseMoneyFlow(raw.contribution, raw.withdrawal),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now(),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now(),
     source: normaliseSource(raw.source),
@@ -246,7 +311,7 @@ export function makePortfolio(seed = {}) {
     value: Number.isFinite(seed.value) && seed.value > 0 ? seed.value : DEFAULT_VALUE,
     holdings: normaliseHoldings(seed.holdings),
     rebalance: REBALANCE_FREQUENCIES.includes(seed.rebalance) ? seed.rebalance : 'none',
-    contribution: normaliseContribution(seed.contribution),
+    ...normaliseMoneyFlow(seed.contribution, seed.withdrawal),
     createdAt: timestamp,
     updatedAt: timestamp,
     source: normaliseSource(seed.source),

@@ -52,6 +52,7 @@ from portfolio_metrics.official_metrics.total_invested import TotalInvestedMetri
 from portfolio_metrics.official_metrics.total_return import TotalReturnMetric
 from portfolio_metrics.official_metrics.tracked_weight_coverage import TrackedWeightCoverageMetric
 from portfolio_metrics.official_metrics.volatility import VolatilityMetric
+from portfolio_metrics.official_metrics.withdrawn import WithdrawnMetric
 
 OFFICIAL_METRICS = [
     # The portfolio family — time-weighted, today's default five tiles.
@@ -71,9 +72,10 @@ OFFICIAL_METRICS = [
     SharpeMetric(),
     SortinoMetric(),
     # The account family — money-weighted, shown once something is
-    # actually contributed.
+    # actually contributed or withdrawn (issue #150).
     TotalInvestedMetric(),
     ContributedMetric(),
+    WithdrawnMetric(),
     GainMetric(),
     MoneyWeightedReturnMetric(),
     # The dividend family — prose, never tiles (issue #68).

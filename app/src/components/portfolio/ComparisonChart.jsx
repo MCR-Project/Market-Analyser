@@ -101,8 +101,8 @@ function buildSeries(runs, mode) {
     const readings = new Array(dates.length).fill(null);
 
     if (simulation) {
-      // `unitValue` is null unless contributions moved the two apart, so
-      // an ordinary run reads exactly the series it always did.
+      // `unitValue` is null unless money paid in or taken out moved the two
+      // apart, so an ordinary run reads exactly the series it always did.
       const performance = simulation.unitValue || simulation.total;
       const base = performance[0] || 1;
       const own = new Map();

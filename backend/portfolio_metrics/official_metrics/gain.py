@@ -6,8 +6,11 @@ from portfolio_metrics.base import RunMetric
 class GainMetric(RunMetric):
     id = "gain"
     name = "Gain"
-    description = "What the portfolio actually made — final value less everything paid into it."
+    description = (
+        "What the portfolio actually made — final value, plus anything taken out, "
+        "less everything paid into it."
+    )
     family = "account"
     format = "currency_signed"
-    formula = "finalValue − totalInvested"
+    formula = "finalValue + withdrawn − totalInvested"
     null_rule = "Never null."

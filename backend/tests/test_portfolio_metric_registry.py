@@ -51,7 +51,7 @@ client = TestClient(app, raise_server_exceptions=False)
 EXPECTED_IDS = [
     "finalValue", "totalReturn", "cagr", "volatility", "maxDrawdown",
     "timeUnderWater", "shareUnderWater", "painIndex", "calmar", "sharpe", "sortino",
-    "contributed", "totalInvested", "gain", "moneyWeightedReturn",
+    "contributed", "withdrawn", "totalInvested", "gain", "moneyWeightedReturn",
     "dividendIncome", "dividendYield", "incomeUnknownFor",
     "diversificationRatio", "top5VarianceShare", "trackedWeightCoverage",
     "averageCorrelation", "effectiveBets", "riskShare",
@@ -251,6 +251,32 @@ class WorkedExampleEndpointTests(unittest.TestCase):
         self.assertIn("run", body)
         self.assertIsNotNone(body["value"])
         self.assertEqual(body["value"], body["run"]["metrics"]["finalValue"])
+
+    def test_the_withdrawn_example_actually_takes_money_out(self):
+        """The default example portfolio pays money *in* (an account-family
+        example is only interesting once something has moved), and a
+        portfolio cannot do both - so Withdrawn names its own, and the
+        example runner has to pass its `withdrawal` through. An example that
+        quietly dropped it would document a metric with a figure of zero
+        (issue #150)."""
+        closes = _closes(
+            {"SPY": [400.0, 410.0, 420.0], "AGG": [100.0, 101.0, 102.0]},
+            ["2021-01-01", "2021-06-01", "2021-12-01"],
+        )
+        with (
+            patch("services.portfolio.get_closes", return_value=closes),
+            patch("services.portfolio.get_dividends", return_value={}),
+            patch("services.portfolio.tracked_tickers", return_value=set()),
+            patch("services.portfolio.get_risk_free_rate", return_value=None),
+        ):
+            resp = client.get("/api/portfolio-metric-docs/withdrawn/example")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIsNotNone(body["portfolio"].get("withdrawal"))
+        self.assertIsNone(body["portfolio"].get("contribution"))
+        self.assertGreater(body["value"], 0)
+        self.assertEqual(body["value"], body["run"]["metrics"]["withdrawn"])
 
     def test_a_null_value_in_the_example_carries_its_reason(self):
         closes = _closes({"SPY": [400.0], "AGG": [100.0]}, ["2021-01-01"])

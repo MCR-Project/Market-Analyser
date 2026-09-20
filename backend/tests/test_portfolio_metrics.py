@@ -624,6 +624,10 @@ class MetricsRouteTests(unittest.TestCase):
             # on every run, so a caller reads the same shape whether or not
             # anything was ever paid in.
             "contributed", "totalInvested", "gain", "moneyWeightedReturn",
+            # And money taken out (issue #150), likewise present on every
+            # run: zero and null when there is no withdrawal schedule, so a
+            # caller reads one shape either way.
+            "withdrawn", "depletedOn",
             # What was paid out rather than what the price did (issue #68),
             # likewise present whether or not anything pays.
             "dividendIncome", "dividendYield", "incomeUnknownFor",

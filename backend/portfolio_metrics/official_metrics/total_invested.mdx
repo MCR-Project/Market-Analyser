@@ -14,7 +14,10 @@ what went in — and their difference is Gain.
 
 <Formula tex={String.raw`\text{totalInvested} = \text{startValue} + \text{contributed}`} />
 
-Withdrawals are not modelled, so this only ever grows over the window.
+A withdrawal never reduces it: money taken out is reported on its own as
+Withdrawn, so this only ever grows over the window. Netting the two would
+let Paid In go negative for a portfolio drawn on for longer than it was
+funded, and "every dollar that ever went in" would stop being true.
 
 <WorkedExample />
 

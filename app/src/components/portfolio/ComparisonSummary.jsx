@@ -9,12 +9,17 @@
  * dropped — a missing row would read as "not compared" when what happened
  * was "could not be priced".
  *
- * A money-weighted column appears as soon as any line is funded by
- * contributions (#67), and only then. RETURN and CAGR are always
+ * A money-weighted column appears as soon as any line is paid into or
+ * drawn on (#67, #150), and only then. RETURN and CAGR are always
  * time-weighted — they describe the holdings, not the account — which is
  * the difference the note under the table exists to name. With every line
  * funded by a single lump sum the two are the same number, and a second
  * column of it would invent a distinction.
+ *
+ * A line that ran out of money is flagged beside its name (#150). Nothing
+ * else in its row can say so: the time-weighted figures are read off a value
+ * a withdrawal does not move, so a line drawn to nothing on flat prices
+ * reads as a return of zero.
  *
  * A cell whose metric is null carries `metrics.reasons`' explanation
  * (issue #99) via `ReasonedValue`, the same tooltip-plus-accessible-text
@@ -57,7 +62,10 @@ function tone(value) {
 }
 
 export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }) {
-  const funded = runs.some(run => (run.simulation?.metrics?.contributed || 0) > 0);
+  const funded = runs.some(run => (
+    (run.simulation?.metrics?.contributed || 0) > 0 || (run.simulation?.metrics?.withdrawn || 0) > 0
+  ));
+  const drawnOn = runs.some(run => (run.simulation?.metrics?.withdrawn || 0) > 0);
 
   return (
     <>
@@ -87,6 +95,15 @@ export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }
                 <td className="px-3 py-2.5">
                   <span className="text-[13px] font-semibold text-[var(--fg)]">{run.label}</span>
                   {run.kind === 'benchmark' && <span className="eyebrow ml-2">BENCHMARK</span>}
+                  {metrics?.depletedOn && (
+                    <span
+                      className="eyebrow ml-2"
+                      style={{ color: 'var(--warning)' }}
+                      title={`A withdrawal took what was left on ${metrics.depletedOn}, and nothing came out after it.`}
+                    >
+                      RAN OUT {metrics.depletedOn}
+                    </span>
+                  )}
                 </td>
                 {metrics ? (
                   <>
@@ -129,11 +146,12 @@ export const ComparisonSummary = memo(function ComparisonSummary({ runs, stale }
       <p className="text-[12px] text-[var(--fg-2)] leading-relaxed m-0 -mt-4 mb-6">
         <strong className="font-bold text-[var(--fg-1)]">Return</strong> and{' '}
         <strong className="font-bold text-[var(--fg-1)]">CAGR</strong> are
-        time-weighted: contributions are taken out before they are measured,
-        so they describe the holdings rather than the account growing.{' '}
+        time-weighted: {drawnOn ? 'money paid in or taken out is' : 'contributions are'} set
+        aside before they are measured, so they describe the holdings rather
+        than the account growing or shrinking.{' '}
         <strong className="font-bold text-[var(--fg-1)]">Money-weighted</strong>{' '}
         is the rate the money itself earned, counting when each payment
-        arrived.
+        arrived{drawnOn ? ' or left' : ''}.
       </p>
     )}
     </>

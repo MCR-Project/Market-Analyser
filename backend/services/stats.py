@@ -602,24 +602,29 @@ def sortino_ratio(values: list[float], dates: list[str], rate: float) -> dict:
 
 
 def unit_values(values: list[float], inflows: list[float]) -> list[float]:
-    """The total with the deposits taken back out of it.
+    """The total with the deposits taken back out of it - and the
+    withdrawals put back.
 
     A contribution is not a gain. Paying $100 into a $1,000 portfolio
     takes the total to $1,100 on a day the market did nothing, and any
     metric read straight off the total records that as a 10% day - which
-    then lands in the volatility, in the drawdown, and in the return.
+    then lands in the volatility, in the drawdown, and in the return. A
+    withdrawal is not a loss, for the same reason the other way round:
+    taking $100 out is a 10% fall on a day the market did nothing.
 
     So each step is measured against the money that was actually working
     before it: the row's total less whatever arrived that day, over the
-    previous row's total. Chaining those steps gives a series that starts
+    previous row's total. `inflows` is signed - money leaving is negative,
+    which puts it back - and this is arithmetic on the signed figure, so
+    nothing here knows which direction a row's flow went. Chaining those steps gives a series that starts
     where the series started and only ever moves because prices did - the
     standard time-weighted construction, in the one place every return
     and risk figure in this module should be read from when its caller
     has any inflows to account for.
 
-    Returned as `values` itself when nothing was ever paid in, so a run
-    without contributions is not merely close to the old result but the
-    same object.
+    Returned as `values` itself when nothing ever crossed the portfolio's
+    edge, so a run without contributions or withdrawals is not merely close
+    to the old result but the same object.
     """
     if not any(inflows):
         return values

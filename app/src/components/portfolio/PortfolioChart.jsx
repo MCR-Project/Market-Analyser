@@ -36,6 +36,14 @@
  *    end. It is absent when there is nothing to say: with a single lump
  *    sum it would be a horizontal rule across the chart.
  *
+ *  - **Money taken out is read, not drawn** (#150). A portfolio drawn on
+ *    has no staircase: what was paid in never rises, so the line would be
+ *    the same horizontal rule, and net of withdrawals it would fall below
+ *    zero on a long drawdown and leave the plot. The stack itself steps
+ *    down as money leaves, which is the picture; the tooltip and the legend
+ *    carry what was taken out so far, and read the gain as the total plus
+ *    that, less what was paid in - money spent was still earned.
+ *
  * The geometry matches useChartHover's own constants, which is what makes
  * the crosshair land on the date the tooltip is describing.
  */
@@ -181,6 +189,10 @@ export const PortfolioChart = memo(function PortfolioChart({
   // single lump sum the line is a horizontal rule saying nothing.
   const invested = simulation.invested;
   const showInvested = !!invested && invested[invested.length - 1] > invested[0];
+  // Running total taken out (#150): null with no withdrawal schedule, and
+  // worth reading only once something has actually come out.
+  const withdrawn = simulation.withdrawn;
+  const showWithdrawn = !!withdrawn && withdrawn[withdrawn.length - 1] > 0;
 
   const { paths, ceiling, investedPath } = useMemo(() => {
     const dates = simulation.dates;
@@ -357,7 +369,8 @@ export const PortfolioChart = memo(function PortfolioChart({
             bands={bands}
             at={at}
             total={totalAt}
-            paidIn={showInvested ? invested[at] : null}
+            paidIn={showInvested || showWithdrawn ? invested[at] : null}
+            withdrawn={showWithdrawn ? withdrawn[at] : null}
           />
         )}
 
@@ -383,6 +396,14 @@ export const PortfolioChart = memo(function PortfolioChart({
             />
             <span className="font-[var(--font-mono)] font-bold text-[var(--fg)]">Paid in</span>
             <span className="text-[var(--fg-2)]">{CURRENCY.format(invested[at])}</span>
+          </li>
+        )}
+        {/* No swatch: it is not a series on the chart, and one would say it
+            was. What has come out by the hovered date, in words. */}
+        {showWithdrawn && (
+          <li className="flex items-center gap-1.5 text-[11.5px]">
+            <span className="font-[var(--font-mono)] font-bold text-[var(--fg)]">Withdrawn</span>
+            <span className="text-[var(--fg-2)]">{CURRENCY.format(withdrawn[at])}</span>
           </li>
         )}
         {bands.map(band => {
@@ -411,7 +432,11 @@ export const PortfolioChart = memo(function PortfolioChart({
  * the question a stacked chart raises is how the total was divided, not
  * what it was.
  */
-function StackedTooltip({ tooltip, bands, at, total, paidIn }) {
+function StackedTooltip({ tooltip, bands, at, total, paidIn, withdrawn }) {
+  // What it made: worth now, plus whatever was taken out, less what went
+  // in. Money a withdrawal took was still earned (#150), so reading the gain
+  // straight off the total would count every dollar spent as a loss.
+  const made = paidIn != null ? total + (withdrawn ?? 0) - paidIn : 0;
   const position = tooltip.alignRight
     ? { right: `${Math.max(0, 98 - tooltip.pctX)}%` }
     : { left: `${Math.max(0, tooltip.pctX - 2)}%` };
@@ -438,8 +463,9 @@ function StackedTooltip({ tooltip, bands, at, total, paidIn }) {
       {paidIn != null && (
         <div className="font-[var(--font-mono)] text-[10.5px] text-[var(--fg-2)] mt-0.5">
           {CURRENCY.format(paidIn)} paid in ·{' '}
-          <span style={{ color: total - paidIn >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-            {total - paidIn >= 0 ? '+' : '−'}{CURRENCY.format(Math.abs(total - paidIn))}
+          {withdrawn != null && <>{CURRENCY.format(withdrawn)} withdrawn · </>}
+          <span style={{ color: made >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            {made >= 0 ? '+' : '−'}{CURRENCY.format(Math.abs(made))}
           </span>
         </div>
       )}

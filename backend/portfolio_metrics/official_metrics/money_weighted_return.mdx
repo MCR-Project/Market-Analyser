@@ -14,9 +14,10 @@ taken into account, which Total Return (deliberately) does not.
 ## How it is computed
 
 Every cash movement is signed from the holder's point of view — negative
-going in, one positive flow at the end for what it all became — and this
-is the single annual rate that discounts every one of them, from the day
-it happened, to zero:
+going in, positive coming out: each recurring withdrawal on its own date,
+and one last flow at the end for what it all became — and this is the
+single annual rate that discounts every one of them, from the day it
+happened, to zero:
 
 <Formula tex={String.raw`\sum_{i} \frac{\text{flow}_i}{(1+r)^{\text{years}_i}} = 0`} />
 
@@ -30,8 +31,15 @@ different questions on the same calendar.
 
 This is the account's own return, comparable to what an alternative use
 of that exact same money, on the exact same dates, would have needed to
-earn to match it. With no contributions it equals CAGR exactly, by
-construction — the two only diverge once money keeps arriving.
+earn to match it. With nothing paid in or taken out after the opening
+amount it equals CAGR exactly, by construction — the two only diverge once
+money keeps arriving or leaving. A
+portfolio that is drawn on can report a healthy rate over a holding that
+fell: a withdrawal taken at the top came out before the fall.
+
+A portfolio pays in or draws out, never both, and that is what keeps this
+rate unambiguous: with the cash flows changing sign only once there is
+exactly one rate that solves it.
 
 ## Caveats
 

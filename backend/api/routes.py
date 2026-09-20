@@ -314,6 +314,18 @@ class ContributionIn(BaseModel):
     frequency: str | None = Field(None, description="monthly, quarterly, yearly")
 
 
+class WithdrawalIn(BaseModel):
+    """Money taken out on a schedule - the mirror of `ContributionIn`.
+
+    Optional on the request and off by default, and the same three spellings
+    of off apply: absent, null, or an amount of zero (issue #150). A request
+    may carry a contribution or a withdrawal but not both (ADR 0002).
+    """
+
+    amount: float = Field(0, description="Taken out each time, in USD; 0 is off")
+    frequency: str | None = Field(None, description="monthly, quarterly, yearly")
+
+
 class PortfolioIn(BaseModel):
     """A whole portfolio, sent with every request.
 
@@ -332,6 +344,13 @@ class PortfolioIn(BaseModel):
     rebalance: str = Field("none", description="none, monthly, quarterly, yearly")
     contribution: ContributionIn | None = Field(
         None, description="Optional recurring contribution; omit for a single lump sum"
+    )
+    withdrawal: WithdrawalIn | None = Field(
+        None,
+        description=(
+            "Optional recurring withdrawal (issue #150); omit for none. "
+            "Cannot be combined with a contribution."
+        ),
     )
     rate: float | None = Field(
         None,
@@ -379,6 +398,16 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
     return, CAGR, volatility and drawdown describe the portfolio and are
     time-weighted, while `moneyWeightedReturn` describes the account.
 
+    An optional `withdrawal` of `{amount, frequency}` is the mirror image
+    (issue #150): a fixed amount taken out on the first row of every new
+    period, from every holding in proportion to what it is then worth. A
+    portfolio that cannot cover one takes what is left and nothing after,
+    and `metrics.depletedOn` names the row it ran out on (null means it did
+    not - never "unknown"). `metrics.withdrawn` and the running `withdrawn`
+    series are what was actually taken, and `metrics.gain` adds it back. A
+    request may carry a contribution or a withdrawal, never both: that is a
+    400.
+
     See services/portfolio.py for the model and for what every number
     means: buy and hold unless a rebalance frequency is named, weights
     normalised, an allocation held as cash until its holding lists, and
@@ -407,6 +436,9 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
                 portfolio.contribution.model_dump() if portfolio.contribution else None
             ),
             rate=portfolio.rate,
+            withdrawal=(
+                portfolio.withdrawal.model_dump() if portfolio.withdrawal else None
+            ),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -416,7 +448,8 @@ def post_portfolio_simulate(portfolio: PortfolioIn):
 def post_portfolio_risk(portfolio: PortfolioIn):
     """How independently a basket's own holdings actually move (issue
     #113) - the same body `POST /api/portfolio/simulate` takes (`value`,
-    `rebalance`, `contribution` and `rate` are accepted for shape parity
+    `rebalance`, `contribution`, `withdrawal` and `rate` are accepted for
+    shape parity
     but unused: this question is about the basket's price history, not
     about a value simulated over it), read from its own endpoint rather
     than folded into every run.

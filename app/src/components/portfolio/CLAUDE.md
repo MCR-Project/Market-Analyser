@@ -84,9 +84,23 @@ working with what it has and the page says it is not being saved.
   owner's own choice but may have been edited or passed on. It salvages *per
   entry* through `migratePortfolio`, unchanged, then holds each result to the
   limits migration deliberately does not enforce — 50 holdings
-  (`MAX_LINK_HOLDINGS`), no ticker twice, every ticker matching `TICKER_PATTERN` —
+  (`MAX_LINK_HOLDINGS`), no ticker twice, every ticker matching `TICKER_PATTERN`,
+  and not both a recurring contribution and a recurring withdrawal (#150) —
   so a portfolio never imports happily and then fails to simulate. A failing entry
-  is skipped and *named with its reason*, never quietly trimmed. Only a file that
+  is skipped and *named with its reason*, never quietly trimmed.
+
+**A record with both schedules, in each reader (issue #150, ADR 0002).** A
+portfolio pays in or draws out, never both, and the three readers answer a record
+that says otherwise the way each already answers anything it cannot take at its
+word: `migratePortfolio` drops *both* (a schedule that cannot be read is no
+schedule, and preferring either would change the numbers of a portfolio whose
+owner never chose to), `decodePortfolio` refuses the whole payload, and
+`planImport` skips the entry with a named reason. Migration erases the evidence,
+so `planImport` asks `hasBothSchedules` of the entry *as the file wrote it*,
+before migrating it — otherwise it would import quietly as a lump sum.
+`scheduleFields(portfolio)` is the one place a request's schedule fields are built:
+the one the portfolio has, nothing when it has none (never a null, so a portfolio
+that never had a schedule keys the same cached request it always did). Only a file that
   is not a Backup, is over 2 MB (checked before it is read), or has nothing
   importable in it is refused whole, and then nothing is written.
 
@@ -134,10 +148,15 @@ ordinary saved portfolios as they are.
   into anything, and the simulation request is built field by field, so an unknown
   field kept in the library never reaches the backend.
 
-The link payload carries **its own version** (`LINK_VERSION`, currently 2),
+The link payload carries **its own version** (`LINK_VERSION`, currently 3),
 independent of `SCHEMA_VERSION` — it is a wire format other people's browsers
-have to read, so it changes for its own reasons. Version 1 is still read as a
-portfolio with no contribution schedule. Adding a field means bumping
+have to read, so it changes for its own reasons. Version 3 added the recurring
+withdrawal (`w`), as its own key rather than a negative contribution: a build
+that predates it reads a contribution at or below zero as "no schedule" and would
+show a withdrawing portfolio as a lump sum, where it refuses a version it does not
+know. Version 1 is still read as a portfolio with no contribution schedule, and
+version 2 as one with no withdrawal; a payload carrying both `c` and `w` is
+refused whole. Adding a field means bumping
 `LINK_VERSION`, adding it to `READABLE_VERSIONS` handling, and keeping the old
 shape readable.
 
@@ -159,7 +178,14 @@ cannot use them, when the answer is that this portfolio is not theirs yet.
 ## Editing: applied vs immediate
 
 The amount and the rebalancing method apply as soon as they are chosen — each is
-a single decision, made once.
+a single decision, made once. So does the **Money flow** (issue #150): one
+control — None, Pay in or Withdraw, then a frequency and an amount — rather than a
+control each, because a portfolio does one or the other (ADR 0002) and with two the
+state "both" would need explaining. Every change writes *both* keys at once, the one
+it sets and the one it clears (`update` spreads its changes, so `undefined` clears),
+which is what keeps the library from ever holding two. Switching direction keeps
+the amount and frequency; turning it on from None fills in a placeholder amount and
+monthly, the way the old frequency-led control did. The amount commits on blur.
 
 **Weights are not.** They are worked out by comparison across the whole table
 ("this one up, that one down, does the total still make sense"), so they are
@@ -220,9 +246,11 @@ shape fits one of those six formats.
   `THE PORTFOLIO · TIME-WEIGHTED, ...` / `THE ACCOUNT · MONEY-WEIGHTED, ...`
   text on screen is that data, not a hardcoded string.
 - **The account row's visibility is the one thing still decided here,
-  not by the manifest**: it only renders once `metrics.contributed > 0`
-  (issue #67, unchanged) — a fact about *this run*, not something a
-  metric declares about itself.
+  not by the manifest**: it only renders once `metrics.contributed > 0` or
+  `metrics.withdrawn > 0` (issues #67 and #150) — a fact about *this run*, not
+  something a metric declares about itself. So is which of the Contributed and
+  Withdrawn tiles is worth drawing: a portfolio does one or the other, so the
+  unused one is a permanent zero and is left out.
 - **The dividend family is never a tile**, on purpose (issue #68): its
   three entries (`dividendIncome`/`dividendYield`/`incomeUnknownFor`)
   declare `tile: false`, so `usePortfolioMetrics`'s `tileMetrics` never
@@ -269,9 +297,9 @@ what lets a benchmark's return, CAGR, volatility and drawdown sit next to a
 portfolio's in one table without any of them meaning something slightly different.
 
 - A **benchmark is deliberately not a portfolio**: a ticker that lives in the URL,
-  simulated as a basket of one, given the open portfolio's own amount and
-  contribution schedule so the comparison is like with like, and never written to
-  the library.
+  simulated as a basket of one, given the open portfolio's own amount and schedule
+  (a contribution or a withdrawal, whichever it has, issue #150) so the comparison
+  is like with like, and never written to the library.
 - **Portfolio ids only mean something in the browser that minted them**, so a
   shared comparison link shows the ids it can find and drops the rest rather than
   erroring — and `compare` is deliberately excluded from what a share link carries.
@@ -300,6 +328,12 @@ total at every date. Four decisions:
 - **Money paid in is a line, not a band.** A funded portfolio climbs whether or not
   anything went up; the paid-in staircase over the stack is what makes the gap to
   the top read as the gain.
+- **Money taken out is read, not drawn** (issue #150). A portfolio drawn on has no
+  staircase — what was paid in never rises — and net of withdrawals the line would
+  fall below zero on a long drawdown and leave the plot. The stack steps down as
+  money leaves, which is the picture; the tooltip and legend carry the running
+  `withdrawn` figure, and the tooltip reads the gain as
+  `total + withdrawn − paidIn`, because money spent was still earned.
 
 `ComparisonChart` defaults to **percent**, and has to: a $1,000 portfolio beside a
 $100,000 one is a flat line under a mountain in dollars, and the flat one is not
@@ -320,12 +354,13 @@ vanished while its values still appeared under the cursor.
   `HoldingsTable`, because the panel above now has contributions in the other
   sense (money paid in on a schedule). Two columns inches apart called the same
   word and meaning opposite things is worse than a label differing from its field.
-- **Two families of number, and the split is the point** once contributions are
-  on. Total return, CAGR, volatility and max drawdown are time-weighted and
-  describe *the portfolio*; paid in, contributed, gain and money-weighted return
-  describe *the account*. `PortfolioSummary` splits into two labelled rows and
-  `ComparisonSummary` grows a money-weighted column, only when some line is
-  actually funded that way. With no contributions the two agree exactly.
+- **Two families of number, and the split is the point** once money is paid in
+  or taken out. Total return, CAGR, volatility and max drawdown are time-weighted
+  and describe *the portfolio*; paid in, contributed (or withdrawn), gain and
+  money-weighted return describe *the account*. `PortfolioSummary` splits into two
+  labelled rows and `ComparisonSummary` grows a money-weighted column, only when
+  some line is actually paid into or drawn on. With nothing beyond the opening
+  amount the two agree exactly.
 - **Dividend income is reported, never added.** It is already inside every value
   through the adjusted closes, so the UI says why the two do not sum rather than
   leaving a reader to wonder.

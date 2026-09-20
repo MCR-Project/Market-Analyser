@@ -27,17 +27,24 @@
  * why (`metrics.reasons`, issue #99), the dash carries that reason as a
  * tooltip and as real accessible text.
  *
- * **Once money keeps arriving there are two questions, and the summary
- * splits into two rows to stop them being read as one** (#67). The
- * account family's row (today: Paid In, Contributed, Gain, Money-
- * Weighted Return) only ever appears once something was actually
- * contributed — with a single lump sum the two families agree exactly,
- * and printing the second row would imply a distinction that is not
- * there. That gate is the one thing about family visibility this
- * component still decides for itself, rather than the manifest: which
- * families exist and what they are called is declared data, but "the
- * account row is pointless until there is an account to speak of" is a
- * fact about *this run*, not about the registry.
+ * **Once money keeps arriving - or leaving - there are two questions, and
+ * the summary splits into two rows to stop them being read as one** (#67,
+ * #150). The account family's row (today: Paid In, Contributed or
+ * Withdrawn, Gain, Money-Weighted Return) only ever appears once something
+ * was actually paid in or taken out — with a single lump sum the two
+ * families agree exactly, and printing the second row would imply a
+ * distinction that is not there. That gate is the one thing about family
+ * visibility this component still decides for itself, rather than the
+ * manifest: which families exist and what they are called is declared
+ * data, but "the account row is pointless until there is an account to
+ * speak of" is a fact about *this run*, not about the registry. So is
+ * which of Contributed and Withdrawn is worth a tile: a portfolio pays in
+ * or draws out, never both, so the other one is a permanent zero.
+ *
+ * **A portfolio that ran out of money says so in a sentence** (#150).
+ * Nothing in the two rows can: the time-weighted figures are read off a
+ * value a withdrawal does not move, so a portfolio drawn to nothing on flat
+ * prices reports a return of zero.
  *
  * **Dividend income is a sentence, not a tile** (#68), unchanged by this
  * issue: `dividendIncome`/`dividendYield`/`incomeUnknownFor` are full
@@ -221,9 +228,31 @@ function DividendNote({ metrics }) {
   );
 }
 
+/**
+ * When the money ran out, in plain words (#150). Absent for a portfolio it
+ * did not run out of - `depletedOn` is null then, meaning "it lasted", not
+ * "unknown" - so nothing is drawn for the ordinary case.
+ */
+function DepletedNote({ date }) {
+  return (
+    <p
+      role="status"
+      className="text-[12px] leading-relaxed m-0 mx-5 mb-4 px-3 py-2 rounded-[var(--radius-md)] border"
+      style={{ background: 'var(--warning-soft)', borderColor: 'var(--warning-ring)', color: 'var(--fg-1)' }}
+    >
+      <strong className="font-bold">The money ran out on {date}.</strong>{' '}
+      That withdrawal took what was left, and nothing came out after it. The
+      return figures above describe what a dollar left in the portfolio
+      earned, so they do not show that the money is gone.
+    </p>
+  );
+}
+
 export const PortfolioSummary = memo(function PortfolioSummary({ metrics, stale, portfolioMetrics }) {
   const { tileMetrics, families, activeIds } = portfolioMetrics;
-  const funded = (metrics.contributed || 0) > 0;
+  const paidIn = (metrics.contributed || 0) > 0;
+  const drawnOn = (metrics.withdrawn || 0) > 0;
+  const funded = paidIn || drawnOn;
 
   const activeTiles = tileMetrics.filter(m => activeIds.includes(m.id));
   const byFamily = (key) => activeTiles.filter(m => m.family === key);
@@ -233,7 +262,11 @@ export const PortfolioSummary = memo(function PortfolioSummary({ metrics, stale,
   // rather than assumed, so a reordered manifest still renders its two
   // rows correctly.
   const portfolioTiles = byFamily('portfolio');
-  const accountTiles = byFamily('account');
+  // A portfolio pays in or draws out, never both (ADR 0002), so whichever
+  // of the two it does not do is a tile that can only say zero.
+  const accountTiles = byFamily('account').filter(metric => (
+    metric.id === 'contributed' ? !drawnOn : metric.id === 'withdrawn' ? drawnOn : true
+  ));
   const showAccountRow = funded && accountTiles.length > 0;
 
   return (
@@ -255,6 +288,8 @@ export const PortfolioSummary = memo(function PortfolioSummary({ metrics, stale,
           </div>
         </>
       )}
+
+      {metrics.depletedOn && <DepletedNote date={metrics.depletedOn} />}
 
       <DividendNote metrics={metrics} />
 
