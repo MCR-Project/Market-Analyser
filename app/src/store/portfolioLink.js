@@ -77,8 +77,9 @@ const MAX_PAYLOAD = 8192;
 
 /** What a ticker can look like: the symbols yfinance and the tracked
  *  universe actually use (BRK.B, RDS-A), and nothing that could be
- *  mistaken for a path, a query or a script. */
-const TICKER_PATTERN = /^[A-Z0-9][A-Z0-9.-]{0,11}$/;
+ *  mistaken for a path, a query or a script. Exported because a Backup
+ *  (portfolioBackup.js, issue #148) is held to the same rule. */
+export const TICKER_PATTERN = /^[A-Z0-9][A-Z0-9.-]{0,11}$/;
 
 /** An amount, not a number: above this it is somebody probing the parser
  *  rather than simulating a portfolio, and the chart would be unreadable

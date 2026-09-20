@@ -206,6 +206,16 @@ copy" is what turns it into a real, independent Portfolio.
 _Avoid_: Shared Portfolio — the link doesn't hold a portfolio, it holds the
 payload to reconstruct a Run
 
+**Backup**:
+A JSON file holding one Portfolio or many, with everything each one has —
+identity and dates included — so they can leave a browser (**Export**) and be
+added to a library elsewhere (**Import**). It is the owner's own copy, not a
+preview for somebody else: unlike a Share Link it carries no view state (window,
+benchmark) and it arrives as ordinary saved Portfolios, not read-only. Importing
+only ever adds; it never replaces or deletes a Portfolio already saved.
+_Avoid_: Restore (it suggests putting back over what is there, which Import never
+does), Share Link (a different thing — a definition for someone else to look at)
+
 **Window**:
 The stretch of history a view is computed over — set via `?window=` (a
 preset like `1y`, or an explicit `start`/`end`) for a portfolio Run, or via
