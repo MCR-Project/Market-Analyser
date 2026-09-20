@@ -7,8 +7,11 @@
  * Props: data (number[]), pct (number, period return %), hoverIdx, onMouseMove/Leave, gradientId, height (px).
  */
 import { memo, useMemo } from 'react';
+import { PLOT_PAD, PLOT_WIDTH } from '../../utils/candles';
 
-const W = 360, PAD = 4;
+// The plot CandleChart and the hover share - one definition, so the line and
+// the candles can never be drawn on different grids.
+const W = PLOT_WIDTH, PAD = PLOT_PAD;
 
 export const AreaChart = memo(function AreaChart({ data, pct = 0, hoverIdx, onMouseMove, onMouseLeave, gradientId = 'g0', height = 140 }) {
   const H = height;

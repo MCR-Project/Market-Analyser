@@ -5,7 +5,7 @@
  * Deliberately not StockPopup reused: StockPopup's right-hand pane needs an
  * ETF's correlation matrix and full constituent list, neither of which a
  * portfolio Holding has (it may not belong to any ETF at all — issue #137).
- * This is the same timeframe-tabs + AreaChart pattern as StockPopup's own
+ * This is the same timeframe-tabs + PriceChart pattern as StockPopup's own
  * left pane, kept in its own component rather than sharing one, so this
  * component never has to fake ETF context and StockPopup is never at risk
  * of a regression from a change made here.
@@ -17,10 +17,9 @@
  */
 import { memo, useState } from 'react';
 import { useLiveSeries } from '../../hooks/useLiveSeries';
-import { useChartHover } from '../../hooks/useChartHover';
 import { useFetch } from '../../hooks/useFetch';
-import { AreaChart } from '../charts/AreaChart';
-import { ChartTooltip } from '../charts/ChartTooltip';
+import { PriceChart } from '../charts/PriceChart';
+import { CandleToggle } from '../charts/CandleToggle';
 import { Logo } from '../ui/Logo';
 import { Loading } from '../ui/Loading';
 import { Overlay } from '../ui/Overlay';
@@ -38,9 +37,8 @@ export const HoldingChartPopup = memo(function HoldingChartPopup({ ticker, weigh
     { fallback: null }
   );
 
-  const { arr, dates, loading: chartLoading } = useLiveSeries(ticker, chartTf);
+  const { arr, dates, candles, loading: chartLoading } = useLiveSeries(ticker, chartTf);
   const pct = arr && arr.length > 1 ? ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100 : 0;
-  const { hoverIdx, onMouseMove, onMouseLeave, tooltip } = useChartHover(arr, chartTf, dates);
 
   return (
     <Overlay
@@ -96,27 +94,27 @@ export const HoldingChartPopup = memo(function HoldingChartPopup({ ticker, weigh
 
       {/* Chart */}
       <div className="p-[22px_28px] flex flex-col gap-4">
-        <div className="grid grid-cols-4 gap-2">
-          {TF_LIST.map(tf => (
-            <button key={tf} onClick={() => setChartTf(tf)}
-              className="py-1.5 border-none rounded-lg cursor-pointer w-full text-center font-[var(--font-mono)] text-[12px] font-semibold transition-all duration-150"
-              style={{
-                background: chartTf === tf ? 'var(--bg-3)' : 'transparent',
-                color: chartTf === tf ? 'var(--fg)' : 'var(--fg-2)',
-                boxShadow: chartTf === tf ? 'var(--shadow-xs)' : 'none',
-              }}
-            >
-              {tf}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="grid grid-cols-4 gap-2 flex-1 min-w-0">
+            {TF_LIST.map(tf => (
+              <button key={tf} onClick={() => setChartTf(tf)}
+                className="py-1.5 border-none rounded-lg cursor-pointer w-full text-center font-[var(--font-mono)] text-[12px] font-semibold transition-all duration-150"
+                style={{
+                  background: chartTf === tf ? 'var(--bg-3)' : 'transparent',
+                  color: chartTf === tf ? 'var(--fg)' : 'var(--fg-2)',
+                  boxShadow: chartTf === tf ? 'var(--shadow-xs)' : 'none',
+                }}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+          <CandleToggle />
         </div>
         <div className="relative mt-4">
           {chartLoading || !arr
             ? <Loading variant="chart" height={180} />
-            : <>
-                <AreaChart data={arr} pct={pct} hoverIdx={hoverIdx} onMouseMove={onMouseMove} onMouseLeave={onMouseLeave} gradientId="holdingChart" height={180} />
-                <ChartTooltip tooltip={tooltip} />
-              </>
+            : <PriceChart arr={arr} dates={dates} candles={candles} pct={pct} timeframe={chartTf} gradientId="holdingChart" height={180} />
           }
         </div>
       </div>

@@ -1,64 +1,46 @@
 /**
- * useChartHover — manages hover state for AreaChart.
+ * useChartHover — manages hover state for AreaChart and CandleChart.
  *
- * Converts mouse X position to a data index, then builds a tooltip
- * object with the date label, return %, period delta, and raw value.
+ * Converts mouse X position to a data index; what the tooltip then says is
+ * `utils/chartTooltip.js`'s `buildTooltip` (date label, return %, period
+ * delta, raw value - and, over a candle, its open/high/low).
  *
  * The date label comes solely from the `dates` array (ISO strings from
  * the API) — no mock/computed label fallback.
+ *
+ * `candleView` (issue #152) is `{ candles, base }` when the chart is drawing
+ * candles, and then `arr` is the candles' closes. The cursor then finds a
+ * candle by its slot (`utils/candles.js`'s `candleIndexAt`, the same function
+ * the chart draws with) rather than the nearest of evenly spaced points.
  */
 import { useState, useCallback } from 'react';
-import { fmtPrice } from '../utils/format';
+import { buildTooltip } from '../utils/chartTooltip';
+import { PLOT_PAD, PLOT_WIDTH, candleIndexAt } from '../utils/candles';
 
-const W = 360, PAD = 4;
+const W = PLOT_WIDTH, PAD = PLOT_PAD;
 
-export function useChartHover(arr, timeframe, dates = null) {
+export function useChartHover(arr, timeframe, dates = null, candleView = null) {
   const [hoverIdx, setHoverIdx] = useState(null);
   const len = arr?.length ?? 0;
+  const slotted = candleView != null;
 
   const onMouseMove = useCallback((e) => {
     if (!len) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / rect.width;
-    const i = Math.round(
-      Math.max(0, Math.min(1, (relX * W - PAD) / (W - 2 * PAD))) * (len - 1)
-    );
+    const i = slotted
+      ? candleIndexAt(relX * W, len)
+      : Math.round(
+          Math.max(0, Math.min(1, (relX * W - PAD) / (W - 2 * PAD))) * (len - 1)
+        );
     setHoverIdx(prev => prev === i ? prev : i);
-  }, [len]);
+  }, [len, slotted]);
 
   const onMouseLeave = useCallback(() => {
     setHoverIdx(null);
   }, []);
 
-  let tooltip = null;
-  if (arr && hoverIdx != null && arr[hoverIdx] !== undefined) {
-    const val = arr[hoverIdx];
-    const prevVal = hoverIdx > 0 ? arr[hoverIdx - 1] : null;
-    const delta = prevVal != null ? ((val - prevVal) / prevVal * 100) : null;
-    const deltaPos = delta != null ? delta >= 0 : null;
-    const runReturn = ((val / arr[0]) - 1) * 100;
-    const runPos = runReturn >= 0;
-    const pctX = (PAD + (hoverIdx / Math.max(1, len - 1)) * (W - 2 * PAD)) / W * 100;
-
-    const label = dates && dates[hoverIdx] ? formatDate(dates[hoverIdx]) : '';
-
-    tooltip = {
-      label,
-      rawValue: val,
-      formattedValue: fmtPrice(val),
-      returnPct: (runPos ? '+' : '') + runReturn.toFixed(2) + '%',
-      runPos,
-      deltaPos,
-      pctX,
-      alignRight: pctX >= 55,
-    };
-  }
+  const tooltip = buildTooltip({ arr, hoverIdx, dates, candleView });
 
   return { hoverIdx, onMouseMove, onMouseLeave, tooltip };
-}
-
-function formatDate(isoDate) {
-  const d = new Date(isoDate + 'T00:00:00');
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
 }

@@ -82,6 +82,12 @@ therefore reading buckets, not days, which is why the portfolio simulator
 scales each return by the trading time it actually covers rather than
 assuming one row is one day.
 
+`GET /api/series` answers each row's `open`, `high` and `low` beside its
+`close` (issue #152) — adjusted like the close, and for a coarse row the
+bucket's own first open, highest high and lowest low. Any of the three is
+`null`, never `0`, where the source has no value. The frontend's candle view
+is what reads them: see [Candles on the price charts](#candles-on-the-price-charts).
+
 **A basket only partly held in Supabase is completed live.** `get_closes`
 answers from the database where it can, and any requested ticker with no
 rows there — every ETF, since those live in `etfs`, and anything resolved
@@ -1305,6 +1311,61 @@ matrix. The graph's layout is not told about clusters, so the outline is the
 convex hull of a cluster's nodes: it always contains every member, but where
 members sit apart it can also contain, or overlap the outline of, nodes that are
 not members. Read it as "these are in it", not "only these are here".
+
+### Candles on the price charts
+
+Three charts draw one ticker's price — the fund card, the stock popup opened
+from the ETF views, and a Holding's chart popup in the portfolio — and each has
+a **Candles** button by its timeframe controls (issue #152). Pressed, the line
+becomes candles: a body from where the stretch opened to where it closed, a wick
+from its low to its high, green when it closed at or above its open and red
+otherwise. The portfolio charts do not have it: they plot the value of a
+simulation, which has no open, high or low to draw.
+
+**One switch, held once.** The choice is one setting, kept in this browser's
+`localStorage` (`market-analyser.chart-style`, absent while off, which is the
+default), read by every chart. Turning candles on in the popup changes the fund
+card behind it at once, and another tab follows. It is a way of looking at prices
+rather than a view of the data, so it is not in the URL and does not travel in a
+Share Link. If the browser will not store it — site data blocked, a private
+window — the button still works for the session and is simply not remembered.
+
+**A candle covers one span, chosen by the timeframe.** Stored history is tiered by
+age, so one window mixes daily, weekly and monthly rows; one candle per row would
+change what a candle means partway along the axis. Rows are instead folded
+(`app/src/utils/candles.js`) into a fixed span, picked to keep the count readable
+in the narrowest chart:
+
+| Timeframe | One candle is | Roughly |
+| --- | --- | --- |
+| 1W, 1M | a day | 5–21 candles |
+| 1Y | a week | ~52 |
+| 5Y | a month | ~60 |
+
+Folding follows the rule the database already uses for a stored bucket — the first
+open, the highest high, the lowest low, the last close.
+
+**What a candle does not mean.**
+
+- **Its prices are adjusted.** Every price in `prices` is adjusted for splits and
+  dividends, so an old candle's open, high, low and close are not what the stock
+  printed that day — the same as every close on the line.
+- **A candle's colour is not the window's return.** It compares the candle's own
+  close with its own open. The return figures, and the line's colour, still come
+  from the closes and do not change when the switch does; the tooltip's return
+  since the start uses the same first close as the chart's header.
+- **The newest candle is unfinished, and the oldest may be cut short.** Both are
+  drawn, and the tooltip names the days a candle actually covers ("Mar 2 – Mar 4,
+  2026") rather than the week or month it belongs to.
+- **A week can straddle a month.** A stored weekly row is dated by its Monday and
+  cannot be split, so a 5Y month candle includes the whole week that began in it,
+  and its span shows the days it ran into.
+- **A gap is not a flat candle.** A stretch with any open, high or low missing is
+  left blank and its tooltip says "no open/high/low" — a flat candle would claim
+  the price did not move. One missing day blanks the whole week or month around
+  it, because its high is unknown without that day's.
+
+Not built: volume bars, zoom or pan, intraday candles, and indicators.
 
 ## Running both
 

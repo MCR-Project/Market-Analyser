@@ -43,12 +43,16 @@ by clicking its ticker in `HoldingsTable`. It deliberately does not reuse
 `components/stock/StockPopup` — that component's correlation-explorer pane
 needs an ETF's correlation matrix and full constituent list, and a Holding
 has neither (it may not belong to any ETF at all). It duplicates StockPopup's
-timeframe-tabs-plus-`AreaChart` pattern rather than sharing it, trading a
+timeframe-tabs-plus-`PriceChart` pattern rather than sharing it, trading a
 little duplication for zero regression risk to the ETF analyzer. Its header
 shows the Holding's own WEIGHT/VALUE from the current Run, dimmed under the
 same `stale` condition the table's own columns use — no correlation pane, no
 income figure, and available identically on read-only (shared) portfolios
-since it writes nothing.
+since it writes nothing. `PriceChart` draws its line or, when the shared
+**Candles** button beside its timeframe tabs is pressed (issue #152), its
+candles; that button is a display choice and so, like the popup itself, stays on
+a read-only portfolio. The portfolio's own charts below are a different kind
+of chart — simulated value, no open/high/low — and have no such switch.
 
 ## Three principles
 
