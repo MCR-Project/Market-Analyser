@@ -141,7 +141,7 @@ other one, never leave "Dividend Yield" to mean it by default
 
 **Portfolio Dividend Yield**:
 A portfolio metric (`metrics.dividendYield`): dividend income earned during a
-Run ÷ that Run's totalInvested. Computed over the simulation's own window,
+Run ÷ that Run's Paid In. Computed over the simulation's own window,
 not a fixed trailing twelve months.
 _Avoid_: Dividend Yield (bare — ambiguous with the measurement above)
 
@@ -176,8 +176,8 @@ one concrete result)
 **Benchmark**:
 A ticker plotted alongside Portfolios for comparison (`?benchmark=`).
 Deliberately not a Portfolio: it's simulated as a basket of one, given the
-open portfolio's own amount and contribution schedule, and never touches the
-portfolio library.
+open portfolio's own amount and Money Flow (whichever schedule it has), and
+never touches the portfolio library.
 _Avoid_: Fund Index (reserved for the ETF-side benchmark series, above)
 
 **Recurring Contribution**:
@@ -209,6 +209,16 @@ Withdrawal), or neither — never both. It is what the editing control is called
 the two schedules are the terms everything else uses.
 _Avoid_: Cash flow (a return-arithmetic word for every signed payment in a Run,
 the opening amount and the closing value included), bare "Schedule"
+
+**Paid In**:
+Every dollar that ever went into a Run: the opening amount plus every Recurring
+Contribution (API field `totalInvested`, labelled PAID IN in the UI). Never
+reduced by a Recurring Withdrawal — money taken out is its own figure,
+Withdrawn — so it only ever grows, and a Portfolio drawn on for longer than it
+was funded does not report a negative amount paid in. What a Run's Gain and
+Portfolio Dividend Yield are measured against.
+_Avoid_: Total Invested (that's the wire field name, not the glossary term), Net
+invested (it would let the figure go negative)
 
 **Gain**:
 The dollar amount of a Run's total gain attributable to one holding (API
