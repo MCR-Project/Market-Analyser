@@ -401,6 +401,26 @@ arithmetic itself belongs in `stats.py` above, not here. The invariants:
   often not a trading day, and an old enough window has no daily rows at all.
   Contributions land on exactly the same definition, and never on the window's
   own first row (that one is the opening lump sum).
+- **A portfolio pays in or draws out, never both** (issue #150, ADR 0002).
+  `withdrawal` is `contribution`'s mirror and lands on the same "first row of a
+  new period" rule, but it is not its sign flipped: money leaving has to come
+  *from* somewhere, and it can run out. It comes out of every holding **and any
+  idle cash pro rata to current value** - never over the target weights the way
+  a contribution is spread, because under buy and hold a drifted holding can be
+  worth less than its target share of the withdrawal. It is taken *before* a
+  rebalance on the same row, in the contribution's own slot. A portfolio that
+  cannot cover one takes what is left (`EMPTY_BELOW`, half a cent, is the
+  ledger's own precision) and nothing after; `metrics.depletedOn` names the row,
+  and `None` there means "did not run out", not "unknown". `taken`, not the
+  scheduled amount, feeds `withdrawn`, the `withdrawn` series, `flows` (so a
+  holding's gain adds back what left it), the IRR flows and `inflows` (negative,
+  so `stats.unit_values` takes the cash back out and the time-weighted metrics
+  stay flat under it). Both schedules is a `ValueError` after both are
+  normalised, so a zero or a null - which mean off - is not a second schedule.
+  The IRR's bisection is only sound while the flows change sign once; that is
+  what this rule protects. `_normalise_schedule` checks both schedules; a
+  negative amount's message points at the other field on purpose, because a
+  sign on `contribution` is not how money out is said.
 - **An allocation is cash until its holding lists**, and converts at exactly that
   day's close, so the total does not move on the day it happens.
 - **The calendar is the union of the dates the rows cover, not the
@@ -426,10 +446,12 @@ arithmetic itself belongs in `stats.py` above, not here. The invariants:
   are both null, with a reason" rather than scoring either against an
   assumed zero. `metrics.riskFreeRate`/`riskFreeRateSource` echo whichever
   one actually produced them.
-- **A holding's `contribution` is its final value less every dollar put into
-  it.** Once a rebalance moves money between holdings, a final value says nothing
-  about which holding earned it. These sum to the portfolio's gain. The UI labels
-  the column GAIN to avoid colliding with recurring contributions.
+- **A holding's `contribution` is its final value, plus every dollar taken out
+  of it, less every dollar put into it.** Once a rebalance moves money between
+  holdings, a final value says nothing about which holding earned it; and money a
+  withdrawal took was still earned, so the portfolio's own gain is
+  `finalValue + withdrawn - totalInvested`. These sum to the portfolio's gain. The
+  UI labels the column GAIN to avoid colliding with recurring contributions.
 - **Dividend income is reported, never added.** It is already inside every value
   via the adjusted closes.
 - **A figure the run cannot support is `null`, not `0`.** `metrics.reasons`

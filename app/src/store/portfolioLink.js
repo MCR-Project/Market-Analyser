@@ -38,7 +38,11 @@
  * fifty-holding one around 900 bytes — links that survive being pasted
  * into a chat window.
  */
-import { CONTRIBUTION_FREQUENCIES, REBALANCE_FREQUENCIES } from './portfolioStorage';
+import {
+  CONTRIBUTION_FREQUENCIES,
+  REBALANCE_FREQUENCIES,
+  WITHDRAWAL_FREQUENCIES,
+} from './portfolioStorage';
 
 /** The payload's own version, independent of the storage schema: this is
  *  a wire format that other people's browsers have to read, so it changes
@@ -47,14 +51,20 @@ import { CONTRIBUTION_FREQUENCIES, REBALANCE_FREQUENCIES } from './portfolioStor
  *  Version 2 added the optional recurring contribution (#67). It had to
  *  travel: a shared portfolio that simulated without the sender's monthly
  *  payments would be a different portfolio wearing the same name, and
- *  reproducing the sender's result is the whole promise of the link. */
-const LINK_VERSION = 2;
+ *  reproducing the sender's result is the whole promise of the link.
+ *
+ *  Version 3 added the optional recurring withdrawal (#150), as its own key
+ *  rather than a negative contribution, and for the reason the version
+ *  exists: a build that predates it reads a contribution at or below zero as
+ *  "no schedule" and would show a withdrawing portfolio as a lump sum,
+ *  whereas it refuses a version it does not know and says so (ADR 0002). */
+const LINK_VERSION = 3;
 
 /** Payloads this build can still read. A version 1 link predates
- *  contributions and simply has none, which is a portfolio this app can
- *  represent exactly - so old links keep working rather than being
- *  refused for being old. */
-const READABLE_VERSIONS = [1, 2];
+ *  contributions and simply has none, and a version 2 one predates
+ *  withdrawals; each is a portfolio this app can represent exactly - so old
+ *  links keep working rather than being refused for being old. */
+const READABLE_VERSIONS = [1, 2, 3];
 
 /** The query parameter carrying the payload. Short because it is in
  *  every shared link. */
@@ -120,7 +130,8 @@ function fromBase64Url(payload) {
  * their screen.
  */
 export function encodePortfolio(portfolio) {
-  const schedule = portfolio.contribution;
+  const contribution = portfolio.contribution;
+  const withdrawal = portfolio.withdrawal;
   return toBase64Url(JSON.stringify({
     v: LINK_VERSION,
     n: String(portfolio.name || '').trim().slice(0, MAX_NAME),
@@ -129,7 +140,10 @@ export function encodePortfolio(portfolio) {
     h: (portfolio.holdings || []).slice(0, MAX_LINK_HOLDINGS).map(h => [h.ticker, h.weight]),
     // Omitted entirely when there is no schedule, so the common link
     // stays the length it was.
-    ...(schedule ? { c: [schedule.amount, schedule.frequency] } : {}),
+    ...(contribution ? { c: [contribution.amount, contribution.frequency] } : {}),
+    // Likewise. At most one of the two is ever set on a portfolio, so a
+    // link never carries both.
+    ...(withdrawal ? { w: [withdrawal.amount, withdrawal.frequency] } : {}),
   }));
 }
 
@@ -248,8 +262,32 @@ export function decodePortfolio(payload) {
     contribution = { amount, frequency };
   }
 
+  // A version 3 link's own field (#150), refused rather than dropped when
+  // present and wrong, for the same reason a contribution is.
+  let withdrawal;
+  if (raw.w !== undefined && raw.w !== null) {
+    if (!Array.isArray(raw.w) || raw.w.length !== 2) {
+      return bad(`This link has a withdrawal that could not be read. ${ASK_AGAIN}`);
+    }
+    const [amount, frequency] = raw.w;
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > MAX_VALUE) {
+      return bad(`This link has a withdrawal that is not a usable amount. ${ASK_AGAIN}`);
+    }
+    if (!WITHDRAWAL_FREQUENCIES.includes(frequency)) {
+      return bad(`This link withdraws on a schedule this app does not have. ${ASK_AGAIN}`);
+    }
+    withdrawal = { amount, frequency };
+  }
+
+  // A portfolio pays in or draws out, never both (ADR 0002). A link that
+  // says both was not made by this app, and choosing one for the reader
+  // would show them a different portfolio and call it the sender's.
+  if (contribution && withdrawal) {
+    return bad(`This link has both a contribution and a withdrawal, which a portfolio cannot have. ${ASK_AGAIN}`);
+  }
+
   return {
-    portfolio: { name, value: raw.a, rebalance: raw.r, holdings, contribution },
+    portfolio: { name, value: raw.a, rebalance: raw.r, holdings, contribution, withdrawal },
     error: null,
   };
 }

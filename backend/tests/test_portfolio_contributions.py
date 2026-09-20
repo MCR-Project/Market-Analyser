@@ -536,8 +536,10 @@ class ContributionValidationTests(unittest.TestCase):
         self.assertIn("fortnightly", str(caught.exception))
 
     def test_a_negative_amount_is_refused(self):
-        """Withdrawals would need a rule for what to sell and what happens
-        when there is not enough, and neither is modelled."""
+        """Money going out has its own field (`withdrawal`, issue #150 and
+        ADR 0002) - see test_portfolio_withdrawals.py, which pins that the
+        refusal says so. Here it is only that a sign on the contribution is
+        not how it is said."""
         with self.assertRaises(ValueError) as caught:
             run(self.CLOSES, self.BASKET,
                 contribution={"amount": -100, "frequency": "monthly"})

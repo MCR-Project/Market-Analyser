@@ -191,8 +191,10 @@ export function CreatePortfolioDialog({ portfolios, onCreate, onClose }) {
         rebalance: copySource.rebalance,
         // How it is funded is part of what the portfolio is, so a copy
         // that dropped the schedule would simulate differently from the
-        // thing it says it is a copy of.
+        // thing it says it is a copy of. Money in or money out (#150): a
+        // portfolio has one or the other, and the copy keeps whichever.
         contribution: copySource.contribution && { ...copySource.contribution },
+        withdrawal: copySource.withdrawal && { ...copySource.withdrawal },
         source: { kind: 'portfolio', id: copySource.id, name: copySource.name },
       });
     } else {

@@ -1,0 +1,50 @@
+---
+title: Withdrawn
+summary: The recurring withdrawals on their own — what was actually taken out of the portfolio.
+---
+
+## What it measures
+
+The money that left the account through a recurring withdrawal: the
+account-side counterpart to Contributed, for a portfolio that is drawn on
+instead of paid into. A portfolio does one or the other, never both, so at
+most one of the two is ever above zero.
+
+## How it is computed
+
+One withdrawal comes out on the first trading row of every new period
+(monthly, quarterly or yearly) after the window's own first row — never on
+the first row itself, which is the opening amount. It comes out of every
+holding, and of any cash still waiting for a holding to list, in proportion
+to what each is worth at that moment, so a withdrawal changes how much the
+portfolio holds and leaves its mix alone:
+
+<Formula tex={String.raw`\text{withdrawn} = \sum \text{amount actually taken}`} />
+
+*Actually taken* matters. A portfolio that cannot cover a withdrawal gives up
+whatever is left and pays nothing after that, so a schedule of $600 a month
+against a $1,000 balance takes $600 and then $400 — $1,000 in all, not
+$1,800.
+
+<WorkedExample />
+
+## How it reads
+
+Zero with no schedule set, which is the default. Paid In does not shrink
+by this amount: it stays the opening amount, because netting the two would
+let it go negative for a portfolio drawn on for longer than it was funded.
+Gain adds this figure back — money that was taken out was still earned, so
+a portfolio that returned $2,000 and paid $1,500 of it to its holder made
+$2,000, not $500.
+
+## Caveats
+
+When the portfolio runs out, nothing else here says so: Total Return and
+the other portfolio-family figures are read off a value that a withdrawal
+does not move, so a portfolio drawn to nothing on flat prices reports a
+return of zero. The date it ran out is reported alongside, and null there
+means the money lasted — it does not mean the date is unknown.
+
+Says nothing about *when* each withdrawal came out relative to the
+market, only the total. Money-Weighted Return is the figure that accounts
+for timing; this one is a plain sum.

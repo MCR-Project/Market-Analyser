@@ -70,7 +70,10 @@ import { usePortfolioRisk } from '../../hooks/usePortfolioRisk';
 import {
   CONTRIBUTION_FREQUENCIES,
   DEFAULT_CONTRIBUTION,
+  DEFAULT_WITHDRAWAL,
   REBALANCE_FREQUENCIES,
+  WITHDRAWAL_FREQUENCIES,
+  scheduleFields,
 } from '../../store/portfolioStorage';
 import { describeFetchError } from '../../utils/errorCopy';
 import { api } from '../../utils/api';
@@ -98,17 +101,32 @@ const REBALANCE_LABELS = {
   yearly: 'Rebalance yearly',
 };
 
-const CONTRIBUTION_LABELS = {
+const PERIOD_LABELS = {
   monthly: 'a month',
   quarterly: 'a quarter',
   yearly: 'a year',
 };
 
+/** Which way money moves. Three states of one choice rather than two
+ *  schedules to fill in: a portfolio pays in or draws out, never both
+ *  (ADR 0002), and a control that could pick both would need a message for
+ *  the state it should never have allowed. */
+const MONEY_FLOW_LABELS = {
+  '': 'None',
+  in: 'Pay in',
+  out: 'Withdraw',
+};
+
 const ACTION_CLASS =
   'px-3 py-1.5 text-[12.5px] font-semibold rounded-[var(--radius-md)] border cursor-pointer transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2';
 
-const FIELD_CLASS =
-  'w-full h-[30px] px-2 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[13.5px] font-semibold text-[var(--fg)] outline-none focus:border-[var(--accent-ring)]';
+// The look of a field without its width, for the controls that share a row
+// and so cannot each claim all of it: a `w-full` in the same class list
+// would win over any narrower width added beside it.
+const FIELD_BASE =
+  'h-[30px] px-2 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[13.5px] font-semibold text-[var(--fg)] outline-none focus:border-[var(--accent-ring)]';
+
+const FIELD_CLASS = `w-full ${FIELD_BASE}`;
 
 /** A fund copy is not the fund: only constituents weighing at least 1%
  *  are tracked, so a copy of SPY is its largest names and a bit over half
@@ -303,68 +321,122 @@ function Amount({ value, onCommit }) {
 }
 
 /**
- * Money paid in on a schedule, or not at all (#67).
+ * Money paid in or drawn out on a schedule, or not at all (#67, #150).
  *
- * The frequency is the switch, and it leads: "None" is the whole control
- * until there is a schedule to have an amount for, so a portfolio that
- * takes a single lump sum shows one select rather than an amount box
- * greyed out beside it. Turning it on fills in a placeholder amount at
- * once, because a schedule of nothing per month is not a state worth
- * being in on the way to a real one.
+ * The direction is the switch, and it leads: "None" is the whole control
+ * until there is a schedule to have a frequency and an amount for, so a
+ * portfolio that takes a single lump sum shows one select rather than two
+ * greyed-out boxes beside it. Turning it on fills in a placeholder amount
+ * and monthly at once, because a schedule of nothing per month is not a
+ * state worth being in on the way to a real one.
+ *
+ * One control rather than one each for paying in and drawing out, because
+ * a portfolio does one or the other (ADR 0002): with two, "both" would be
+ * a state to explain, and here it is one nobody can reach. Every change
+ * writes both keys at once, the one it sets and the one it clears, so the
+ * library is never left holding two.
+ *
+ * Switching direction keeps the amount and the frequency - somebody
+ * comparing "$500 a month in" against "$500 a month out" is changing one
+ * word, not retyping a schedule.
  *
  * The amount commits on blur like the opening amount does, and for the
  * same reason: halfway through typing 500 it reads 5, and re-simulating
  * a portfolio funded at $5 a month is work nobody asked for.
  */
-function Contribution({ contribution, onChange }) {
+function MoneyFlow({ portfolio, onChange }) {
   const [draft, setDraft] = useState(null);
+  const direction = portfolio.contribution ? 'in' : portfolio.withdrawal ? 'out' : '';
+  const schedule = portfolio.contribution || portfolio.withdrawal;
+  const frequencies = direction === 'out' ? WITHDRAWAL_FREQUENCIES : CONTRIBUTION_FREQUENCIES;
+
+  // `undefined` for the one that is not set, so the write clears it.
+  const write = (next, to) => onChange(
+    to === 'in'
+      ? { contribution: next, withdrawal: undefined }
+      : { contribution: undefined, withdrawal: next }
+  );
 
   const commit = () => {
     if (draft !== null) {
       const parsed = Number(draft.replace(/[^0-9.]/g, ''));
       if (Number.isFinite(parsed) && parsed > 0) {
-        onChange({ ...contribution, amount: parsed });
+        write({ ...schedule, amount: parsed }, direction);
       }
     }
     setDraft(null);
   };
 
+  const selectDirection = (to) => {
+    setDraft(null);
+    if (!to) {
+      onChange({ contribution: undefined, withdrawal: undefined });
+      return;
+    }
+    const allowed = to === 'in' ? CONTRIBUTION_FREQUENCIES : WITHDRAWAL_FREQUENCIES;
+    write(
+      {
+        amount: schedule?.amount || (to === 'in' ? DEFAULT_CONTRIBUTION : DEFAULT_WITHDRAWAL),
+        frequency: allowed.includes(schedule?.frequency) ? schedule.frequency : 'monthly',
+      },
+      to
+    );
+  };
+
   const selectFrequency = (frequency) => {
     setDraft(null);
-    if (!frequency) onChange(undefined);
-    else onChange({ amount: contribution?.amount || DEFAULT_CONTRIBUTION, frequency });
+    write({ ...schedule, frequency }, direction);
   };
 
   return (
     <div className="flex items-center gap-2">
       <select
-        value={contribution?.frequency || ''}
-        aria-label="Contribution frequency"
-        onChange={e => selectFrequency(e.target.value)}
-        className={`${FIELD_CLASS} cursor-pointer ${contribution ? 'w-[124px]' : ''}`}
+        value={direction}
+        aria-label="Money flow"
+        onChange={e => selectDirection(e.target.value)}
+        className={`${FIELD_BASE} cursor-pointer ${schedule ? 'w-[104px] flex-none' : 'w-full'}`}
       >
-        <option value="">None</option>
-        {CONTRIBUTION_FREQUENCIES.map(frequency => (
-          <option key={frequency} value={frequency}>{CONTRIBUTION_LABELS[frequency]}</option>
+        {Object.entries(MONEY_FLOW_LABELS).map(([value, label]) => (
+          <option key={value || 'none'} value={value}>{label}</option>
         ))}
       </select>
-      {contribution && (
-        <input
-          value={draft ?? CURRENCY.format(contribution.amount)}
-          aria-label="Contribution amount, USD"
-          inputMode="decimal"
-          onFocus={e => { setDraft(String(contribution.amount)); e.target.select(); }}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={e => {
-            if (e.key === 'Enter') e.currentTarget.blur();
-            if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur(); }
-          }}
-          className={FIELD_CLASS}
-        />
+      {schedule && (
+        <>
+          <select
+            value={schedule.frequency}
+            aria-label="Money flow frequency"
+            onChange={e => selectFrequency(e.target.value)}
+            className={`${FIELD_BASE} cursor-pointer w-[112px] flex-none`}
+          >
+            {frequencies.map(frequency => (
+              <option key={frequency} value={frequency}>{PERIOD_LABELS[frequency]}</option>
+            ))}
+          </select>
+          <input
+            value={draft ?? CURRENCY.format(schedule.amount)}
+            aria-label="Money flow amount, USD"
+            inputMode="decimal"
+            onFocus={e => { setDraft(String(schedule.amount)); e.target.select(); }}
+            onChange={e => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur(); }
+            }}
+            className={`${FIELD_BASE} min-w-0 flex-1`}
+          />
+        </>
       )}
     </div>
   );
+}
+
+/** How a portfolio's schedule reads when there is nothing to edit. */
+function describeMoneyFlow(portfolio) {
+  const amount = (schedule) => `${CURRENCY.format(schedule.amount)} ${PERIOD_LABELS[schedule.frequency]}`;
+  if (portfolio.contribution) return `Pays in ${amount(portfolio.contribution)}`;
+  if (portfolio.withdrawal) return `Withdraws ${amount(portfolio.withdrawal)}`;
+  return 'Nothing';
 }
 
 /** Which window the simulated columns describe, or why they are blank.
@@ -397,16 +469,18 @@ function SimulationStatus({ simulation, loading, error, onRetry, hasWeight }) {
 }
 
 /** A simulate payload for one line of the comparison. Each portfolio
- *  brings its own contribution schedule: comparing one that is paid into
- *  monthly with one that is not is a comparison somebody may well want,
- *  and flattening them to the same schedule would answer a question
- *  nobody asked. */
-function requestFor(holdings, value, rebalance, windowRequest, contribution) {
+ *  brings its own schedule, of either kind: comparing one that is paid into
+ *  monthly with one that is drawn on, or with one that is neither, is a
+ *  comparison somebody may well want, and flattening them to the same
+ *  schedule would answer a question nobody asked. `schedule` is anything
+ *  that holds the schedule - a portfolio, or the open one lent to a
+ *  benchmark. */
+function requestFor(holdings, value, rebalance, windowRequest, schedule) {
   return {
     holdings: holdings.filter(h => h.weight > 0).map(h => ({ ticker: h.ticker, weight: h.weight })),
     value,
     rebalance,
-    ...(contribution ? { contribution } : {}),
+    ...scheduleFields(schedule),
     ...windowRequest,
   };
 }
@@ -451,8 +525,14 @@ export function PortfolioPanel({
   // error worth showing.
   const simulateRequest = useMemo(() => {
     if (!holdings.some(h => h.weight > 0)) return null;
-    return requestFor(holdings, portfolio.value, portfolio.rebalance, request, portfolio.contribution);
-  }, [holdings, portfolio.value, portfolio.rebalance, portfolio.contribution, request]);
+    return requestFor(
+      holdings, portfolio.value, portfolio.rebalance, request,
+      { contribution: portfolio.contribution, withdrawal: portfolio.withdrawal }
+    );
+    // Only the fields the request is built from: depending on the whole
+    // portfolio would rebuild it - and hand `usePortfolioRisk` a new object -
+    // on a rename or any other edit that changes nothing it asks the backend.
+  }, [holdings, portfolio.value, portfolio.rebalance, portfolio.contribution, portfolio.withdrawal, request]);
   const portfolioRisk = usePortfolioRisk(simulateRequest);
   const [riskPickerOpen, setRiskPickerOpen] = useState(false);
 
@@ -513,7 +593,7 @@ export function PortfolioPanel({
         label: portfolio.name,
         kind: 'portfolio',
         request: requestFor(
-          holdings, portfolio.value, portfolio.rebalance, request, portfolio.contribution
+          holdings, portfolio.value, portfolio.rebalance, request, portfolio
         ),
       },
       ...compared.map(other => ({
@@ -521,7 +601,7 @@ export function PortfolioPanel({
         label: other.name,
         kind: 'portfolio',
         request: requestFor(
-          other.holdings || [], other.value, other.rebalance, request, other.contribution
+          other.holdings || [], other.value, other.rebalance, request, other
         ),
       })),
       ...comparison.benchmarks.map(symbol => ({
@@ -529,11 +609,11 @@ export function PortfolioPanel({
         label: symbol,
         kind: 'benchmark',
         // A benchmark takes the open portfolio's own funding, schedule
-        // included: "did this beat SPY" means against the same money
-        // arriving on the same dates, not against a lump sum.
+        // included and of either kind: "did this beat SPY" means against
+        // the same money arriving - or leaving - on the same dates, not
+        // against a lump sum.
         request: requestFor(
-          [{ ticker: symbol, weight: 100 }], portfolio.value, 'none', request,
-          portfolio.contribution
+          [{ ticker: symbol, weight: 100 }], portfolio.value, 'none', request, portfolio
         ),
       })),
     ];
@@ -605,12 +685,12 @@ export function PortfolioPanel({
 
       <Provenance source={portfolio.source} windowStart={simulation?.start || null} />
 
-      {/* Two rows of four, with the contribution taking two columns
-          because it is two controls. Read-only drops CREATED: a portfolio
+      {/* Two rows of four, with the money flow taking two columns because
+          it is up to three controls. Read-only drops CREATED: a portfolio
           that came out of a link has no created date to show, since the
           copy is created when somebody keeps it. */}
       {/* At 2xl, six columns make it one row: amount, the two-column
-          contribution, method, holdings, created. */}
+          money flow, method, holdings, created. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 2xl:grid-cols-6 gap-5 p-5 mb-6 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)]">
         <Field label="AMOUNT">
           {readOnly ? (
@@ -619,20 +699,13 @@ export function PortfolioPanel({
             <Amount value={portfolio.value} onCommit={value => onUpdate({ value })} />
           )}
         </Field>
-        {/* Reads left to right as a sentence: start with this much, add
-            this much this often, run it this way. */}
-        <Field label="ADDS" wide>
+        {/* Reads left to right as a sentence: start with this much, pay
+            in or withdraw this often, this much, run it this way. */}
+        <Field label="MONEY FLOW" wide>
           {readOnly ? (
-            <Stated>
-              {portfolio.contribution
-                ? `${CURRENCY.format(portfolio.contribution.amount)} ${CONTRIBUTION_LABELS[portfolio.contribution.frequency]}`
-                : 'Nothing'}
-            </Stated>
+            <Stated>{describeMoneyFlow(portfolio)}</Stated>
           ) : (
-            <Contribution
-              contribution={portfolio.contribution}
-              onChange={contribution => onUpdate({ contribution })}
-            />
+            <MoneyFlow portfolio={portfolio} onChange={onUpdate} />
           )}
         </Field>
         <Field label="METHOD">

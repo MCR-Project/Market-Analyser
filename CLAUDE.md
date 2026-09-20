@@ -92,10 +92,12 @@ service is a bug in the test.
 The frontend has two automated checks: `npm run lint` (ESLint with react-hooks
 and react-refresh rules) and `npm test` (Vitest, run from `app/`). The suite is
 deliberately small — plain functions over pure logic, no DOM environment, no
-component tests — and today covers only `store/portfolioBackup.js` (issue
-#148). Logic that is worth testing goes in a pure module and is tested through
-its public function, the way `planImport` is; components, hooks and dialogs are
-checked by using the running app.
+component tests — and today covers only the three `store/` modules that decide
+what a portfolio may be and how it travels: `portfolioBackup.js` (issue #148),
+`portfolioLink.js` and `portfolioStorage.js` (issue #150). Logic that is worth
+testing goes in a pure module and is tested through its public function, the
+way `planImport` is; components, hooks and dialogs are checked by using the
+running app.
 
 `docker compose run --rm tests` (with pytest args passed through, or
 `docker compose run --rm tests lint` for the ESLint check, `... tests frontend`

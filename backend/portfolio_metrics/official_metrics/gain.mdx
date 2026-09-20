@@ -1,18 +1,24 @@
 ---
 title: Gain
-summary: What the portfolio actually made — final value less everything paid into it.
+summary: What the portfolio actually made — final value, plus anything taken out, less everything paid into it.
 ---
 
 ## What it measures
 
-The plain dollar profit: what the account is worth now, minus every
-dollar that was ever put into it. Where Total Return asks "how did the
-investing go" with deposits stripped out, Gain asks the more literal
-question — is there more money here than was paid in, and how much more.
+The plain dollar profit: what the account is worth now, plus whatever was
+taken out of it along the way, minus every dollar that was ever put into
+it. Where Total Return asks "how did the investing go" with deposits
+stripped out, Gain asks the more literal question — is there more money
+here than was paid in, and how much more.
 
 ## How it is computed
 
-<Formula tex={String.raw`\text{gain} = \text{finalValue} - \text{totalInvested}`} />
+<Formula tex={String.raw`\text{gain} = \text{finalValue} + \text{withdrawn} - \text{totalInvested}`} />
+
+Withdrawn is zero for a portfolio with no recurring withdrawal, which is
+the default, and then this is simply what it is worth less what went in.
+Money taken out is added back because it was still earned: a portfolio that
+returned $2,000 and paid $1,500 of it to its holder made $2,000, not $500.
 
 <WorkedExample />
 
@@ -28,4 +34,6 @@ value, is not. Read the two together rather than expecting them to agree.
 Once a rebalance starts moving money between holdings, each holding's own
 `contribution` field is the only way to say which one earned which part
 of this total — Gain itself is a portfolio-wide figure and does not
-attribute credit to any one position.
+attribute credit to any one position. A holding's own figure follows the
+same rule: what it is worth, plus what was taken out of it, less what went
+into it.

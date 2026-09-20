@@ -121,6 +121,9 @@ export const PortfolioMetricWorkedExample = memo(function PortfolioMetricWorkedE
   const holdings = portfolio.holdings || [];
   const risk = isRiskExample(run.metrics);
   const contribution = !risk && portfolio.contribution;
+  // The example's own schedule, of whichever kind (#150): Withdrawn's page
+  // names a portfolio that draws out, and the sentence has to say so.
+  const withdrawal = !risk && portfolio.withdrawal;
 
   return (
     <section className="my-6">
@@ -135,6 +138,9 @@ export const PortfolioMetricWorkedExample = memo(function PortfolioMetricWorkedE
         ))}
         {contribution && (
           <> plus {CURRENCY.format(contribution.amount)} {contribution.frequency}</>
+        )}
+        {withdrawal && (
+          <> less {CURRENCY.format(withdrawal.amount)} {withdrawal.frequency}</>
         )}, from{' '}
         <strong className="text-[var(--fg)] font-semibold">{run.start}</strong> to{' '}
         <strong className="text-[var(--fg)] font-semibold">{run.end}</strong>.

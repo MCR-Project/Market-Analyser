@@ -77,6 +77,10 @@ def build_example(metric) -> dict:
         end=portfolio.get("end"),
         rebalance=portfolio.get("rebalance", "none"),
         contribution=portfolio.get("contribution"),
+        # A metric whose own example draws money out (Withdrawn, issue #150)
+        # names a `withdrawal` in its `example_portfolio`. Dropping it here
+        # would document that metric with a figure of zero.
+        withdrawal=portfolio.get("withdrawal"),
     )
     run_metrics = run["metrics"]
 

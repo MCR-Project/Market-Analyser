@@ -139,6 +139,13 @@ test('a recurring contribution and an origin note come across unchanged', () => 
   expect(plan.added[0].source).toEqual(original.source);
 });
 
+test('a recurring withdrawal comes across unchanged (#150)', () => {
+  const original = saved({ withdrawal: { amount: 500, frequency: 'quarterly' } });
+  const plan = planImport([], backup([original]));
+  expect(plan.added[0].withdrawal).toEqual({ amount: 500, frequency: 'quarterly' });
+  expect(plan.added[0].contribution).toBeUndefined();
+});
+
 // ── Identical, different, and the same identity ─────────────────────────
 
 test('importing what the library already holds skips it, and says which', () => {
@@ -178,6 +185,7 @@ test('a difference in any field stops a portfolio counting as identical', () => 
     { rebalance: 'yearly' },
     { holdings: [{ ticker: 'NVDA', weight: 60 }, { ticker: 'AMD', weight: 41 }] },
     { contribution: { amount: 100, frequency: 'monthly' } },
+    { withdrawal: { amount: 100, frequency: 'monthly' } },
     { updatedAt: '2026-02-06T11:30:01.000Z' },
   ];
   for (const change of changes) {
@@ -345,6 +353,57 @@ test('a failed entry does not make its name unavailable to a later one', () => {
   expect(plan.renamed).toEqual([]);
 });
 
+// A portfolio pays in or draws out, never both (#150, ADR 0002). Migration
+// answers a record with both by dropping both, which would import it
+// quietly as a lump sum - so the entry is held to the rule before it is
+// migrated, and named, the way any other entry this app could not have made
+// is.
+
+/** An entry as a hand-edited file could hold it: both schedules, which
+ *  `saved()` cannot build because it goes through the migration. */
+function withBothSchedules(overrides = {}) {
+  return {
+    ...saved(),
+    contribution: { amount: 100, frequency: 'monthly' },
+    withdrawal: { amount: 500, frequency: 'monthly' },
+    ...overrides,
+  };
+}
+
+test('an entry with both a contribution and a withdrawal is skipped, and says why', () => {
+  const plan = planImport([], envelope([withBothSchedules(), saved({ id: 'b', name: 'Energy' })]));
+  expect(plan.error).toBeNull();
+  expect(plan.added.map(p => p.name)).toEqual(['Energy']);
+  expect(plan.failed).toHaveLength(1);
+  expect(plan.failed[0].name).toBe('Semis');
+  expect(plan.failed[0].reason).toMatch(/contribution/i);
+  expect(plan.failed[0].reason).toMatch(/withdrawal/i);
+});
+
+test('an unusable schedule beside a good one is not "both"', () => {
+  const plan = planImport([], envelope([
+    withBothSchedules({ contribution: { amount: 0, frequency: 'monthly' } }),
+  ]));
+  expect(plan.failed).toEqual([]);
+  expect(plan.added[0].withdrawal).toEqual({ amount: 500, frequency: 'monthly' });
+});
+
+test('a file whose only entry has both schedules is refused, with the reason', () => {
+  const plan = planImport([saved()], envelope([withBothSchedules({ name: 'Energy', id: 'b' })]));
+  expect(plan.error).toMatch(/none of the portfolios/i);
+  expect(plan.added).toEqual([]);
+  expect(plan.failed[0].reason).toMatch(/withdrawal/i);
+});
+
+test('an entry skipped for having both does not make its name unavailable', () => {
+  const plan = planImport([], envelope([
+    withBothSchedules(),
+    saved({ id: 'ok', name: 'Semis' }),
+  ]));
+  expect(plan.added.map(p => p.name)).toEqual(['Semis']);
+  expect(plan.renamed).toEqual([]);
+});
+
 // ── Export ──────────────────────────────────────────────────────────────
 
 test('what a library exports comes back unchanged into an empty one', () => {
@@ -358,6 +417,7 @@ test('what a library exports comes back unchanged into an empty one', () => {
       extra: { kept: true },
     }),
     saved({ id: 'c', name: 'Empty', holdings: [] }),
+    saved({ id: 'd', name: 'Drawn on', withdrawal: { amount: 500, frequency: 'monthly' } }),
   ];
   const plan = planImport([], exportLibrary(library).text);
   expect(plan.error).toBeNull();

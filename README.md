@@ -507,11 +507,13 @@ behind it:
   volatility and by downside deviation respectively; both are null with
   a reason, not scored against an assumed zero, whenever no risk-free
   rate is available for the run's own window and no override was given.
-- **A holding's gain is its final value less every dollar put into it** —
-  the `contribution` field per holding, labelled GAIN in the UI. Once a
-  rebalance starts moving money between holdings, a final value says
-  nothing about which holding earned it, so the flows have to net out. The
-  per-holding gains sum to the portfolio's.
+- **A holding's gain is its final value, plus every dollar taken out of
+  it, less every dollar put into it** — the `contribution` field per
+  holding, labelled GAIN in the UI. Once a rebalance starts moving money
+  between holdings, a final value says nothing about which holding earned
+  it, so the flows have to net out; and money a withdrawal took was still
+  earned, so it is added back. The per-holding gains sum to the
+  portfolio's.
 - **A figure the run cannot support is `null`, not `0`.** Two days of
   history has no growth rate and no volatility, and reporting zero would
   claim a portfolio held for two days was riskless.
@@ -587,6 +589,78 @@ The UI labels both families, shows the paid-in line as a staircase over
 the stacked chart so the gap to the top of the stack is the gain, and adds
 a money-weighted column to the comparison table as soon as any line is
 funded this way.
+
+### Recurring withdrawals
+
+The other direction (issue #150): `{"amount": 500, "frequency": "monthly"}`
+as a `withdrawal`, beside the holdings, answers whether a portfolio would
+have survived a regular draw. It is **off by default** on the same terms —
+absent, null and an amount of zero are all the same request — and it is a
+fixed dollar amount, not a percentage of the value, and not adjusted for
+inflation.
+
+**A portfolio pays in or draws out, never both** (ADR 0002). Sending a
+`contribution` and a `withdrawal` together is a **400**, and a negative
+`contribution.amount` is a 400 that points at `withdrawal`. The
+money-weighted return is only guaranteed one answer while a run's cash
+flows change sign once, and a deposit and a withdrawal in the same month
+mostly cancel out anyway. For the same reason there is no way to start a
+withdrawal later than the first period: the window is view state in the URL,
+not a property of the portfolio, and a start date on the portfolio would
+mean something different under every window.
+
+Money leaves on **the first row of each new period after the start**, the
+same rule and for the same reason a contribution lands on (the 1st is often
+not a trading day, and old history is bucketed). It comes out of **every
+holding, and any cash still waiting for a holding to list, in proportion to
+what each is worth at that moment** — not over the target weights the way a
+contribution is spread. Under buy and hold the holdings have drifted, and a
+target weight can ask for more of a holding than it is now worth; pro rata
+changes how much the portfolio holds and never what the mix is. A rebalance
+on the same row then restores the targets from what is left, so the
+withdrawal is taken first.
+
+**It can run out, and says so.** Shorting is not modelled, so a withdrawal
+the portfolio cannot cover takes what is left and nothing comes out after
+that. The run keeps its window — it is a real answer to "would this have
+lasted", and shortening it would break a like-for-like comparison against a
+line that did — and `metrics.depletedOn` names the row it ran out on. Null
+there means the money lasted; it does not mean the date is unknown. Nothing
+else in the response can say the money is gone: the time-weighted figures are
+read off a value that a withdrawal does not move, so a portfolio drawn to
+nothing on flat prices reports a return of zero.
+
+Every figure downstream reads what was **actually taken**, never what was
+scheduled: a $600 a month schedule against a $1,000 balance takes $600 and
+then $400.
+
+- **Withdrawn** is the sum of what was taken out, and the `withdrawn` series
+  is its running total (null when there is no schedule).
+- **Paid in does not shrink.** It stays the opening amount, because netting
+  the two would let it go negative for a portfolio drawn on for longer than
+  it was funded.
+- **Gain adds it back**: `finalValue + withdrawn − totalInvested`. Money
+  that was taken out was still earned — a portfolio that returned $2,000 and
+  paid $1,500 of it to its holder made $2,000, not $500. A holding's own gain
+  follows the same rule, and the per-holding gains still sum to the
+  portfolio's.
+- **The money-weighted return** counts each withdrawal as a positive flow on
+  its own date. It can be healthy over a holding that fell: a withdrawal
+  taken at the top came out before the fall.
+- **The time-weighted figures** (total return, CAGR, volatility, drawdown)
+  are unaffected by cash leaving, for the reason they are unaffected by cash
+  arriving.
+
+The UI has one **Money flow** control — None, Pay in or Withdraw, then a
+frequency and an amount — so "both" is a state nobody can reach; switching
+direction keeps the amount and frequency. A portfolio that ran out says so in
+a sentence, and a comparison line that ran out is flagged beside its name.
+The chart draws no paid-in line for a portfolio drawn on (net of
+withdrawals it would fall below zero and leave the plot); its tooltip reads
+"paid in · withdrawn · gain" instead. A record that somehow holds both
+schedules — a hand-edited library, backup or link — is read as no schedule
+by the library, skipped with a named reason by an import, and refused whole
+as a link.
 
 ### Dividends
 
@@ -678,8 +752,8 @@ the chart, up to six in total. A benchmark is deliberately not a portfolio:
 answering "did this beat SPY" should not require creating and then deleting
 a portfolio called SPY, so a benchmark is a ticker that lives in the URL,
 is simulated as a basket of one, and never touches the library. It is
-given the open portfolio's own amount and contribution schedule, so the
-comparison is like with like. Portfolio ids only mean something in the
+given the open portfolio's own amount and schedule — a contribution or a
+withdrawal, whichever it has — so the comparison is like with like. Portfolio ids only mean something in the
 browser that minted them, so a shared comparison link shows the ids it can
 find and drops the rest rather than erroring.
 
@@ -695,8 +769,14 @@ anything over 8 kB is refused before it is decoded.
 The payload is JSON with single-letter keys, UTF-8, base64url, and it
 carries its own version independent of the storage schema — it is a wire
 format other people's browsers have to read, so it changes for its own
-reasons. Version 2 added the contribution schedule; version 1 is still
-read as a portfolio that has none. The window and any benchmarks ride
+reasons. Version 2 added the contribution schedule; version 3 added the
+withdrawal (`w`), as its own key rather than a negative contribution — a
+build that predates it reads a contribution at or below zero as "no
+schedule", and would show a withdrawing portfolio as a lump sum, where it
+refuses a version it does not know and says so. Versions 1 and 2 are still
+read, as a portfolio with no withdrawal (and, for version 1, no
+contribution); a payload carrying both a contribution and a withdrawal is
+refused whole. The window and any benchmarks ride
 along as ordinary query parameters, because reproducing the sender's
 *result* means reproducing the dates too. Comparison ids do not: they name
 portfolios that only exist in the sender's browser.
@@ -732,7 +812,7 @@ It is not a share link, and the differences are the point. A link is a
 *definition* for someone else to look at: no id, no dates, read-only until
 they keep a copy. A Backup is your own library at full fidelity — each
 portfolio's id, its created and updated dates, its origin note, its
-contribution schedule, and any fields a newer build of the app added that
+contribution or withdrawal schedule, and any fields a newer build of the app added that
 this one does not know about — and what an import produces is ordinary
 saved portfolios. It carries no view state: the window, benchmark and
 comparison live in the URL because they belong to how you were looking at
@@ -815,6 +895,9 @@ stored: the portfolio arrives in the request and leaves in the response.
     "amount": 100,
     "frequency": "monthly"           // monthly | quarterly | yearly
   },
+  "withdrawal": null,                // optional, same shape, for money taken
+                                     //   out (issue #150); sending both a
+                                     //   contribution and a withdrawal is a 400
   "rate": null                       // risk-free rate override, % p.a. (issue
                                       //   #103), scoring Sharpe/Sortino (issue
                                       //   #112); omit for the tracked series.
@@ -829,13 +912,18 @@ stored: the portfolio arrives in the request and leaves in the response.
   "startValue": 10000.0,
   "rebalance": "none",
   "contribution": { "amount": 100.0, "frequency": "monthly" },  // or null
+  "withdrawal": null,                // the same, for money taken out; at most
+                                     //   one of the two is ever set
 
   "dates": ["2025-09-08", …],
   "total": [10000.0, …],             // portfolio value per date
   "cash": [0.0, …],                  // allocations still waiting to buy in
   "invested": [10000.0, …],          // running sum of money paid in
-  "unitValue": [10000.0, …],         // flow-free series the metrics use;
-                                     //   null when there are no contributions
+  "withdrawn": null,                 // running sum of money actually taken out;
+                                     //   null when there is no withdrawal
+  "unitValue": [10000.0, …],         // flow-free series the metrics use; null
+                                     //   when there are no contributions or
+                                     //   withdrawals
 
   "metrics": {
     "startValue": 10000.0,
@@ -855,7 +943,11 @@ stored: the portfolio arrives in the request and leaves in the response.
     "riskFreeRateSource": "tracked", // "tracked" or "override" (the request's `rate`)
     "contributed": 1200.0,           // recurring contributions only
     "totalInvested": 11200.0,        // startValue + contributed
-    "gain": 2817.3,                  // finalValue − totalInvested
+    "withdrawn": 0.0,                // recurring withdrawals: what was actually
+                                     //   taken out (0 when there is none)
+    "depletedOn": null,              // the row a withdrawal left nothing behind;
+                                     //   null means the money lasted, not "unknown"
+    "gain": 2817.3,                  // finalValue + withdrawn − totalInvested
     "moneyWeightedReturn": 27.0779,  // IRR, percent
     "dividendIncome": 229.92,        // reported, never added to the value
     "dividendYield": 2.0529,         // on totalInvested, percent
@@ -898,8 +990,9 @@ mostly unreachable from the app.
 
 **`POST /api/portfolio/risk`** (issue #113) — how independently a
 basket's own holdings actually move. The same body `simulate` takes
-(`value`, `rebalance`, `contribution` and `rate` are accepted for shape
-parity — a caller can send it the exact request it built for `simulate`
+(`value`, `rebalance`, `contribution`, `withdrawal` and `rate` are accepted
+for shape parity — a caller can send it the exact request it built for
+`simulate`
 — but unused: this is a question about the basket's price history, not
 about a value simulated over it), its own endpoint rather than folded
 into `simulate`'s response, because a correlation matrix over the basket
@@ -966,7 +1059,9 @@ for the symbol — a fact about the symbol, and not one to retry.
 
 Every tile in the portfolio summary — Final Value, Total Return, CAGR,
 Volatility, Max Drawdown, the four account-side tiles that appear once
-something is actually contributed, and the six optional risk tiles issue
+something is actually paid in or taken out (Paid In, Contributed or
+Withdrawn, Gain, Money-Weighted Return — a portfolio does one or the other,
+so the unused tile is left out), and the six optional risk tiles issue
 #112 added (Time Under Water, Share Under Water, Pain Index, Calmar,
 Sharpe, Sortino) — comes from a metric registry
 (`backend/portfolio_metrics/`, issue #104), the same self-describing-plugin

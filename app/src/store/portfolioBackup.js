@@ -23,7 +23,7 @@
  * a future envelope would be told apart from this one.
  *
  * What travels is the portfolio as the session holds it - id, dates,
- * origin note, contribution schedule, and any fields a newer build added
+ * origin note, contribution or withdrawal schedule, and any fields a newer build added
  * that this one does not know. What does not is view state: the window,
  * the benchmark and the comparison live in the URL because they belong to
  * the way somebody is looking, not to the portfolio.
@@ -58,8 +58,10 @@
  * then holds the result to the limits that migration deliberately does not
  * enforce, because a portfolio that imports happily and then cannot be
  * simulated is a portfolio that is broken twice: no more than
- * MAX_LINK_HOLDINGS holdings, no ticker twice, every ticker a ticker. An
- * entry failing one is skipped and named with its reason, never quietly
+ * MAX_LINK_HOLDINGS holdings, no ticker twice, every ticker a ticker, and not
+ * both a recurring contribution and a recurring withdrawal (ADR 0002 - migration
+ * answers that by dropping both, which would import the entry quietly as a
+ * lump sum). An entry failing one is skipped and named with its reason, never quietly
  * trimmed. Only a file that is not a Backup at all, is too large, or has
  * nothing in it that can be imported is refused whole - and then nothing is
  * written, which the message says.
@@ -70,7 +72,7 @@
  * `planImport` returns. Saving a file is `utils/downloadFile.js`'s job.
  */
 import { MAX_LINK_HOLDINGS, TICKER_PATTERN } from './portfolioLink';
-import { migratePortfolio, newId } from './portfolioStorage';
+import { hasBothSchedules, migratePortfolio, newId } from './portfolioStorage';
 
 /** What the envelope's `format` says. A fixed string naming this app's
  *  portfolios; the shortened `ma-` is for filenames only. */
@@ -91,6 +93,8 @@ const TOO_LARGE = `This file is too large to be a portfolio backup. ${UNCHANGED}
 const UNREADABLE = `This file could not be read. ${UNCHANGED}`;
 const NONE_USABLE = `None of the portfolios in this file could be imported. ${UNCHANGED}`;
 const NOT_A_PORTFOLIO = 'It is not a portfolio, or it has no name.';
+const BOTH_SCHEDULES =
+  'It has both a recurring contribution and a recurring withdrawal, and a portfolio has one or the other.';
 
 /** Refusals and successes have the same shape, so callers never have to ask
  *  which one they got. `failed` is kept on a refusal: a file in which every
@@ -216,7 +220,13 @@ export function planImport(existing, text) {
       failed.push({ name: `Entry ${index + 1}`, reason: NOT_A_PORTFOLIO });
       return;
     }
-    const problem = problemWith(migrated);
+    // Asked of the entry as the file wrote it: migration has already
+    // answered a record with both schedules by dropping both, so what it
+    // hands back cannot say that it had them (#150, ADR 0002). Importing it
+    // without either would be a portfolio that quietly simulates as a lump
+    // sum - named and skipped instead, like anything else this app could not
+    // have made.
+    const problem = hasBothSchedules(raw) ? BOTH_SCHEDULES : problemWith(migrated);
     if (problem) {
       failed.push({ name: migrated.name, reason: problem });
       return;

@@ -24,6 +24,7 @@
 import { useMemo } from 'react';
 import { useDebouncedValue } from './useDebouncedValue';
 import { useFetch } from './useFetch';
+import { scheduleFields } from '../store/portfolioStorage';
 import { api } from '../utils/api';
 
 /** Short: every change reaching here is now a deliberate one, and making
@@ -42,10 +43,11 @@ export function usePortfolioSimulation(portfolio, windowRequest) {
       holdings: holdings.map(h => ({ ticker: h.ticker, weight: h.weight })),
       value: portfolio.value,
       rebalance: portfolio.rebalance,
-      // Omitted rather than sent as null when there is none, so a
-      // portfolio that never had a schedule keys the same request it
-      // always did and reuses the same cached run.
-      ...(portfolio.contribution ? { contribution: portfolio.contribution } : {}),
+      // The schedule it has - a contribution or a withdrawal, never both
+      // - and nothing when there is none, so a portfolio that never had
+      // one keys the same request it always did and reuses the same
+      // cached run.
+      ...scheduleFields(portfolio),
       // Either a period or a start/end pair, never both - the backend
       // refuses the combination rather than picking one.
       ...(windowRequest || {}),

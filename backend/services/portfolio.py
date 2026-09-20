@@ -41,6 +41,23 @@ The model, in the order the decisions were made:
     lump sum, never a contribution, so a year of monthly contributions is
     the twelve times money arrived *after* the start.
 
+  - **Withdrawals are the other direction, and a portfolio has one or the
+    other** (issue #150, ADR 0002). A fixed amount leaves on the first row
+    of each new period - the same timing rule, for the same reason - and
+    comes out of every holding, and of any cash still waiting for a holding
+    to list, in proportion to what each is worth at that moment. Not over
+    the target weights the way a contribution is spread: under buy and hold
+    the holdings have drifted, and a target weight can ask for more of a
+    holding than it is now worth. Pro rata changes how much the portfolio
+    holds and never what the mix is; a rebalance on the same row then
+    restores the targets from what is left, so the withdrawal is taken
+    first. A portfolio that cannot cover one takes what is left and pays
+    nothing after that - shorting is not modelled - and every figure
+    downstream reads what was actually taken, never what was scheduled.
+    `depletedOn` names the row it ran out on. Both schedules at once is
+    refused: the money-weighted return is only guaranteed one answer while
+    the run's cash flows change sign once.
+
 How the run is then scored, in one place because a number is only worth
 as much as the convention behind it:
 
@@ -48,9 +65,10 @@ as much as the convention behind it:
     rows of the run's own calendar.
 
   - **Performance is time-weighted; the account is money-weighted.** A
-    deposit is not a gain. Paying $100 into a $1,000 portfolio moves the
-    total 10% on a day the market did nothing, and left alone that flows
-    straight into the volatility, the drawdown and the return. So every
+    deposit is not a gain, and a withdrawal is not a loss. Paying $100 into
+    a $1,000 portfolio moves the total 10% on a day the market did nothing
+    (and taking $100 out moves it 10% the other way), and left alone that
+    flows straight into the volatility, the drawdown and the return. So every
     metric describing *the portfolio* - total return, CAGR, volatility,
     drawdown - is computed on a flow-free unit value that only moves when
     prices do, while the money-weighted return (IRR) answers the different
@@ -82,10 +100,13 @@ as much as the convention behind it:
     price moving - and a holding whose dividends are not on record reports
     that it does not know rather than reporting nothing.
 
-  - **A holding's contribution is its final value less every dollar put
-    into it.** Once a rebalance starts moving money between holdings, a
-    final value says nothing about which holding earned it; the flows
-    have to be netted out. Contributions add up to the portfolio's gain.
+  - **A holding's contribution is its final value, plus every dollar taken
+    out of it, less every dollar put into it.** Once a rebalance starts
+    moving money between holdings, a final value says nothing about which
+    holding earned it; the flows have to be netted out. Money a withdrawal
+    took was still earned, so it is added back, and the portfolio's own
+    gain is `finalValue + withdrawn - totalInvested` for the same reason.
+    Contributions add up to the portfolio's gain.
 
 The calendar every holding is aligned onto is the union of the dates the
 price rows cover, not the intersection: one holding missing one day must
@@ -148,11 +169,23 @@ REBALANCE_FREQUENCIES = ("none", "monthly", "quarterly", "yearly")
 # contribution is absent by being absent, and an amount of zero is off.
 CONTRIBUTION_FREQUENCIES = ("monthly", "quarterly", "yearly")
 
+# How often money is taken out, when it is - the same three periods, on the
+# same "first row of a new period" rule (issue #150). A separate name rather
+# than a reuse of the tuple above because the two schedules are separate
+# concepts that happen to agree today, and a frequency added to one should
+# not silently appear on the other.
+WITHDRAWAL_FREQUENCIES = ("monthly", "quarterly", "yearly")
+
 # Money is reported to the cent. Each holding's value is rounded, and the
 # total is summed from those rounded parts rather than computed alongside
 # them, so a stacked chart's bands add up to exactly the total line drawn
 # above them.
 MONEY_DP = 2
+
+# A balance smaller than this after a withdrawal is empty, not a sliver: half
+# a cent is below what MONEY_DP rounds a value to, so it could never be seen
+# on a series anyway (issue #150).
+EMPTY_BELOW = 0.5 * 10 ** -MONEY_DP
 
 # PERCENT_DP and DAYS_PER_YEAR are imported from services.stats above
 # rather than redefined here - the IRR discounting below (`_npv`) has to
@@ -201,10 +234,14 @@ def _money_weighted_return(flows: list[tuple[pd.Timestamp, float]]) -> float | N
     $1,100 after a $100 deposit last week has not returned 10%.
 
     `flows` is signed from the holder's point of view: negative going in,
-    and one positive flow at the end for what it is all worth. That shape
-    has exactly one sign change, so there is exactly one rate that solves
-    it, and bisection finds it without needing a derivative or a starting
-    guess to be lucky. NPV falls as the rate rises, so the bracket is
+    positive coming out - each recurring withdrawal on its own date, and
+    one last flow at the end for what it is all worth. A portfolio pays in
+    or draws out, never both (ADR 0002), so that shape has exactly one sign
+    change either way - money in and then one positive flow, or the opening
+    amount and then only positive ones - so there is exactly one rate that
+    solves it, and bisection finds it without needing a derivative or a
+    starting guess to be lucky. That is the property the both-schedules
+    refusal protects. NPV falls as the rate rises, so the bracket is
     widened upward until it does turn negative.
 
     None when the question does not arise - nothing was paid in, or no
@@ -278,6 +315,8 @@ def _metrics(
     units: list[float],
     flows: list[tuple[pd.Timestamp, float]],
     contributed: float,
+    withdrawn: float,
+    depleted_on: str | None,
     income: dict[str, float],
     unknown: list[str],
     rate: float | None,
@@ -413,8 +452,22 @@ def _metrics(
         # `startValue`, and adding the two is what `totalInvested` is for.
         "contributed": round(contributed, MONEY_DP),
         "totalInvested": invested,
+        # Recurring withdrawals only (issue #150): what was actually taken
+        # out, which is less than what was scheduled for a portfolio that
+        # ran dry. Never subtracted from `totalInvested` - that stays what
+        # was paid in, because netting the two would let it go negative
+        # for a portfolio drawn on for longer than it was funded.
+        "withdrawn": round(withdrawn, MONEY_DP),
+        # The row on which a withdrawal left nothing behind. Nothing else in
+        # the response says the money is gone: the time-weighted figures
+        # are read off a unit value that a withdrawal does not move. Null
+        # means the run never ran out - it is not an "unknown".
+        "depletedOn": depleted_on,
         # What the portfolio made, as opposed to what was paid into it.
-        "gain": round(final_value - invested, MONEY_DP),
+        # Money taken out was still earned, so it is added back: a
+        # portfolio that returned $2,000 and paid $1,500 of it to its
+        # holder made $2,000, not $500.
+        "gain": round(final_value + withdrawn - invested, MONEY_DP),
         "moneyWeightedReturn": money_weighted,
         # Income over the window, from the holdings the `dividends` table
         # can speak for. Never added to `finalValue`: the adjusted closes
@@ -481,42 +534,62 @@ def _normalise_holdings(holdings) -> list[tuple[str, float]]:
     return [(ticker, weight / total_weight) for ticker, weight in pairs]
 
 
-def _normalise_contribution(contribution) -> tuple[float, str | None]:
-    """Validate an optional recurring contribution into (amount, frequency).
+def _normalise_schedule(
+    schedule, field: str, frequencies: tuple[str, ...], negative_hint: str
+) -> tuple[float, str | None]:
+    """Validate an optional `{amount, frequency}` schedule - a recurring
+    contribution or a recurring withdrawal, which are checked identically -
+    into (amount, frequency). `field` names it in every message.
 
     Off is `(0.0, None)`, and there are three ways to mean it: send
     nothing, send null, or send an amount of zero. All three are the same
     request, and all three must simulate exactly as a run with no
-    contributions at all - which is what makes "off by default" a promise
+    schedule at all - which is what makes "off by default" a promise
     rather than a hope.
 
-    A frequency is required as soon as there is an amount to pay: "$100"
+    A frequency is required as soon as there is an amount to move: "$100"
     without saying how often is not a schedule, and picking one for the
-    caller would put money into their portfolio on dates they never asked
-    for. Raises ValueError naming what is wrong.
+    caller would move money in or out of their portfolio on dates they
+    never asked for. Raises ValueError naming what is wrong.
     """
-    if contribution is None:
+    if schedule is None:
         return 0.0, None
-    if not isinstance(contribution, dict):
-        raise ValueError("`contribution` must be an object with `amount` and `frequency`")
+    if not isinstance(schedule, dict):
+        raise ValueError(f"`{field}` must be an object with `amount` and `frequency`")
 
-    amount = contribution.get("amount", 0) or 0
+    amount = schedule.get("amount", 0) or 0
     if not isinstance(amount, (int, float)) or isinstance(amount, bool) or not math.isfinite(amount):
-        raise ValueError(f"`contribution.amount` must be a number: {amount!r}")
+        raise ValueError(f"`{field}.amount` must be a number: {amount!r}")
     if amount < 0:
-        raise ValueError(
-            f"`contribution.amount` cannot be negative ({amount}) - withdrawals are not modelled"
-        )
+        raise ValueError(f"`{field}.amount` cannot be negative ({amount}){negative_hint}")
     if amount == 0:
         return 0.0, None
 
-    frequency = contribution.get("frequency")
-    if frequency not in CONTRIBUTION_FREQUENCIES:
+    frequency = schedule.get("frequency")
+    if frequency not in frequencies:
         raise ValueError(
-            "`contribution.frequency` must be one of "
-            f"{', '.join(CONTRIBUTION_FREQUENCIES)}: {frequency!r}"
+            f"`{field}.frequency` must be one of {', '.join(frequencies)}: {frequency!r}"
         )
     return float(amount), frequency
+
+
+def _normalise_contribution(contribution) -> tuple[float, str | None]:
+    """Validate an optional recurring contribution into (amount, frequency)."""
+    return _normalise_schedule(
+        contribution, "contribution", CONTRIBUTION_FREQUENCIES,
+        # Money going out has its own field rather than a sign on this one:
+        # an older build reads an amount at or below zero as "no schedule",
+        # and would quietly simulate a withdrawal as a lump sum (ADR 0002).
+        negative_hint=" - to take money out, send a `withdrawal` instead",
+    )
+
+
+def _normalise_withdrawal(withdrawal) -> tuple[float, str | None]:
+    """Validate an optional recurring withdrawal into (amount, frequency)."""
+    return _normalise_schedule(
+        withdrawal, "withdrawal", WITHDRAWAL_FREQUENCIES,
+        negative_hint=" - to pay money in, send a `contribution` instead",
+    )
 
 
 def _verify_absent(tickers: list[str], window_start: str) -> None:
@@ -730,6 +803,7 @@ def simulate_portfolio(
     rebalance: str = "none",
     contribution=None,
     rate: float | None = None,
+    withdrawal=None,
 ) -> dict:
     """Simulate `holdings` over a window, starting from `value` in cash.
 
@@ -761,6 +835,14 @@ def simulate_portfolio(
     in, so a chart can draw the money against the value without having to
     reconstruct the schedule.
 
+    `withdrawal` is the same shape and the same off-by-default (issue
+    #150): `{"amount": 100, "frequency": "monthly"}` takes that much out on
+    the first row of every new month after the start. It cannot be
+    combined with a `contribution` (ValueError). The `withdrawn` array
+    beside `invested` is the running sum of what was actually taken - null
+    when there is no schedule - and `metrics.depletedOn` the row a
+    withdrawal left nothing behind, null when the money lasted.
+
     `rate` is optional too (issue #112, filed alongside #103): an
     override for the annual risk-free rate Sharpe/Sortino are scored
     against, percent per annum. Omitted, the tracked series' own average
@@ -791,6 +873,17 @@ def simulate_portfolio(
             f"`rebalance` must be one of {', '.join(REBALANCE_FREQUENCIES)}: {rebalance!r}"
         )
     pay_in, pay_every = _normalise_contribution(contribution)
+    pay_out, take_every = _normalise_withdrawal(withdrawal)
+    if pay_every is not None and take_every is not None:
+        # ADR 0002. Not a preference for tidiness: the money-weighted return
+        # is only guaranteed one answer while the run's cash flows change
+        # sign once, and money going both in and out can change it several
+        # times. Checked after both are normalised, so an amount of zero or
+        # a null - which mean off - is not a second schedule.
+        raise ValueError(
+            "`contribution` and `withdrawal` cannot both be set - a portfolio "
+            "pays in or draws out, never both"
+        )
 
     tickers = [ticker for ticker, _ in weights]
     closes = get_closes(tickers, period=period, start=start, end=end, min_tickers=1)
@@ -828,8 +921,16 @@ def simulate_portfolio(
     cash_flows: list[tuple[pd.Timestamp, float]] = []
     paid_in = float(value)
     contributed = 0.0
-    # What arrived on each row, which is exactly what has to be taken back
-    # out again before a return is measured (see stats.unit_values).
+    # Money taken out, running - the mirror of `invested_series`, and just
+    # as much a series rather than a total so a chart can read the account
+    # at any date without reconstructing the schedule.
+    withdrawn = 0.0
+    withdrawn_series: list[float] = []
+    depleted_on: str | None = None
+    # What crossed the portfolio's edge on each row - positive for money
+    # arriving, negative for money leaving - which is exactly what has to be
+    # taken back out again before a return is measured (see
+    # stats.unit_values).
     inflows: list[float] = []
     values: dict[str, list[float]] = {ticker: [] for ticker in tickers}
     first_priced: dict[str, str | None] = {ticker: None for ticker in tickers}
@@ -924,6 +1025,49 @@ def simulate_portfolio(
                     flows[ticker] += slice_of
                     invested[ticker] += slice_of / price
 
+        # Money leaving, on the same rule and in the same slot: before a
+        # rebalance, so the targets are restored from what is left rather
+        # than sold down to and then drawn on. Every holding - and any cash
+        # still waiting for a holding to list - gives up the same fraction
+        # of its current value, so a withdrawal changes how much is held
+        # and never what the mix is. Spreading it over the *target* weights
+        # the way a contribution is would try to sell more of a drifted
+        # holding than it is now worth.
+        taken = 0.0
+        if (
+            take_every is not None
+            and previous is not None
+            and _period_key(timestamp, take_every) != _period_key(previous, take_every)
+        ):
+            live_total = sum(invested[t] * p for t, p in priced.items()) + sum(idle.values())
+            # Shorting is not modelled, so a withdrawal the portfolio cannot
+            # cover takes what is left and the portfolio is empty from here
+            # on: `taken` is what actually left, and everything downstream -
+            # the gain, the money-weighted return, the series - reads that,
+            # never the scheduled amount. Half a cent is the ledger's own
+            # precision (MONEY_DP), so a balance that would be left with
+            # less than that is empty rather than a fraction of a cent.
+            if live_total > 0:
+                emptied = live_total - pay_out < EMPTY_BELOW
+                taken = live_total if emptied else pay_out
+                fraction = 1.0 if emptied else pay_out / live_total
+                for ticker in tickers:
+                    price = priced.get(ticker)
+                    if price is not None:
+                        # Money out of the position, not a loss in it:
+                        # netted from what was put in, so the holding's gain
+                        # stays what it made (see "flows" above).
+                        flows[ticker] -= invested[ticker] * price * fraction
+                        invested[ticker] -= invested[ticker] * fraction
+                    idle[ticker] -= idle[ticker] * fraction
+                withdrawn += taken
+                cash_flows.append((timestamp, taken))
+                # The first row a withdrawal left nothing behind. Null for
+                # a run that never got there means "did not run out" - not
+                # "unknown", which is why this is not a reason string.
+                if emptied and depleted_on is None:
+                    depleted_on = timestamp.date().isoformat()
+
         if (
             rebalance != "none"
             and previous is not None
@@ -954,7 +1098,8 @@ def simulate_portfolio(
         cash_series.append(cash)
         totals.append(round(held + cash, MONEY_DP))
         invested_series.append(round(paid_in, MONEY_DP))
-        inflows.append(arrived)
+        withdrawn_series.append(round(withdrawn, MONEY_DP))
+        inflows.append(arrived - taken)
         previous = timestamp
 
     # The opening lump sum, and the closing value it all turned into: the
@@ -974,19 +1119,31 @@ def simulate_portfolio(
         "contribution": (
             {"amount": round(pay_in, MONEY_DP), "frequency": pay_every} if pay_every else None
         ),
+        # The same, for money taken out (issue #150). At most one of the two
+        # is ever set: a portfolio pays in or draws out, never both.
+        "withdrawal": (
+            {"amount": round(pay_out, MONEY_DP), "frequency": take_every} if take_every else None
+        ),
         "dates": dates,
         "total": totals,
         "cash": cash_series,
         "invested": invested_series,
+        # Running sum of what was actually taken out. Null when there is no
+        # withdrawal schedule, as `unitValue` is when nothing moved it away
+        # from `total` - a copy of zeros would say there was a schedule.
+        "withdrawn": withdrawn_series if take_every else None,
         # The flow-free series the metrics are read off, for a chart that
         # plots return rather than value: a percentage taken off `total`
-        # would count the deposits, and then the chart and the summary
-        # beside it would disagree about the same line. Null when there
-        # were no contributions, because then it is `total` again and
-        # sending a copy would say there was a difference.
+        # would count the deposits (or read the withdrawals as losses), and
+        # then the chart and the summary beside it would disagree about the
+        # same line. Null when nothing was paid in or taken out, because
+        # then it is `total` again and sending a copy would say there was a
+        # difference.
         "unitValue": None if units is totals else [round(u, MONEY_DP) for u in units],
         "metrics": _metrics(
             totals, dates, units, cash_flows, contributed,
+            withdrawn=withdrawn,
+            depleted_on=depleted_on,
             income={t: v for t, v in income.items() if t in on_record},
             unknown=[t for t in tickers if t not in on_record],
             rate=resolved_rate,
