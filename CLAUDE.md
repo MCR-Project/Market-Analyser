@@ -97,7 +97,8 @@ decide what a portfolio may be and how it travels (`portfolioBackup.js`, issue
 #148; `portfolioLink.js` and `portfolioStorage.js`, issue #150), the one that holds
 the candle switch (`candlePreference.js`, issue #152), and the `utils/` ones that
 decide which candles a price chart draws and what hovering one says
-(`candles.js`, `chartTooltip.js`). Logic that is worth
+(`candles.js`, `chartTooltip.js`), and the one that decides what the header says
+about how recent the daily fetch was (`freshness.js`, issue #154). Logic that is worth
 testing goes in a pure module and is tested through its public function, the
 way `planImport` is; components, hooks and dialogs are checked by using the
 running app.

@@ -170,6 +170,12 @@ export const api = {
     fetchJson(`/correlation/${etfId}?period=${period}`, opts),
   getSectors: (etfId, opts = {}) => fetchJson(`/sectors/${etfId}`, opts),
 
+  // When the daily fetch job last finished and when the next run is due
+  // (issue #154) — one figure for the whole database, read by the header's
+  // Freshness indicator (hooks/useFreshness.js). All three fields null, with
+  // a 200, means there is nothing to report; a 503 is retried like any other.
+  getFreshness: (opts = {}) => fetchJson('/freshness', opts),
+
   // Ticker lookup. Search is the as-you-type path and never leaves the
   // tracked universe; resolve is asked once, for a symbol somebody chose,
   // and answers 404 for one that cannot be priced at all.

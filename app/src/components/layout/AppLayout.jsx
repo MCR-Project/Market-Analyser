@@ -14,6 +14,7 @@
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { useTheme } from '../../hooks/useTheme';
+import { useFreshness } from '../../hooks/useFreshness';
 import { LiveStatusContext } from '../../hooks/useLiveStatus';
 import { DEFAULT_ETF_ID } from '../../store/useEtfStore';
 import { Header } from './Header';
@@ -25,6 +26,11 @@ export function AppLayout() {
   // Whichever page owns live data publishes it here for the badge.
   const [isLive, setIsLive] = useState(undefined);
   const liveStatus = useMemo(() => ({ isLive, publish: setIsLive }), [isLive]);
+
+  // Unlike the badge above, freshness is a fact about the whole database, so
+  // the layout reads it itself rather than have a page publish it — but only
+  // once the app is on a page that reads prices. Docs shows no market data.
+  const freshness = useFreshness(!pathname.startsWith('/docs'));
 
   // Remembered so the "Analyser" tab returns to the fund and view you
   // left, not the default ETF. Adjusted during render rather than in an
@@ -44,6 +50,7 @@ export function AppLayout() {
           theme={theme}
           onToggleTheme={toggleTheme}
           isLive={isLive}
+          freshness={freshness}
           dashboardPath={dashboardPath}
         />
         <Outlet />

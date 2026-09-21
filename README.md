@@ -53,7 +53,9 @@ in `.env` — see `.env.example`):
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
   ETF holdings, and the tracked risk-free rate (`risk_free_rate` table,
   issue #103 — see "Scoring against a risk-free rate" below) for everything
-  tracked. Runs on a cron via the "Daily ticker data fetch" GitHub Action.
+  tracked, then records the run in `fetch_run` — see
+  [Freshness](#freshness-is-the-data-from-a-recent-run). Runs on a cron via the
+  "Daily ticker data fetch" GitHub Action.
 
 #### How prices are stored
 
@@ -100,6 +102,72 @@ the same holding simulated on its own daily rows. Before this, a partial
 answer was returned short and the simulator read the missing column as a
 holding that had not listed yet — valuing an ETF at zero for a whole run
 (issue #86).
+
+#### Freshness: is the data from a recent run?
+
+Everything above is only as current as the last run of the daily job, and
+nothing used to say how long ago that was. The header now does (issue #154,
+[ADR 0003](docs/adr/0003-the-daily-job-records-its-own-runs.md)) — on the
+Analyser and Portfolios pages, not on Docs, which show no market data.
+
+**The job records itself.** `fetch_daily.py` writes one `fetch_run` row
+(`sql/005_record_daily_job_runs.sql`) right after its price sync and before
+compaction: `failed`, the number of distinct ids it could not refresh (the ETF
+sync, the risk-free rate, prices and metadata — not compaction, which leaves the
+data as fresh as it was), and a `finished_at` the *database* stamps. The
+"no tickers to sync" exit writes one too, because that run finished. A run that
+crashes first, or whose own write fails, leaves no row: a row would claim a
+finish for a run that did not, and the missing row is what makes the data read as
+behind. It is not read off `ticker.last_fetch` — a date on the runner's UTC clock,
+and GitHub starts the cron up to hours late (15 minutes to 7h 41m across the runs
+from 17 August to 19 September 2026), so one date can mean either of two days'
+runs and a missed Friday goes unnoticed until the Tuesday after.
+
+**The backend names the deadline; the browser compares.** `GET /api/freshness`
+answers `finishedAt` and `dueBy` (UTC, ISO 8601) and `failed`. `dueBy` is the
+first scheduled slot strictly after the run finished, plus a 12-hour grace: a
+Friday run that finished on Saturday morning is due Tuesday 10:30 UTC, a Thursday
+run that finished on Friday morning is due Saturday 10:30 UTC. The schedule
+(22:30 UTC, Monday to Friday) and the grace are in `backend/config.py`, and a test
+reads `.github/workflows/fetch-daily.yml` and fails if the cron line and the
+config disagree. The browser compares `dueBy` with its own clock, so there is no
+calendar logic in the client and the answer can be cached for 15 minutes.
+
+- **Nothing to report** — no Supabase configured, no run recorded yet, or the
+  `fetch_run` table not created yet (the backend can be deployed before `sql/005`
+  is applied) — is a `200` with all three fields `null`, which the header shows as
+  unknown. None of those changes by asking again, and a 503 would have the
+  frontend retry them on every page load for nothing.
+- **A configured database that cannot be reached or read** is a `503` with
+  `Retry-After`, the same retried failure as every other read, and never a `500`.
+  That includes credentials being set but no client being buildable: that is a
+  cold process whose DNS or TLS is not ready, not a missing config, and only the
+  environment tells the two apart. Only a found run is cached; an absent answer
+  and a failure are not.
+
+**Four states, in this order of precedence.** *Unknown* (grey): no usable record,
+including a request that failed. *Behind* (red): the deadline has passed with no
+newer run — the data is from an old fetch, which is not the same as the job
+having failed. *Last run had failures* (amber): finished on time, but some ids
+were not refreshed. *On schedule* (green). The dot shows at every width; its
+words (`Refreshed 3h ago`, `Refresh overdue · last 2d ago`) step aside on a
+narrow window and stay in the page for a screen reader. The page *asks* once per
+load — no timer and no polling, since it is reloaded well inside a day — so a tab
+left open across a late run keeps what it first read until it is reloaded. It
+*judges* again, against the browser's clock and without a request, each time the
+tab comes back into view, so a tab left open for days turns to behind and its
+"3h ago" moves on when it is looked at rather than staying a green claim that
+stopped being true.
+
+**What it does not say.** It is when the job last finished, not the date of the
+latest close: a market holiday adds no prices and the job still runs, and that is
+not stale. It is one figure for the whole database, not per fund. And it has
+nothing to do with the `stale` flag on `GET /api/etf/{id}`, which means the
+holdings came from the live top-~10 fallback rather than the database — a
+completeness fact about that one answer.
+
+`sql/005` has to be applied before the first run of a `fetch_daily.py` that
+writes to it, or that run goes red on the insert.
 
 ### Measurements
 

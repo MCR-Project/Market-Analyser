@@ -224,6 +224,40 @@ Four things distinguish it from a price series:
   per-holding risk share) is a property of the basket's price history,
   not of anything scored against a risk-free rate.
 
+## Freshness (issue #154)
+
+The header says whether the data being read comes from a recent run of the daily
+fetch job or an old one. The reasoning is `docs/adr/0003-the-daily-job-records-its-own-runs.md`;
+the code is `services/freshness.py` and `GET /api/freshness`; the rest is where
+the rules touch the ones above.
+
+- **The job records itself, and the record is read, not inferred.** One
+  `fetch_run` row per run (`sql/005_record_daily_job_runs.sql`), written by
+  `scripts/fetch_daily.py` before compaction. `ticker.last_fetch` is not used:
+  it is a date on the runner's clock and GitHub starts the cron up to hours late.
+- **The backend names the deadline, the browser compares.** `dueBy` is the first
+  scheduled slot strictly after the run *finished*, plus a 12-hour grace, so the
+  answer can be cached for `CACHE_TTL_SECONDS` and still turn behind on time,
+  with no calendar logic in the client. `config.py`'s `FETCH_SCHEDULE_*` is a
+  second copy of the cron line in `.github/workflows/fetch-daily.yml`;
+  `tests/test_freshness.py` parses that file and fails if they differ. **Change
+  the cron and `config.py` together.**
+- **The status codes follow "Errors are the API" above.** Nothing to report — no
+  Supabase configured, no run yet, or the table not created yet (the migration is
+  applied by hand, so the backend can be deployed first) — is a `200` of nulls,
+  because a 503 would have the frontend retry, on a backoff, something that never
+  changes on its own. Supabase configured but unreachable or unreadable is
+  `DataUnavailable` → `503`, retried, never a `500` — including credentials set
+  but no client buildable, which is a cold start (`get_client_optional` returns
+  `None` for that exactly as for a missing config; only the environment says
+  which). Only a found run is cached; an absent answer and a failure are not.
+- **A figure the run cannot support is `null`, never `0`** (invariant 7):
+  `failed: 0` means a run finished and refreshed everything, and `null` means
+  there is no run to describe.
+- **It is not the `stale` flag.** `stale` on `GET /api/etf/{id}` means the
+  holdings came from the live top-~10 fallback, a completeness fact; a fund in
+  that state is as current as it gets. Do not reuse the word for age.
+
 ## Adding an endpoint
 
 1. Put the logic in `services/`, with the validation, the caching and the

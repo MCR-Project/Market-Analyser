@@ -49,6 +49,28 @@ weight", used only for Cap-Weight Tilt). One glossary entry; the qualifier in
 front tells you which.
 _Avoid_: Allocation (for the portfolio sense — "weight" is used even there)
 
+### Data freshness
+
+**Freshness**:
+When the daily fetch job last finished, read off the job's own record of its
+runs, and whether that is on schedule. A statement about the job, not about the
+market: a market holiday adds no new prices, and the data is as fresh as any
+other day because the job still ran. It is also not a per-fund fact — one figure
+covers everything the job maintains.
+_Avoid_: Stale (the ETF response's `stale` flag means the holdings came from the
+live top-~10 fallback rather than the database — a completeness fact, and a fund
+in that state is as current as it gets); Last updated, As-of date (each reads as
+the date of the latest close, which is a different fact)
+
+**Behind**:
+The state of Freshness where the job's newest finished run is older than the run
+that should have finished by now: its scheduled time plus a 12-hour grace has
+passed and nothing newer has finished. Says the data is from an old fetch, not
+that the job failed — a run that never started and one that crashed look the
+same. Distinct from a last run that finished with some tickers failed, where the
+data is current but partly not.
+_Avoid_: Stale (see Freshness), Late
+
 ### Correlation
 
 **Correlation**:

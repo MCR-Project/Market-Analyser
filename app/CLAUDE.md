@@ -28,11 +28,12 @@ src/App.jsx                  the dashboard shell (/etf/:etfId/:view)
 src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
 src/utils/candles.js         rows -> candles, and where a candle sits; chartTooltip.js builds the hover readout (both pure, both tested)
+src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/hooks/                   data fetching and view state
 src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup, candlePreference (+ their tests)
 src/views/                   one file per route or tab panel
 src/components/
-  layout/    AppLayout, Header
+  layout/    AppLayout, Header, FreshnessBadge
   ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, SegmentedControl, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
   charts/    PriceChart (line or candles), AreaChart, CandleChart, CandleToggle, BrushOverlay, ChartTooltip
   etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard
@@ -234,6 +235,49 @@ not take part: a simulated value has no open, high or low.
   `candleCentre(i, count)` and the hover finds them with `candleIndexAt` — both from
   `utils/candles.js`, so they cannot disagree about which candle is where.
 
+## The header's freshness (issue #154)
+
+The header says whether the data comes from a recent run of the daily fetch job.
+`AppLayout` owns the fetch (`hooks/useFreshness`), `utils/freshness.js` decides
+the state and the words, and `layout/FreshnessBadge` draws it beside the theme
+button. Unlike the LIVE badge — a fact a page publishes through `useLiveStatus`
+because it is about that page's own data — this is one figure for the whole
+database, so the layout reads it itself, and only once the app is on a page that
+reads prices: not on `/docs`, and no request at all if the app opens there.
+
+- **The backend names the deadline; the browser compares.** `GET /api/freshness`
+  answers `finishedAt`, `dueBy` and `failed`; `freshnessState(now, record)` asks
+  whether `now` has reached `dueBy`. No schedule or calendar logic belongs in the
+  client — a weekend is just a `dueBy` on Tuesday morning. `now` is the browser's
+  clock when the answer arrived or when the tab last came back into view,
+  whichever is later — read in the fetcher and in an event handler, never during
+  render.
+- **Four states, in this precedence:** unknown (grey), behind (red, `--color-danger`),
+  last run had failures (amber), on schedule (green). A null in any of the three
+  fields is unknown, never a guess — a null `failed` is not "nothing failed". A
+  failed request reads as unknown too; nothing renders while the first request is
+  in flight, so the header does not flash "unknown" on every load.
+- **One request per load: no timer, no polling.** The page is reloaded well inside
+  a day, the only rate this figure changes at. The cost, accepted: a tab left open
+  across a late run keeps what it first read until it is reloaded. `useFetch`'s own
+  503 retries still apply; `useFreshness` latches "failed once" itself, because
+  `useFetch` clears `error` at the start of each retry and the badge would
+  otherwise flicker between unknown and nothing.
+- **Fetching once is not judging once.** The record is re-*judged* — no request —
+  against the browser's clock each time the tab returns to view (`focus`,
+  `visibilitychange`), so a tab left open for days turns to behind and its age
+  moves on when looked at, instead of a green "Refreshed 30m ago" that stopped
+  being true. That is an event handler, not a timer, and it is where the clock is
+  read; never call `Date.now()` during render (`react-hooks/purity`). The hook's
+  result is memoised so `Header`'s `memo` still holds.
+- **The dot shows at every width; only its words hide** (`sr-only md:not-sr-only`),
+  so a warning does not vanish on a phone. The tooltip's exact local time and the
+  line saying this is *not the date of the latest close* are in a real `sr-only`
+  span as well as the `title`, which is not reliably announced.
+- **It is not the `stale` flag** on the ETF response (holdings from the live
+  fallback), and not the date of the latest close: a market holiday adds no
+  prices and the job still ran.
+
 ## MDX: two vocabularies, deliberately separate
 
 Both compile backend-authored source into real React components at runtime, which
@@ -336,6 +380,8 @@ tests the link module had. Issue #152 added `utils/candles.test.js` (`toCandles`
 `candleLabel` and where a candle sits), `utils/chartTooltip.test.js`
 (`buildTooltip`: what hovering a line, a candle and a gap says) and
 `store/candlePreference.test.js` (the one switch, including storage that throws).
+Issue #154 added `utils/freshness.test.js` (`freshnessState` and `describeFreshness`:
+the four states, their precedence, the boundary at `dueBy`, and the words).
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that

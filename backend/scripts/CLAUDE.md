@@ -36,7 +36,7 @@ rather than falling back to a guess.
 
 ## `fetch_daily.py`
 
-Six phases, in order:
+Seven phases, in order:
 
 0. **`sync_risk_free_rate`** (issue #103) — refresh the tracked risk-free rate
    series (`risk_free_rate`), for whichever symbol `risk_free_rate_source`
@@ -63,7 +63,20 @@ Six phases, in order:
    5-day window is not re-escalated every run forever.
 4. **Metadata refresh** — sector, market cap, currency, exchange, logo, website,
    for active tickers only.
-5. **`compact_ticker`** — sweep every known ticker (active or not) and promote
+5. **`record_run`** (issue #154, ADR 0003) — write one `fetch_run` row: `failed`,
+   the number of distinct ids the run could not refresh (ETF sync, the
+   risk-free rate, prices, metadata), with `finished_at` stamped by the database.
+   This is what the header's Freshness reads. It sits **before** compaction on
+   purpose: compaction only tidies storage, so its failures are not counted as
+   data that is old, and a compaction crash cannot hide a fetch that had already
+   finished. The "no tickers to sync" exit writes one too, since that run
+   finished. A run that crashes before this point leaves **no** row, and so does
+   one whose own write fails (the job then carries on, finishes compaction and
+   exits 1) — a row would claim a finish for a run that did not finish, which is
+   the one thing the record must never say. The row is new schema:
+   `sql/005_record_daily_job_runs.sql` has to be applied before the first run
+   that writes to it.
+6. **`compact_ticker`** — sweep every known ticker (active or not) and promote
    aged buckets to a coarser tier.
 
 ### Tiering and compaction
@@ -164,6 +177,8 @@ call.
   `_select_tickers_needing_sync`, `normalize_symbol`/`normalize_holdings` and
   `prune_below_threshold` against fakes — and `test_risk_free_rate.py`, which
   covers `fetch_risk_free_rate_rows`/`sync_risk_free_rate` the same way (issue
-  #103). Add a case whenever you touch the
+  #103) — and `test_fetch_run_record.py`, which runs `main()` itself against
+  fakes to pin what the run record says and when it is written (issue #154).
+  Add a case whenever you touch the
   bucketing or the escalation rules — they are the parts where a mistake corrupts
   stored data rather than failing loudly.
