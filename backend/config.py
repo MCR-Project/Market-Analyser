@@ -38,6 +38,26 @@ RATE_LIMIT_COOLDOWN_SECONDS = 60
 # a freshly-fetched one.
 FORCE_REFRESH_THROTTLE_SECONDS = 300
 
+# When the daily fetch job is scheduled to start, and how late a run may
+# finish before the data reads as behind (issue #154). The first three are a
+# second copy of the cron line in .github/workflows/fetch-daily.yml
+# ("30 22 * * 1-5"), which the backend cannot read at runtime;
+# tests/test_freshness.py parses that file and fails if the two differ, so
+# changing the cron without changing this is a red test rather than a header
+# that quietly judges against the wrong schedule. Weekdays are Python's
+# (Monday is 0), not cron's.
+FETCH_SCHEDULE_HOUR_UTC = 22
+FETCH_SCHEDULE_MINUTE_UTC = 30
+FETCH_SCHEDULE_WEEKDAYS = (0, 1, 2, 3, 4)
+
+# The grace is long on purpose. GitHub starts a scheduled workflow when it has
+# capacity, not at the minute asked: across the 25 runs from 17 August to 19
+# September 2026 the start ranged from 15 minutes to 7h 41m late (the run is
+# only 2-4 minutes once it starts). 12 hours is clear of all of them with four
+# hours to spare, and still says "behind" by mid-morning UTC after a run that
+# never happened. Shorten it and a slow GitHub day reads as a broken pipeline.
+FETCH_GRACE_HOURS = 12
+
 # Default parameters for correlation computation
 CORRELATION_PERIOD = "1y"    # lookback window for daily returns
 CORRELATION_INTERVAL = "1d"  # granularity of return observations

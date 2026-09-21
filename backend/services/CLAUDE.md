@@ -1,6 +1,6 @@
 # backend/services — data access and arithmetic
 
-Six modules, and the large ones carry most of the project's load-bearing
+Seven modules, and the large ones carry most of the project's load-bearing
 decisions.
 
 | Module | Responsibility |
@@ -8,6 +8,7 @@ decisions.
 | `supabase_client.py` | Client construction, and the pagination rules every read must follow |
 | `cache.py` | Process-local TTL dict, one shared singleton |
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached |
+| `freshness.py` | When the daily fetch job last finished and by when the next run is due (issue #154) — reads the job's own `fetch_run` record, no live fallback |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
 | `stats.py` | Return and risk arithmetic over a plain series, and the correlation matrix's clustering (`cluster_correlation`, issue #143) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
 | `portfolio.py` | The simulation, plus its sibling risk decomposition (issue #113) — decides what series to hand `stats.py` and assembles its answers into a portfolio's or a basket's shape, no I/O of its own beyond the reads it calls |
@@ -168,6 +169,38 @@ has never been synced, so a caller scoring a ratio against this must show a
 null with a reason rather than assume a rate of zero. `PortfolioIn.rate`
 (`api/routes.py`) is the override — a caller supplying its own rate skips this
 reader entirely for that run.
+
+## `freshness.py` — when the job last finished (issue #154)
+
+`get_freshness()` reads the newest `fetch_run` row (`ORDER BY finished_at DESC
+LIMIT 1`, so nothing to paginate) and answers `finishedAt`, `dueBy` and `failed`.
+`due_by(finished_at)` is the whole of the arithmetic: the first scheduled slot
+strictly after the run *finished*, plus the grace — measured from the finish,
+never from which day the run was scheduled for, because GitHub starts the cron
+hours late and a Friday run that finishes on Saturday must not read as
+Saturday's. The schedule and grace are `config.FETCH_SCHEDULE_*`/`FETCH_GRACE_HOURS`,
+a second copy of the workflow's cron line that a test keeps honest.
+
+Same **no live fallback** reasoning as `get_dividends` and `get_risk_free_rate`,
+and the same absence rule, with one difference in what absence means. Not
+configured, no row yet, or a table not created yet (`PGRST205`/`42P01`: `sql/005`
+is applied by hand and the backend can be deployed first) is all-`None` — facts
+asking again will not change, which the frontend reads as unknown. A configured
+database that cannot be reached or read raises `DataUnavailable` (503), never an
+empty answer: "the database is down" and "nobody has run the job yet" must not
+look alike.
+
+`get_client_optional` returns `None` both for missing env vars and for a cold
+process whose DNS or TLS is not ready yet, so **only the environment says which**
+(`_supabase_configured`): credentials set but no client is the blip, a 503; a
+permanent 200 there would leave the header on unknown for a whole session, since
+the frontend asks once. Only a **found** run is cached. An absent answer is
+deliberately not: an empty table is one run away from its first row and a missing
+one from being created, and caching either would pin the header on unknown for
+15 minutes after the fact changed.
+
+It says nothing about how old the latest price is: a market holiday adds no rows
+and the job still ran.
 
 ## `tickers.py` — two questions, two paths
 

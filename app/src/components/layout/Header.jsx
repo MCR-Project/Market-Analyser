@@ -1,9 +1,9 @@
 /**
  * Header — the bar shared by every page.
  *
- *  ┌──────────────────────────────────────────────────────────────────┐
- *  │ Market Analyser  Analyser | Portfolios | Docs  LIVE · returns ☀ │
- *  └──────────────────────────────────────────────────────────────────┘
+ *  ┌────────────────────────────────────────────────────────────────────────────────┐
+ *  │ Market Analyser  Analyser | Portfolios | Docs  ● Refreshed 3h ago  LIVE · returns ☀ │
+ *  └────────────────────────────────────────────────────────────────────────────────┘
  *
  * Three columns: the brand, the page tabs, and the status/theme controls.
  * The side columns are equal fractions and the middle is auto-width, so
@@ -11,12 +11,18 @@
  * happen to be — and the columns shrink rather than overlap when there
  * isn't room.
  *
- * The connectivity badge is only rendered when a page has published a
- * status (see hooks/useLiveStatus): "LIVE · daily returns" is a claim
- * about the dashboard's data, and would be meaningless above the docs.
+ * Two status elements, about different things. The connectivity badge is only
+ * rendered when a page has published a status (see hooks/useLiveStatus):
+ * "LIVE · daily returns" is a claim about the dashboard's data, and would be
+ * meaningless above the docs. The freshness badge (FreshnessBadge, issue #154)
+ * says whether that data comes from a recent run of the daily fetch job; it is
+ * a fact about the whole database, read by AppLayout itself, and is only
+ * present on the pages that read prices — none on Docs, and none until the
+ * first answer arrives.
  */
 import { Fragment, memo } from 'react';
 import { Link, useLocation } from 'react-router';
+import { FreshnessBadge } from './FreshnessBadge';
 
 const TAB_CLASS =
   'font-[var(--font-body)] text-sm no-underline px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 hover:bg-[var(--bg-3)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
@@ -32,6 +38,7 @@ export const Header = memo(function Header({
   theme,
   onToggleTheme,
   isLive,
+  freshness,
   dashboardPath = '/',
 }) {
   const { pathname } = useLocation();
@@ -86,6 +93,10 @@ export const Header = memo(function Header({
       </nav>
 
       <div className="flex items-center justify-end gap-4 min-w-0">
+        {/* Its words step aside on a narrow window, its dot does not: see
+            FreshnessBadge. */}
+        {freshness !== undefined && <FreshnessBadge freshness={freshness} />}
+
         {/* A status line, not navigation — it steps aside on a narrow
             window rather than squeezing the tabs. */}
         {isLive !== undefined && (

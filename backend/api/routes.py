@@ -15,6 +15,9 @@ Endpoints:
   GET /api/tickers/{symbol}      — resolve one symbol, tracked or not
   GET /api/series/{ticker}       — historical price series, by period or
                                    by explicit start/end window
+  GET /api/freshness             — when the daily fetch job last finished,
+                                   and the deadline for the next run
+                                   (issue #154)
   GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings, plus clusters
   GET /api/sectors/{etf_id}      — sector weight breakdown
   POST /api/portfolio/simulate   — value a basket of tickers over a window,
@@ -35,6 +38,7 @@ from services.market_data import (
     compute_correlation_matrix,
     list_etf_summaries,
 )
+from services.freshness import get_freshness
 from services.portfolio import compute_portfolio_risk, simulate_portfolio
 from services.tickers import DEFAULT_SEARCH_LIMIT, resolve_ticker, search_tickers
 from config import SECTOR_TAG
@@ -185,6 +189,31 @@ def get_series(
     if not data:
         raise HTTPException(404, f"No price data for '{ticker}'")
     return data
+
+
+# ── Freshness ─────────────────────────────────────────────────────────────────
+
+@router.get("/freshness")
+def freshness():
+    """When the daily fetch job last finished, and by when the next run is due
+    (issue #154).
+
+    Answers `finishedAt` and `dueBy` (UTC, ISO 8601) and `failed`, the number of
+    ids the run could not refresh. The browser compares `dueBy` with its own
+    clock to say whether the data is behind, so nothing here is a verdict and
+    the answer can be cached for minutes. It is one figure for the whole
+    database, not for a fund, and says nothing about how old the latest price is.
+
+    All three fields are `null` with a 200 when there is nothing to report:
+    Supabase is not configured, no run has been recorded yet, or the table has
+    not been created (the migration is applied by hand). Those are conditions
+    asking again will not change, and a 503 would have the frontend retry them
+    on a backoff for nothing. A configured database that cannot be reached or
+    read - including a client that could not be built with the credentials set,
+    which is a cold start and not a missing config - is a 503 with `Retry-After`,
+    a fact about right now which the frontend does retry, and never a 500.
+    """
+    return get_freshness()
 
 
 # ── Correlation ───────────────────────────────────────────────────────────────

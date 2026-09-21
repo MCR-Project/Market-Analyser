@@ -30,6 +30,14 @@ Daily data-refresh job:
     top-up otherwise. Independent of the ticker loop above - it is one
     flat series, not per-ticker - so it runs even on a day nothing else
     needs syncing.
+  - Records the run itself in `fetch_run` (issue #154) - one row, `failed`
+    being how many ids it could not refresh, `finished_at` stamped by the
+    database - which is what the header's Freshness reads. Written right
+    after the price sync and before compaction, so a compaction failure is
+    not counted and cannot hide a fetch that had finished; also on the "no
+    tickers to sync" exit, since that run finished too. A run that crashes
+    first, or whose own write fails, leaves no row: a row would claim a
+    finish for a run that did not finish. See docs/adr/0003.
 
 Run manually with:   python scripts/fetch_daily.py
 Runs on a schedule via .github/workflows/fetch-daily.yml.
@@ -578,6 +586,34 @@ def _select_tickers_needing_sync(tickers: list[dict]) -> list[dict]:
     )
 
 
+def record_run(client, failed_ids: list[str]) -> bool:
+    """Write this run's row in `fetch_run` (issue #154): the record Freshness
+    is read from, and the only thing that says the daily job finished.
+
+    The row carries `failed`, the number of distinct ids the run could not
+    refresh, and nothing else - `finished_at` is the column's own
+    `default now()`, so it is the database's clock at the moment of the write,
+    not the runner's. Called right after the price sync and before compaction
+    (see main()): compaction only tidies storage, so its failures must not be
+    counted as data that is old, and a compaction crash must not be able to
+    hide a fetch that had already finished.
+
+    Returns whether the write succeeded, so main() can fold a failure into its
+    exit code the way it does `sync_risk_free_rate`'s. A run whose write fails
+    leaves no row, which is the right outcome: the header then reads it as a
+    run that did not finish, and goes behind at the next deadline. A row for a
+    run that did not finish would be the one thing this record must never say.
+    """
+    failed = len(set(failed_ids))
+    try:
+        client.table("fetch_run").insert({"failed": failed}).execute()
+    except Exception as e:
+        print(f"  FAILED  recording this run in fetch_run: {e}")
+        return False
+    print(f"  recorded this run in fetch_run  ({failed} failed)")
+    return True
+
+
 def main():
     client = get_client()
 
@@ -593,18 +629,23 @@ def main():
     print("\nSyncing ETFs (market_data.list_etfs)...")
     etf_failures = sync_etfs(client, all_ticker_ids)
 
+    failed = list(etf_failures)
+    if not rate_synced:
+        failed.append("risk_free_rate")
+
     if not tickers_needing_sync:
         print("\nNo tickers to sync - add some with scripts/add_ticker.py first.")
-        if etf_failures or not rate_synced:
+        # Still a finished run: the ETF and rate syncs above ran, and the
+        # header must not read a quiet day as a job that never came.
+        if not record_run(client, failed):
+            failed.append("fetch_run")
+        if failed:
             sys.exit(1)
         return
 
     print("\nSyncing stock prices...")
     today_date = date.today()
     total_rows = 0
-    failed = list(etf_failures)
-    if not rate_synced:
-        failed.append("risk_free_rate")
 
     for ticker in tickers_needing_sync:
         ticker_id = ticker["id"]
@@ -676,6 +717,14 @@ def main():
         print(f"  {ticker_id:8s} {len(rows):5d} fetched -> {len(price_rows):4d} stored  ({period}){resplit_note}{metadata_note}")
 
     print(f"\nDone: {len(tickers_needing_sync)} tickers, {total_rows} price rows upserted.")
+
+    # The run's own record (issue #154) goes here: after every phase that
+    # changes what a reader sees, before the one that only reorganises it.
+    # `failed` holds only the ids that could not be refreshed at this point -
+    # compaction failures are appended below, after this count is taken.
+    print("\nRecording this run...")
+    if not record_run(client, failed):
+        failed.append("fetch_run")
 
     # Compact aged rows for every known ticker, not just active ones -
     # inactive tickers stop getting top-ups but their old data still needs
