@@ -296,6 +296,17 @@ the holdings table's own window control for window-aware Measurements.
 "Period" is only the backend request-body field name for the same concept.
 _Avoid_: Period, except when naming that specific API field
 
+**Preset**:
+A named Window chosen with one press instead of two dates: 1M, 3M, 6M, 1Y, 5Y,
+YTD and Max. Most count back a fixed stretch from today and stay relative — "the
+last year" means the last year whenever the view is opened. Two are not spans in
+that sense: YTD starts at the first of the current year, so its length changes
+through the year, and Max has no dates of its own because how far back a
+Portfolio reaches is a fact about its Holdings, not the calendar. Picking a
+date instead of a Preset makes the Window exact, and it no longer moves.
+_Avoid_: Period, Range, Timeframe (the price charts' own tabs — a different
+control over a different thing)
+
 **Rebalance**:
 Restoring a Portfolio's target Weights from its then-current total, on the
 first row of each new month/quarter/year (never a fixed calendar date). The

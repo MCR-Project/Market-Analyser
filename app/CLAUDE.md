@@ -29,6 +29,8 @@ src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
 src/utils/candles.js         rows -> candles, and where a candle sits; chartTooltip.js builds the hover readout (both pure, both tested)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
+src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
+src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
 src/hooks/                   data fetching and view state
 src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup, candlePreference (+ their tests)
 src/views/                   one file per route or tab panel
@@ -55,7 +57,7 @@ the data nor worth a link: see "Price charts and candles"):
 | `/docs/:measurementId` | `DocsPage` |
 | `/portfolio/:portfolioId` | `PortfolioPage` |
 | `/portfolio/shared?p=…` | `portfolioLink.decodePortfolio` |
-| `?window=` / `?start=&end=` (on `/portfolio/...`) | `useSimulationWindow` |
+| `?window=` / `?start=&end=` (on `/portfolio/...`) | `useSimulationWindow` — a preset (`1m`, `3m`, `6m`, `1y`, `5y`, `ytd`, `max`) or an exact window |
 | `?compare=` / `?benchmark=` | `useComparison` |
 | `?rf=` (on `/portfolio/...`) | `useRiskFreeRate` — an override for the risk-free rate a run is scored against (issue #103); absent or unusable falls back to the tracked series |
 | `?risk=` (on `/portfolio/...`) | `usePortfolioRisk` — which `computed_from="risk"` tiles are on, on `PortfolioRiskCard` (issue #113); its own key so it cannot collide with `?metrics=` or `?fundMetrics=` |
@@ -382,6 +384,11 @@ tests the link module had. Issue #152 added `utils/candles.test.js` (`toCandles`
 `store/candlePreference.test.js` (the one switch, including storage that throws).
 Issue #154 added `utils/freshness.test.js` (`freshnessState` and `describeFreshness`:
 the four states, their precedence, the boundary at `dueBy`, and the words).
+Issue #156 added `utils/windowCalendar.test.js` (`editWindow`, `parseTypedDate`,
+`pickableRange`, `monthGrid` and `moveFocus`: what a typed or clicked date does to the
+window, which days the calendar offers and where the keyboard goes) and
+`utils/windowPresets.test.js` (`presetWindow` and `PRESETS`; the date is passed in, so
+nothing fakes the clock).
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that

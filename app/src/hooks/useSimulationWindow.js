@@ -10,15 +10,17 @@
  *
  * Two shapes, because there are two kinds of answer:
  *
- *   ?window=ytd|1y|5y|max   a preset, which is relative to today and stays
+ *   ?window=1m|3m|6m|1y|5y|ytd|max
+ *                           a preset, which is relative to today and stays
  *                           relative — "the last year" means the last year
  *                           whenever the link is opened
  *   ?start=…&end=…          an exact window, which is absolute and does not
  *                           move
  *
- * A preset resolves to dates here, except **max**: how far back a basket
- * reaches is a fact about its holdings, so that one travels to the backend
- * as a period and comes back as the window it turned out to be.
+ * A preset resolves to dates through `presetWindow` (`utils/windowPresets`),
+ * except **max**: how far back a basket reaches is a fact about its holdings,
+ * so that one travels to the backend as a period and comes back as the window
+ * it turned out to be.
  *
  * Anything unusable in the URL — a malformed date, an end before a start,
  * an end in the future, a preset that does not exist — falls back to the
@@ -28,53 +30,8 @@
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { withParams } from '../utils/searchParams';
-
-/** Mirrors PERIOD_TO_DAYS in backend/config.py, so a preset asks for the
- *  same stretch the backend would have counted back itself. */
-const DAYS = { '1y': 365, '5y': 1825 };
-
-export const PRESETS = [
-  { key: 'ytd', label: 'YTD' },
-  { key: '1y', label: '1Y' },
-  { key: '5y', label: '5Y' },
-  { key: 'max', label: 'Max' },
-];
-
-export const DEFAULT_PRESET = '1y';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-export function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function shift(days) {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().slice(0, 10);
-}
-
-/** What a preset means in dates. `max` deliberately has none: the answer
- *  is in the data, not in the calendar. */
-export function presetWindow(key) {
-  if (key === 'max') return { period: 'max', start: null, end: null };
-  if (key === 'ytd') return { start: `${new Date().getFullYear()}-01-01`, end: today() };
-  return { start: shift(DAYS[key] ?? DAYS['1y']), end: today() };
-}
-
-/**
- * Why a window cannot be used, or null if it can. The same three rules
- * the backend applies (resolve_window), checked here so an unusable window
- * is a message rather than a request that comes back 400.
- */
-export function windowProblem({ start, end }) {
-  if (!start || !end) return null;
-  if (!ISO_DATE.test(start)) return 'The start date is not a full date yet.';
-  if (!ISO_DATE.test(end)) return 'The end date is not a full date yet.';
-  if (start >= end) return 'The start date has to come before the end date.';
-  if (end > today()) return 'The end date cannot be in the future.';
-  return null;
-}
+import { windowProblem } from '../utils/windowCalendar';
+import { DEFAULT_PRESET, PRESETS, presetWindow } from '../utils/windowPresets';
 
 export function useSimulationWindow() {
   const [params, setParams] = useSearchParams();
