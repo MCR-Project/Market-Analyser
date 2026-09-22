@@ -49,23 +49,36 @@
  * (store/recentStocks.js) the moment it resolves — not before, so a typo'd
  * URL never earns a place in the list.
  */
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useFetch } from '../hooks/useFetch';
 import { useLiveSeries } from '../hooks/useLiveSeries';
 import { useRecentStocks } from '../hooks/useRecentStocks';
+import { useSimulationWindow } from '../hooks/useSimulationWindow';
+import { usePortfolioSimulation } from '../hooks/usePortfolioSimulation';
+import { useStockMetrics } from '../hooks/useStockMetrics';
 import { api } from '../utils/api';
 import { PriceChart } from '../components/charts/PriceChart';
 import { CandleToggle } from '../components/charts/CandleToggle';
 import { TimeframeTabs } from '../components/ui/TimeframeTabs';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
+import { MetricsPicker } from '../components/ui/MetricsPicker';
 import { describeFetchError } from '../utils/errorCopy';
 import { Logo } from '../components/ui/Logo';
 import { StocksSidebar } from '../components/stock/StocksSidebar';
+import { StockMetricsCard } from '../components/stock/StockMetricsCard';
 import { TickerSearchField } from '../components/portfolio/TickerSearchField';
 
 const VALID_TIMEFRAMES = ['1W', '1M', '1Y', '5Y'];
+
+// The opening amount every Stock page Run is simulated with (issue #159).
+// There is no open Portfolio to borrow a real amount from the way a
+// Benchmark on the portfolio page does, so this is a fixed "growth of
+// $100" baseline instead — CONTEXT.md's Benchmark entry states the same
+// reasoning. Dollar-denominated tiles (final value, gain) read against
+// this rather than a user-chosen investment.
+const STOCK_RUN_AMOUNT = 100;
 
 // How far the scroll position has to move, in either direction, before the
 // search bar reacts — a few pixels of noise (trackpad settling, a resize
@@ -201,6 +214,31 @@ function EmptyState() {
 const StockDetail = memo(function StockDetail({ resolved }) {
   const ticker = resolved.symbol;
   const [timeframe, setTimeframe] = useTimeframeParam();
+  const [metricsPickerOpen, setMetricsPickerOpen] = useState(false);
+
+  // The Run this stock is scored against (issue #159): a basket of one,
+  // 100% weighted, no schedule — the standalone-page reading of Benchmark
+  // (CONTEXT.md), simulated exactly like a portfolio's own run so the
+  // whole portfolio_metrics registry applies unchanged. Memoised so a
+  // render that doesn't change `ticker` doesn't hand usePortfolioSimulation
+  // a new object identity for no reason — it stringifies this every
+  // render regardless, but there's no reason to make that string differ.
+  const syntheticPortfolio = useMemo(() => ({
+    holdings: [{ ticker, weight: 100 }],
+    value: STOCK_RUN_AMOUNT,
+    rebalance: 'none',
+  }), [ticker]);
+
+  const windowState = useSimulationWindow();
+  const {
+    simulation,
+    loading: runLoading,
+    error: runError,
+    stale: runStale,
+    retry: retryRun,
+  } = usePortfolioSimulation(syntheticPortfolio, windowState.request);
+
+  const stockMetrics = useStockMetrics();
 
   const { data: info, loading: infoLoading } = useFetch(
     (signal) => api.getStock(ticker, { signal }),
@@ -303,6 +341,37 @@ const StockDetail = memo(function StockDetail({ resolved }) {
           )}
         </div>
       </section>
+
+      {/* Metrics (issue #159) — scored against the basket-of-one Run
+          above, over this card's own window, independent of the
+          Performance chart's own ?tf= timeframe. */}
+      <StockMetricsCard
+        windowState={windowState}
+        metrics={simulation?.metrics}
+        resolvedStart={simulation?.start || null}
+        resolvedEnd={simulation?.end || null}
+        loading={runLoading}
+        stale={runStale}
+        error={runError}
+        onRetry={retryRun}
+        tileMetrics={stockMetrics.tileMetrics}
+        activeIds={stockMetrics.activeIds}
+        onOpenPicker={() => setMetricsPickerOpen(true)}
+      />
+
+      {metricsPickerOpen && (
+        <MetricsPicker
+          tileMetrics={stockMetrics.tileMetrics}
+          families={stockMetrics.families}
+          activeIds={stockMetrics.activeIds}
+          onToggle={stockMetrics.toggle}
+          onClose={() => setMetricsPickerOpen(false)}
+          eyebrow="STOCK METRICS"
+          subtitle="Select which tiles to show for this stock"
+          ariaLabel="Stock metrics"
+          emptyText="No stock metrics available — is the backend running?"
+        />
+      )}
 
       {/* About — its own loading/error state, independent of the header
           above: a description is always a live call and can fail on its
