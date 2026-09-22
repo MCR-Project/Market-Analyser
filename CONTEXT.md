@@ -28,6 +28,17 @@ other instrument type (e.g. mutual funds) exists in this app.
 _Avoid_: Index (for the instrument itself — see Fund Index below for the
 one place "index" means something specific)
 
+**Stock**:
+Anything the Stock page treats as a company rather than a Fund: every
+`kind: "stock"` entry in the tracked universe, plus anything `resolve_ticker`
+answers live and outside the tracked `etfs` table (`kind: None`) — accepted
+as a Stock without trying to tell a company from some other untracked
+instrument type first (`docs/adr/0004-untracked-symbols-on-the-stock-page-are-treated-as-stocks.md`).
+Not the same boundary Tracked draws below: an untracked symbol is a Stock the
+moment it is opened, just not one with a full price history stored in
+`ticker`.
+_Avoid_: none
+
 **Holding**:
 A ticker and a weight inside a basket. Two unrelated baskets use the word: an
 ETF's real-world constituent (tracked in Supabase, has an `etf_holdings`
@@ -210,10 +221,16 @@ _Avoid_: Simulation (used loosely elsewhere in prose; "Run" is the noun for
 one concrete result)
 
 **Benchmark**:
-A ticker plotted alongside Portfolios for comparison (`?benchmark=`).
-Deliberately not a Portfolio: it's simulated as a basket of one, given the
-open portfolio's own amount and Money Flow (whichever schedule it has), and
-never touches the portfolio library.
+A ticker simulated as a basket of one — deliberately not a Portfolio, and
+never touching the portfolio library. Two contexts run the same kind of Run
+with a different opening amount: on a Portfolio's own page, a Benchmark is
+plotted alongside it for comparison (`?benchmark=`), given that open
+Portfolio's own amount and Money Flow (whichever schedule it has); on a Stock
+page, where there is no open Portfolio to borrow either from, it is simulated
+with a fixed $100 opening amount and no schedule — a "growth of $100"
+baseline that lets its dollar-denominated figures (final value, gain) read as
+a percentage in disguise, purely so this Run comes out in the exact same
+shape every other one does.
 _Avoid_: Fund Index (reserved for the ETF-side benchmark series, above)
 
 **Recurring Contribution**:

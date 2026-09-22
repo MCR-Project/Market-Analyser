@@ -1,9 +1,9 @@
 /**
  * Header — the bar shared by every page.
  *
- *  ┌────────────────────────────────────────────────────────────────────────────────┐
- *  │ Market Analyser  Analyser | Portfolios | Docs  ● Refreshed 3h ago  LIVE · returns ☀ │
- *  └────────────────────────────────────────────────────────────────────────────────┘
+ *  ┌────────────────────────────────────────────────────────────────────────────────────┐
+ *  │ Market Analyser  Analyser | Stocks | Portfolios | Docs  ● Refreshed 3h ago  LIVE ☀ │
+ *  └────────────────────────────────────────────────────────────────────────────────────┘
  *
  * Three columns: the brand, the page tabs, and the status/theme controls.
  * The side columns are equal fractions and the middle is auto-width, so
@@ -40,6 +40,7 @@ export const Header = memo(function Header({
   isLive,
   freshness,
   dashboardPath = '/',
+  stockPath = '/stock',
 }) {
   const { pathname } = useLocation();
   // Which tab is current is decided by the section of the app being
@@ -50,7 +51,9 @@ export const Header = memo(function Header({
     ? 'docs'
     : pathname.startsWith('/portfolio')
       ? 'portfolio'
-      : 'analyser';
+      : pathname.startsWith('/stock')
+        ? 'stock'
+        : 'analyser';
 
   return (
     // minmax(0,·) rather than plain 1fr: a grid track's default minimum is
@@ -75,6 +78,7 @@ export const Header = memo(function Header({
       <nav aria-label="Pages" className="justify-self-center flex items-center gap-1">
         {[
           { key: 'analyser', label: 'Analyser', to: dashboardPath },
+          { key: 'stock', label: 'Stocks', to: stockPath },
           { key: 'portfolio', label: 'Portfolios', to: '/portfolio' },
           { key: 'docs', label: 'Docs', to: '/docs' },
         ].map((tab, i) => (
