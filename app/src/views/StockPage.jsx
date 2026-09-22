@@ -126,8 +126,14 @@ export function StockPage() {
       <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8" onScroll={onMainScroll}>
         <div className="max-w-[900px] mx-auto flex flex-col gap-6">
           <div
-            className="sticky top-0 z-10 -mx-8 px-8 pt-1 pb-3 bg-[var(--bg)] transition-all duration-200 ease-out"
+            className="sticky top-0 z-10 -mx-8 px-8 pt-1 pb-3 transition-all duration-200 ease-out"
             style={{
+              // Frosted, not a solid block — the same treatment the header
+              // itself uses (Header.jsx) rather than a flat --bg panel that
+              // would look like an odd floating tile over the chart as it
+              // scrolls underneath.
+              background: 'color-mix(in oklab, var(--bg) 82%, transparent)',
+              backdropFilter: 'blur(12px)',
               opacity: searchVisible ? 1 : 0,
               transform: searchVisible ? 'translateY(0)' : 'translateY(-10px)',
               pointerEvents: searchVisible ? 'auto' : 'none',
