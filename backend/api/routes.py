@@ -10,6 +10,9 @@ Endpoints:
   GET /api/etfs                  — list all tracked ETFs (summary)
   GET /api/etf/{etf_id}          — full ETF detail with holdings
   GET /api/stock/{ticker}        — single stock metadata
+  GET /api/stock/{ticker}/description — a stock's business description,
+                                   its own endpoint since it is always a
+                                   live call (issue #158)
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
   GET /api/tickers/search?q=     — search the tracked universe
   GET /api/tickers/{symbol}      — resolve one symbol, tracked or not
@@ -34,6 +37,7 @@ from services.market_data import (
     get_etf_info,
     get_etf_holdings,
     get_stock_info,
+    get_stock_description,
     get_price_series,
     compute_correlation_matrix,
     list_etf_summaries,
@@ -98,6 +102,24 @@ def get_stock(ticker: str):
     """Single stock metadata: name, sector, market cap, etc."""
     ticker = ticker.upper()
     return get_stock_info(ticker)
+
+
+@router.get("/stock/{ticker}/description")
+def get_stock_description_route(ticker: str):
+    """A stock's own business-description text (issue #158's Stock page).
+
+    A separate endpoint from GET /api/stock/{ticker} above, on purpose:
+    that one is also read by StockPopup and HoldingChartPopup for
+    name/sector/exchange alone, and get_stock_description's own docstring
+    explains why this field is always a live yfinance call, with no DB
+    path, unlike the rest of a stock's metadata. Merging it into the
+    shared endpoint would mean a Yahoo outage or rate-limit cooldown - which
+    those two popups' own fields are otherwise immune to, since a synced
+    ticker answers get_stock_info from Supabase alone - now breaks them too,
+    for a field neither one reads. Only the Stock page calls this route.
+    """
+    ticker = ticker.upper()
+    return {"description": get_stock_description(ticker)}
 
 
 @router.get("/stocks")

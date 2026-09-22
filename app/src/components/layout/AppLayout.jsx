@@ -9,7 +9,12 @@
  *
  * It also remembers the last dashboard URL visited, so the "Analyser" tab
  * returns you to the fund and view you left rather than resetting to the
- * default ETF.
+ * default ETF — and, the same way, the last Stock page visited, so the
+ * "Stocks" tab returns to the ticker you left rather than an empty search
+ * (issue #158). Unlike Analyser there is no default ticker to fall back to
+ * (there is no equivalent of DEFAULT_ETF_ID for stocks — invariant 4 rules
+ * out a hardcoded one), so the tab points at the bare `/stock` landing
+ * state until something has actually been viewed.
  */
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
@@ -43,6 +48,12 @@ export function AppLayout() {
     setDashboardPath(currentDashboardPath);
   }
 
+  const [stockPath, setStockPath] = useState('/stock');
+  const currentStockPath = pathname.startsWith('/stock') ? pathname + search : null;
+  if (currentStockPath && currentStockPath !== stockPath) {
+    setStockPath(currentStockPath);
+  }
+
   return (
     <LiveStatusContext.Provider value={liveStatus}>
       <div className="h-screen overflow-hidden flex flex-col bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
@@ -52,6 +63,7 @@ export function AppLayout() {
           isLive={isLive}
           freshness={freshness}
           dashboardPath={dashboardPath}
+          stockPath={stockPath}
         />
         <Outlet />
       </div>

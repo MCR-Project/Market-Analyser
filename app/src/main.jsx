@@ -9,6 +9,8 @@
 //   /portfolio               → the portfolio library
 //   /portfolio/shared?p=…    → a portfolio carried by the link itself
 //   /portfolio/:portfolioId  → one saved portfolio
+//   /stock                   → the Stock page, nothing open yet (issue #158)
+//   /stock/:ticker           → one stock, browsed on its own
 //
 // The dashboard's ETF and view live in the URL rather than in memory, so
 // a reload or a shared link reopens the same fund and the same view.
@@ -19,6 +21,7 @@ import './index.css';
 import App from './App';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortfolioPage } from './views/PortfolioPage';
+import { StockPage } from './views/StockPage';
 import { DEFAULT_ETF_ID } from './store/useEtfStore';
 
 // Split out so the dashboard doesn't carry the docs page's weight —
@@ -56,6 +59,8 @@ createRoot(document.getElementById('root')).render(
               with. */}
           <Route path="/portfolio/shared" element={<PortfolioPage shared />} />
           <Route path="/portfolio/:portfolioId" element={<PortfolioPage />} />
+          <Route path="/stock" element={<StockPage />} />
+          <Route path="/stock/:ticker" element={<StockPage />} />
           {/* Anything unrecognised lands on the default ETF rather than a
               blank screen. */}
           <Route path="*" element={<Navigate to="/" replace />} />

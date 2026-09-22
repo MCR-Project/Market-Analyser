@@ -3,12 +3,20 @@ Market data service — reads ETF/stock/price/correlation data from Supabase
 (kept fresh daily by scripts/fetch_daily.py), falling back to a live
 yfinance call when a row hasn't been synced yet or Supabase is unreachable.
 
-Every public function follows the same pattern:
+Most public functions follow the same pattern:
   1. Check the TTL cache for a cached result
   2. Try Supabase; on a miss (no row, or a not-yet-synced sentinel) or any
      error, fall back to a live yfinance call
   3. Cache the result (skipping genuinely empty/failed results, so a retry
      isn't blocked for the full TTL) and return it
+
+A few deliberately don't: get_dividends and get_risk_free_rate have no live
+fallback at all (a number that sometimes comes from a record and sometimes
+from a network call is a number nobody can reconcile), and
+get_stock_description has no DB path at all (prose nobody reconciles
+against a second source, and not worth a pipeline sync). Each states its
+own deviation in its own docstring rather than this one trying to stay in
+sync with every exception.
 
 The private "_..._live" helpers are the original all-yfinance
 implementations, unchanged - kept both as the fallback path here and reused
@@ -591,6 +599,49 @@ def get_stock_info(ticker_symbol: str) -> dict:
             f"stock info for '{ticker_symbol}'", _get_stock_info_live, ticker_symbol
         )
 
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+def _get_stock_description_live(ticker_symbol: str) -> str:
+    ticker = yf.Ticker(ticker_symbol)
+    info = ticker.info or {}
+    return info.get("longBusinessSummary") or ""
+
+
+def get_stock_description(ticker_symbol: str) -> str:
+    """A company's own business-summary text, straight from yfinance.
+
+    Deliberately live-only, with no DB column and none of get_stock_info's
+    DB-first read: this is prose nobody reconciles against a second source,
+    and the daily pipeline has no reason to carry a paragraph of text
+    through its own sync for a page that reads it once in a while (issue
+    #158). Cached under its own key, `stock_description:{ticker}`, and
+    served from its own route (GET /api/stock/{ticker}/description) rather
+    than merged into GET /api/stock/{ticker} - that endpoint is also read
+    by StockPopup and HoldingChartPopup for name/sector/exchange alone, and
+    a Yahoo outage or rate-limit cooldown on this call must not break those
+    two over a field neither reads.
+
+    The one known cost this doesn't try to avoid: an unsynced ticker
+    (get_stock_info's own DB miss) makes its own yf.Ticker(...).info call
+    here too, a second one alongside get_stock_info's live fallback for the
+    same ticker in the same page view. Sharing that one fetch would mean
+    threading a raw yfinance payload between two functions this module
+    otherwise keeps genuinely independent (get_stock_info's cached shape
+    has no reason to carry a paragraph of prose through it for every
+    caller, including the batch one above) - accepted rather than
+    engineered around, since it only recurs once per ticker per
+    CACHE_TTL_HOLDINGS and only for a ticker without a synced DB row.
+    """
+    key = f"stock_description:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = _live(
+        f"description for '{ticker_symbol}'", _get_stock_description_live, ticker_symbol
+    )
     cache.set(key, result, CACHE_TTL_HOLDINGS)
     return result
 

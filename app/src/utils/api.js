@@ -164,6 +164,12 @@ export const api = {
     fetchJson(`/etf/${id}${refresh ? '?refresh=true' : ''}`, { signal }),
   getStock: (ticker, opts = {}) => fetchJson(`/stock/${ticker}`, opts),
   getStocks: (tickers, opts = {}) => fetchJson(`/stocks?tickers=${tickers.join(',')}`, opts),
+  // Its own request, not a field on getStock above (issue #158): that one
+  // is also read by StockPopup and HoldingChartPopup for name/sector/
+  // exchange alone, and a description is always a live yfinance call with
+  // no DB path, unlike the rest of a stock's metadata — merging it in
+  // would make an unrelated Yahoo outage break two popups that never read it.
+  getStockDescription: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/description`, opts),
   getSeries: (ticker, period = '1y', interval = '1d', opts = {}) =>
     fetchJson(`/series/${ticker}?period=${period}&interval=${interval}`, opts),
   getCorrelation: (etfId, period = '1y', opts = {}) =>
