@@ -126,16 +126,10 @@ export function StockPage() {
       <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8" onScroll={onMainScroll}>
         <div className="max-w-[900px] mx-auto flex flex-col gap-6">
           <div
-            className="sticky top-0 z-10 -mx-8 px-8 pt-1 pb-3 transition-all duration-200 ease-out"
+            className="sticky top-0 z-10 -mx-8 transition-all duration-500 ease-out"
             style={{
-              // Frosted, not a solid block — the same treatment the header
-              // itself uses (Header.jsx) rather than a flat --bg panel that
-              // would look like an odd floating tile over the chart as it
-              // scrolls underneath.
-              background: 'color-mix(in oklab, var(--bg) 82%, transparent)',
-              backdropFilter: 'blur(12px)',
               opacity: searchVisible ? 1 : 0,
-              transform: searchVisible ? 'translateY(0)' : 'translateY(-10px)',
+              transform: searchVisible ? 'translateY(10px)' : 'translateY(-10px)',
               pointerEvents: searchVisible ? 'auto' : 'none',
             }}
           >
@@ -236,44 +230,49 @@ const StockDetail = memo(function StockDetail({ resolved }) {
 
   return (
     <>
-      {/* Header */}
-      <div className="flex items-start gap-4">
-        <Logo ticker={ticker} name={info?.name} size={48} />
-        <div className="flex flex-col gap-1.5 min-w-0">
-          <div className="flex items-baseline gap-3 flex-wrap">
-            <span className="font-[var(--font-mono)] text-[26px] font-extrabold text-[var(--accent)] tracking-tight leading-none">
-              {ticker}
-            </span>
-            {infoLoading ? (
-              <Loading variant="skeleton" lines={1} className="w-40" />
-            ) : (
-              <span className="text-[17px] font-semibold text-[var(--fg)] tracking-tight">
-                {info?.name || resolved.name || ticker}
+      {/* Header — its own card, the same bg-1/border/radius-lg/shadow-sm
+          treatment FundMetricsCard already uses, so every section here
+          reads as a distinct panel rather than loose content floating on
+          the page background. */}
+      <section className="bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-5">
+        <div className="flex items-start gap-4">
+          <Logo ticker={ticker} name={info?.name} size={48} />
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <span className="font-[var(--font-mono)] text-[26px] font-extrabold text-[var(--accent)] tracking-tight leading-none">
+                {ticker}
               </span>
-            )}
-          </div>
-          <div className="flex items-center gap-[7px] flex-wrap">
-            {!infoLoading && info?.sector && (
-              <span className="text-xs text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full py-[3px] px-2.5">
-                {info.sector}
-              </span>
-            )}
-            {!infoLoading && info?.exchange && (
-              <span className="text-[11px] text-[var(--fg-3)] bg-[var(--bg-3)] rounded-full py-0.5 px-2.5 font-[var(--font-mono)]">
-                {info.exchange}
-              </span>
-            )}
-            {!resolved.tracked && (
-              <span className="text-[11px] text-[var(--fg-3)] bg-[var(--bg-3)] rounded-full py-0.5 px-2.5">
-                Not tracked here — priced live
-              </span>
-            )}
+              {infoLoading ? (
+                <Loading variant="skeleton" lines={1} className="w-40" />
+              ) : (
+                <span className="text-[17px] font-semibold text-[var(--fg)] tracking-tight">
+                  {info?.name || resolved.name || ticker}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-[7px] flex-wrap">
+              {!infoLoading && info?.sector && (
+                <span className="text-xs text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full py-[3px] px-2.5">
+                  {info.sector}
+                </span>
+              )}
+              {!infoLoading && info?.exchange && (
+                <span className="text-[11px] text-[var(--fg-3)] bg-[var(--bg-3)] rounded-full py-0.5 px-2.5 font-[var(--font-mono)]">
+                  {info.exchange}
+                </span>
+              )}
+              {!resolved.tracked && (
+                <span className="text-[11px] text-[var(--fg-3)] bg-[var(--bg-3)] rounded-full py-0.5 px-2.5">
+                  Not tracked here — priced live
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Performance */}
-      <div className="flex flex-col gap-3">
+      <section className="bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-3">
             <TimeframeTabs active={timeframe} onChange={setTimeframe} />
@@ -303,12 +302,12 @@ const StockDetail = memo(function StockDetail({ resolved }) {
             />
           )}
         </div>
-      </div>
+      </section>
 
       {/* About — its own loading/error state, independent of the header
           above: a description is always a live call and can fail on its
           own without the name/sector that already loaded successfully. */}
-      <div className="flex flex-col gap-2">
+      <section className="bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-2">
         <div className="eyebrow">ABOUT</div>
         {descriptionLoading ? (
           <Loading variant="skeleton" lines={4} />
@@ -327,7 +326,7 @@ const StockDetail = memo(function StockDetail({ resolved }) {
             {descriptionData?.description || 'No description available for this company.'}
           </p>
         )}
-      </div>
+      </section>
     </>
   );
 });
