@@ -6,16 +6,27 @@
  * stock at a time.
  *
  *  ┌────────────────┬─────────────────────────────┐
- *  │ search a stock │  NVDA  NVIDIA Corporation    │
- *  │ NVDA           │  Technology · NASDAQ         │
- *  │ TSLA           │                              │
- *  │ …              │  1W 1M 1Y 5Y      [candles]  │
+ *  │ filter history │  [ search a stock…        ]  │ ← fades on scroll
+ *  │ NVDA           │  NVDA  NVIDIA Corporation    │
+ *  │ TSLA           │  Technology · NASDAQ         │
+ *  │ …              │                              │
+ *  │                │  1W 1M 1Y 5Y      [candles]  │
  *  │                │  ┌────────────────────────┐  │
  *  │                │  │      price chart        │  │
  *  │                │  └────────────────────────┘  │
  *  │                │  About                       │
  *  │                │  <business description>      │
  *  └────────────────┴─────────────────────────────┘
+ *
+ * Two different search boxes, two different jobs. The sidebar's
+ * (StocksSidebar) only filters the recently-viewed list already on
+ * screen — it never calls the API. The one that actually switches stocks
+ * lives here, in the main column, and is always mounted (so it works from
+ * the empty landing state, an error state, or mid-browse) but only
+ * *visible* at the top of the scroll: it fades out on scrolling down and
+ * back in on scrolling up, `useScrollFade` below, rather than permanently
+ * occupying space above a 280px chart most of the page doesn't need it
+ * once already open.
  *
  * /stock          → nothing open yet, sidebar usable, empty landing state
  * /stock/:ticker  → one stock, resolved the same way a portfolio holding
@@ -38,7 +49,7 @@
  * (store/recentStocks.js) the moment it resolves — not before, so a typo'd
  * URL never earns a place in the list.
  */
-import { memo, useEffect } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useFetch } from '../hooks/useFetch';
 import { useLiveSeries } from '../hooks/useLiveSeries';
@@ -52,8 +63,17 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { describeFetchError } from '../utils/errorCopy';
 import { Logo } from '../components/ui/Logo';
 import { StocksSidebar } from '../components/stock/StocksSidebar';
+import { TickerSearchField } from '../components/portfolio/TickerSearchField';
 
 const VALID_TIMEFRAMES = ['1W', '1M', '1Y', '5Y'];
+
+// How far the scroll position has to move, in either direction, before the
+// search bar reacts — a few pixels of noise (trackpad settling, a resize
+// reflow) must not flicker it, but a deliberate scroll should feel instant.
+const SCROLL_FADE_SLACK = 4;
+// Always shown within this many pixels of the top, so landing on the page
+// (or scrolling all the way back) never leaves it ambiguously mid-fade.
+const SCROLL_FADE_TOP_ZONE = 8;
 
 export function StockPage() {
   const { ticker: rawTicker } = useParams();
@@ -87,6 +107,8 @@ export function StockPage() {
     navigate(result.kind === 'etf' ? `/etf/${result.symbol}` : `/stock/${result.symbol}`);
   };
 
+  const [searchVisible, onMainScroll] = useScrollFade();
+
   if (isEtf) return <Navigate to={`/etf/${resolved.symbol}`} replace />;
   // Canonicalise rather than error (App.jsx does the same for /etf/smh):
   // resolve_ticker always normalises to uppercase, so this only fires for
@@ -98,11 +120,27 @@ export function StockPage() {
   return (
     <div className="flex-1 min-h-0 flex">
       <aside className="flex-none w-[264px] border-r border-[var(--border)] p-4 min-h-0">
-        <StocksSidebar tickers={tickers} onResolved={handleResolved} />
+        <StocksSidebar tickers={tickers} />
       </aside>
 
-      <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
+      <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8" onScroll={onMainScroll}>
         <div className="max-w-[900px] mx-auto flex flex-col gap-6">
+          <div
+            className="sticky top-0 z-10 -mx-8 px-8 pt-1 pb-3 bg-[var(--bg)] transition-all duration-200 ease-out"
+            style={{
+              opacity: searchVisible ? 1 : 0,
+              transform: searchVisible ? 'translateY(0)' : 'translateY(-10px)',
+              pointerEvents: searchVisible ? 'auto' : 'none',
+            }}
+          >
+            <TickerSearchField
+              placeholder="Search a stock…"
+              ariaLabel="Search for a stock"
+              disabled={!searchVisible}
+              onResolved={handleResolved}
+            />
+          </div>
+
           {!ticker ? (
             <EmptyState />
           ) : resolveError ? (
@@ -116,6 +154,32 @@ export function StockPage() {
       </main>
     </div>
   );
+}
+
+/** `[visible, onScroll]`: whether the sticky search bar should show, and
+ *  the scroll handler that decides it. Always visible within
+ *  SCROLL_FADE_TOP_ZONE of the top; past that, it hides on a scroll down
+ *  of more than SCROLL_FADE_SLACK and reappears on a scroll up of the
+ *  same, so a stray pixel of jitter from a trackpad or a layout reflow
+ *  can't flip it back and forth. Reads `main`'s own scrollTop (the page
+ *  has no window-level scroll — `main` is the scrolling element), so this
+ *  is plain state plus a ref, not something worth a store module: it
+ *  touches the DOM directly and has nothing to say once this component is
+ *  gone. */
+function useScrollFade() {
+  const [visible, setVisible] = useState(true);
+  const lastTop = useRef(0);
+
+  const onScroll = useCallback((event) => {
+    const top = event.currentTarget.scrollTop;
+    const last = lastTop.current;
+    if (top <= SCROLL_FADE_TOP_ZONE) setVisible(true);
+    else if (top > last + SCROLL_FADE_SLACK) setVisible(false);
+    else if (top < last - SCROLL_FADE_SLACK) setVisible(true);
+    lastTop.current = top;
+  }, []);
+
+  return [visible, onScroll];
 }
 
 function EmptyState() {

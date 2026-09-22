@@ -1,34 +1,36 @@
 /**
- * StocksSidebar — the always-present way to switch stocks (issue #158),
- * and the shortlist of ones recently looked at.
+ * StocksSidebar — the recently-viewed stocks, and a way to filter them
+ * (issue #158, revised after the search bar moved to the main column).
  *
  *  ┌────────────────────┐
- *  │ [ search a stock ] │  ← pinned, never scrolls away
+ *  │ [ filter history… ]│  ← pinned, never scrolls away
  *  ├────────────────────┤
  *  │ NVDA  NVIDIA       │  ↕ scrolls
  *  │ TSLA  Tesla        │
  *  │ …                  │
  *  └────────────────────┘
  *
- * Shaped like PortfolioSidebar/DocsSidebar: one pinned control above a
- * scrolling list. `tickers` (from store/recentStocks.js, via
- * hooks/useRecentStocks) holds only symbols, never a name or logo that
- * could go stale sitting in `localStorage` — this reads them fresh through
- * the same batch stock lookup (`api.getStocks`) StockPopup already uses to
- * label its peer cards, so a company that changed its name shows the
- * current one rather than whatever was true the day it was first opened.
+ * This box does not call the API and cannot open a stock that isn't
+ * already in `tickers` — it only narrows the list already on screen. The
+ * search bar that actually switches stocks (resolving a symbol, possibly
+ * one never viewed before) lives on the main page instead
+ * (views/StockPage.jsx); this one exists purely to make a long history
+ * navigable, the same distinction PortfolioSidebar draws between "open
+ * this" and its own, separate compare toggle.
  *
- * Picking a search result is handled by the caller (`onResolved`), not
- * here — resolving a tracked ETF instead of a stock has to navigate
- * somewhere this sidebar has no route to (docs/adr/0004).
+ * Names beside each ticker come from a single batch lookup (api.getStocks)
+ * rather than being stored — CONTEXT.md's Stock entry and
+ * store/recentStocks.js both hold only the symbol, never a name that could
+ * go stale sitting in localStorage.
  */
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { NavLink } from 'react-router';
-import { TickerSearchField } from '../portfolio/TickerSearchField';
 import { useFetch } from '../../hooks/useFetch';
 import { api } from '../../utils/api';
 
-export const StocksSidebar = memo(function StocksSidebar({ tickers, onResolved }) {
+export const StocksSidebar = memo(function StocksSidebar({ tickers }) {
+  const [query, setQuery] = useState('');
+
   const { data: infos } = useFetch(
     (signal) => (tickers.length ? api.getStocks(tickers, { signal }) : Promise.resolve([])),
     [tickers.join(',')],
@@ -39,22 +41,34 @@ export const StocksSidebar = memo(function StocksSidebar({ tickers, onResolved }
     [infos]
   );
 
+  const normalized = query.trim().toUpperCase();
+  const filtered = normalized
+    ? tickers.filter(ticker => ticker.includes(normalized) || (nameOf[ticker] || '').toUpperCase().includes(normalized))
+    : tickers;
+
   return (
-    <nav aria-label="Stocks" className="h-full flex flex-col gap-4 min-h-0">
-      <TickerSearchField
-        placeholder="Search a stock…"
-        ariaLabel="Search for a stock"
-        onResolved={onResolved}
+    <nav aria-label="Recently viewed stocks" className="h-full flex flex-col gap-4 min-h-0">
+      <input
+        value={query}
+        onInput={e => setQuery(e.target.value)}
+        placeholder="Filter history…"
+        aria-label="Filter recently viewed stocks"
+        disabled={tickers.length === 0}
+        className="w-full h-[38px] px-3 bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-md)] text-[13px] text-[var(--fg)] outline-none focus:border-[var(--accent-ring)] disabled:opacity-50"
       />
 
       {tickers.length === 0 ? (
         <p className="text-[13px] text-[var(--fg-2)] m-0 px-1 leading-relaxed">
           Nothing viewed yet.
         </p>
+      ) : filtered.length === 0 ? (
+        <p className="text-[13px] text-[var(--fg-2)] m-0 px-1 leading-relaxed">
+          No match in your history for "{query.trim()}".
+        </p>
       ) : (
         <div className="corr-scroll flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
           <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
-            {tickers.map(ticker => (
+            {filtered.map(ticker => (
               <li key={ticker}>
                 <NavLink
                   to={`/stock/${ticker}`}
