@@ -38,7 +38,7 @@ import { useComparison } from '../hooks/useComparison';
 import { usePortfolios } from '../hooks/usePortfolios';
 import { exportLibrary, exportOne } from '../store/portfolioBackup';
 import { SHARE_PARAM, decodePortfolio, encodePortfolio } from '../store/portfolioLink';
-import { PRESETS } from '../hooks/useSimulationWindow';
+import { PRESETS } from '../utils/windowPresets';
 import { downloadFile } from '../utils/downloadFile';
 import { PortfolioSidebar } from '../components/portfolio/PortfolioSidebar';
 import { PortfolioPanel } from '../components/portfolio/PortfolioPanel';

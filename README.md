@@ -809,13 +809,39 @@ the way the dashboard's fund and view live in the path. Two shapes:
 
 | Query | Meaning |
 | --- | --- |
-| `?window=ytd\|1y\|5y\|max` | A preset, relative to today and staying relative — "the last year" means the last year whenever the link is opened |
+| `?window=1m\|3m\|6m\|1y\|5y\|ytd\|max` | A preset, relative to today and staying relative — "the last year" means the last year whenever the link is opened |
 | `?start=…&end=…` | An exact window, absolute, which does not move |
 
-`1y` is the default. `max` is the one preset with no dates of its own:
+`1y` is the default. The buttons run 1M, 3M, 6M, 1Y, 5Y, YTD, Max: the
+plain spans first, shortest to longest (30, 90, 182, 365 and 1825 days back,
+the same counts the backend's `PERIOD_TO_DAYS` uses), then the two that are
+not spans. YTD starts on 1 January, so its length changes through the year,
+and `max` is the one preset with no dates of its own:
 how far back a basket reaches is a fact about its holdings, so it travels
 to the backend as a period and comes back as the window it turned out to
-be. Anything unusable in the URL — a malformed date, an end before a
+be.
+
+An exact window is chosen with the two date fields beside the presets, and
+each is a text box with a calendar. Type `YYYY-MM-DD` (or paste one) and press
+Enter or leave the box; or click the box and pick a day. Either way only the
+bound you are editing changes, so changing the start never moves the end. Text
+is applied when it is finished, not while it is being typed: a year passes
+through `0002`, `0020` and `0202` on its way to `2020`, and a window is not
+asked of the server at each step. The calendar disables the days that would
+make a window the backend refuses (a start on or after the end, an end after
+today) and tints the days between the two bounds. It cannot navigate before
+1970, but that is a suggestion and not a rule: a typed date or a link before it
+is an ordinary window, and the backend has no floor of its own — a holding with
+no prices yet at the start simply waits in cash. Where the other date already
+reaches past 1970 the calendar reaches with it, so it is never left with every
+day disabled. "Today" is the UTC date, the
+one the backend checks an `end` against, so the calendar never offers a day the
+server would call the future. With Max in force the fields show the window it
+resolved to, and changing one date keeps the other at what it reported; before
+its first run they are empty, and a date typed alone is held until the other
+arrives, with nothing re-simulated in between.
+
+Anything unusable in the URL — a malformed date, an end before a
 start, an end in the future, a preset that does not exist — falls back to
 the default rather than erroring, because a bad link should open the app
 and not a complaint about itself. Dragging across either chart sets an

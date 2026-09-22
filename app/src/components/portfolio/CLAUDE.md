@@ -19,6 +19,8 @@ It is spread across four directories, so a change often touches all of them:
 | `hooks/usePortfolioSimulation.js` | the open portfolio's run |
 | `hooks/useComparisonRuns.js` | one run per line on the comparison chart |
 | `hooks/useSimulationWindow.js` | the window, held in the query string |
+| `utils/windowPresets.js` | what each preset button means in dates, and their order (pure, tested; issue #156) |
+| `utils/windowCalendar.js` | what a typed or clicked date does to a window (`editWindow`), which days the calendar offers, the month grid, the keyboard model, and the window rules `windowProblem` mirrors from the backend (issue #156); the tested module behind `WindowControls` |
 | `hooks/useRiskFreeRate.js` | `?rf=`, an override for Sharpe/Sortino's rate (issue #103) — no visible control yet |
 | `hooks/usePortfolioMetrics.js` | the portfolio metric registry manifest, and `?metrics=` (issue #104) |
 | `hooks/usePortfolioRisk.js` | the `computed_from="risk"` entries of that same registry, `?risk=`, and the (gated) fetch of `POST /api/portfolio/risk` (issue #113) |
@@ -29,7 +31,7 @@ It is spread across four directories, so a change often touches all of them:
 Components here: `PortfolioPanel` (the container, ~700 lines), `PortfolioSidebar`,
 `HoldingsTable`, `HoldingChartPopup` (issue #137), `AddHolding`, `TickerSearchField`, `PortfolioChart`,
 `ComparisonChart`, `PortfolioSummary`, `PortfolioRiskCard` (issue #113),
-`ComparisonSummary`, `WindowControls`,
+`ComparisonSummary`, `WindowControls` (with `WindowDateField` and `DateCalendar`, issue #156),
 `BenchmarkBar`, and the dialogs/notices (`CreatePortfolioDialog`,
 `ApplyWeightsDialog`, `DeletePortfolioDialog`, `SharePortfolioDialog`,
 `SharedNotice`, `StorageNotice`) and, for Backups (issue #148),
@@ -215,21 +217,59 @@ way to say "add something".
 Lives in the query string, because it belongs to the view rather than to the
 portfolio: the same basket is worth looking at over a year and over a decade, and
 neither reading is the portfolio's own property. Three controls write the same
-window — presets, the two date boxes, and dragging on either chart — and there is
+window — presets, the two date fields, and dragging on either chart — and there is
 never a second window that disagrees. Choosing a preset fills the dates; editing a
-date drops the preset.
+date drops the preset. The buttons are 1M, 3M, 6M, 1Y, 5Y, YTD, Max — spans first,
+then the two that are not spans (`PRESETS`, in the order they are drawn).
 
-- A date is only sent once it is a **usable** window. A half-typed year is a
-  legitimate state of a date input, not a request worth making; an end before its
-  start is a 400 the backend would answer. `windowProblem()` mirrors the backend's
-  `resolve_window` rules so both are said next to the boxes instead.
+- A date is only sent once it is a **usable** window. An end before its start is a
+  400 the backend would answer, and `windowProblem()` mirrors the backend's
+  `resolve_window` rules so it is said next to the boxes instead. It lives in
+  `utils/windowCalendar.js` with `today()` (the UTC date, the one the backend checks
+  `end` against). Both take the date to judge against as an argument, as
+  `presetWindow` does, so the tests need no fake clock.
+- **Each date field is a text box with a calendar (issue #156), not
+  `<input type="date">`.** The native control reports a full, valid date at every step
+  of typing a year (`0002`, `0020`, `0202`, `2020`), and the old `onChange` committed
+  the first of them: a simulation per digit and a box that jumped under the cursor.
+  Text is applied on **Enter or blur**, never as it is typed (`WindowDateField`), and
+  whatever is typed but not yet applied (`typed`) or held (`held`, below) is dropped
+  the moment the window in force changes, however it changed.
+- **One rule for typing and clicking: `editWindow(current, field, text, today)`.** It
+  answers `commit` (send it), `hold` or `problem` (with the message). Only `field`
+  changes, which is why picking a day can never move the date beside it. `hold` is a
+  date accepted while the other bound is missing (Max before its first run), and it
+  waits rather than being sent as half a window.
+- **The calendar (`DateCalendar`) edits one bound**, the one whose field opened it, and
+  disables the days `pickableRange` rules out instead of refusing the click. Its floor
+  is 1970 (`CALENDAR_FLOOR`) and it is a **suggestion, not a rule**: `windowProblem`
+  has no 1970 in it, so a typed date or a `?start=` before it is an ordinary window,
+  and no message is shown. Do not add one to `windowProblem`: the backend has no
+  floor, and a link older than 1970 would then fall back to the default preset.
+  Where the other bound already reaches past it the floor gives way, so the calendar
+  never has every day disabled.
+- **The popover is not modal**, so it does not go through `Overlay` (whose focus trap
+  is for dialogs that disable what is behind them). Clicking the box opens it *and
+  leaves focus in the box*, so you can keep typing while the calendar follows;
+  ArrowDown opens it and moves focus into the day grid, because Left, Right, Home and
+  End belong to the caret in a text box. The grid's keys are `moveFocus`'s. The field
+  forgets its request to focus the grid whenever the popover closes: kept, the next
+  calendar, opened by a click, took focus from the box it was opened from. Focus is
+  never left on a button that is about to go: a year or month picked with the keyboard
+  hands it to the next view, and the month arrows turn `aria-disabled`, not
+  `disabled`, at the edge of the range, because a disabled button holding focus
+  stops receiving keys — Escape included. Leaving the box *for the popover*
+  (ArrowDown) does not apply the text; leaving it for anywhere else does.
 - `max` is the one preset with no dates of its own. It travels as a period and
-  comes back as the window it turned out to be.
+  comes back as the window it turned out to be. While it is in force the fields show
+  what it resolved to, and editing one date keeps the other at that.
 - A drag is applied **on release**, and one shorter than `MIN_ROWS` (4) is refused
   — below that the window is mostly rounding, and a stray click is a zero-length
   drag that would otherwise wipe the window out. The refusal is shown *during* the
   drag (warning colour) rather than sprung at the end.
 - Presets push history; retyping a date replaces, so the back button stays useful.
+- The label over the presets reads **WINDOW**, not PERIOD (CONTEXT.md: "Period" is only
+  the API field's name).
 
 ## The portfolio metric registry (issue #104)
 
