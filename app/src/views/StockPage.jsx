@@ -1,20 +1,21 @@
 /**
  * StockPage — browse one stock on its own (issue #158): a real price chart
- * with a candle/line toggle, and its business description. Metric tiles
- * scored against a $100 Benchmark-style Run (#159) and comparing a second
- * stock (#160) are separate, later issues — this page only ever shows one
- * stock at a time.
+ * with a candle/line toggle, its business description, metric tiles scored
+ * against a $100 Benchmark-style Run (#159), and comparing a second stock
+ * (#160). Never more than two stocks at once — the primary plus one.
  *
  *  ┌────────────────┬─────────────────────────────┐
  *  │ filter history │  [ search a stock…        ]  │ ← fades on scroll
  *  │ NVDA           │  NVDA  NVIDIA Corporation    │
  *  │ TSLA           │  Technology · NASDAQ         │
  *  │ …              │                              │
+ *  │                │  [ compare against… ]        │
  *  │                │  1W 1M 1Y 5Y      [candles]  │
  *  │                │  ┌────────────────────────┐  │
- *  │                │  │      price chart        │  │
- *  │                │  └────────────────────────┘  │
- *  │                │  About                       │
+ *  │                │  │      price chart        │  │  ← ComparisonChart
+ *  │                │  └────────────────────────┘  │    while comparing
+ *  │                │  Metrics …                   │  ← ComparisonSummary
+ *  │                │  About                       │    while comparing
  *  │                │  <business description>      │
  *  └────────────────┴─────────────────────────────┘
  *
@@ -26,7 +27,12 @@
  * *visible* at the top of the scroll: it fades out on scrolling down and
  * back in on scrolling up, `useScrollFade` below, rather than permanently
  * occupying space above a 280px chart most of the page doesn't need it
- * once already open.
+ * once already open. The compare-against control (issue #160,
+ * `useStockComparison`) is a third, distinct one, inside the Performance
+ * card, above the graph — it only ever adds a second line to the chart and
+ * the Metrics card, never switches which stock the page itself is about,
+ * and its own visit is never recorded in the recently-viewed sidebar
+ * (only a resolve of the *primary* ticker, below, calls `visit`).
  *
  * /stock          → nothing open yet, sidebar usable, empty landing state
  * /stock/:ticker  → one stock, resolved the same way a portfolio holding
@@ -57,6 +63,8 @@ import { useRecentStocks } from '../hooks/useRecentStocks';
 import { useSimulationWindow } from '../hooks/useSimulationWindow';
 import { usePortfolioSimulation } from '../hooks/usePortfolioSimulation';
 import { useStockMetrics } from '../hooks/useStockMetrics';
+import { useStockComparison } from '../hooks/useStockComparison';
+import { useComparisonRuns } from '../hooks/useComparisonRuns';
 import { api } from '../utils/api';
 import { PriceChart } from '../components/charts/PriceChart';
 import { CandleToggle } from '../components/charts/CandleToggle';
@@ -64,6 +72,7 @@ import { TimeframeTabs } from '../components/ui/TimeframeTabs';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 import { MetricsPicker } from '../components/ui/MetricsPicker';
+import { ComparisonChart } from '../components/portfolio/ComparisonChart';
 import { describeFetchError } from '../utils/errorCopy';
 import { Logo } from '../components/ui/Logo';
 import { StocksSidebar } from '../components/stock/StocksSidebar';
@@ -240,6 +249,41 @@ const StockDetail = memo(function StockDetail({ resolved }) {
 
   const stockMetrics = useStockMetrics();
 
+  // Comparing a second stock (issue #160). `usePortfolioSimulation` above
+  // keeps scoring the primary alone regardless — the same "both hooks
+  // always run" shape PortfolioPanel.jsx already uses between its own
+  // usePortfolioSimulation and useComparisonRuns — so nothing here can
+  // change which hooks a render calls, only what `lines` (and so what
+  // gets fetched) contains. `lines` is empty, not the primary alone, while
+  // nothing is being compared: useComparisonRuns already treats an empty
+  // list as "nothing to fetch" (see its own module docstring), so this
+  // costs nothing extra until a second stock is actually set.
+  const comparison = useStockComparison(ticker);
+  const comparisonLines = useMemo(() => {
+    if (!comparison.compareTicker) return [];
+    const lineFor = (symbol) => ({
+      key: symbol,
+      label: symbol,
+      kind: 'stock',
+      request: {
+        holdings: [{ ticker: symbol, weight: 100 }],
+        value: STOCK_RUN_AMOUNT,
+        rebalance: 'none',
+        ...windowState.request,
+      },
+    });
+    return [lineFor(ticker), lineFor(comparison.compareTicker)];
+  }, [ticker, comparison.compareTicker, windowState.request]);
+  const comparisonRuns = useComparisonRuns(comparisonLines);
+  // Memoised so StockMetricsCard's own memo() isn't defeated by a fresh
+  // object literal on every StockDetail render (e.g. info/description
+  // resolving, the picker opening) that doesn't actually change what
+  // this prop describes.
+  const stockMetricsComparison = useMemo(
+    () => (comparison.compareTicker ? { runs: comparisonRuns.runs, stale: comparisonRuns.stale } : null),
+    [comparison.compareTicker, comparisonRuns.runs, comparisonRuns.stale]
+  );
+
   const { data: info, loading: infoLoading } = useFetch(
     (signal) => api.getStock(ticker, { signal }),
     [ticker],
@@ -262,9 +306,6 @@ const StockDetail = memo(function StockDetail({ resolved }) {
     [ticker],
     { fallback: null }
   );
-
-  const { arr, dates, candles, loading: chartLoading } = useLiveSeries(ticker, timeframe);
-  const pct = arr && arr.length > 1 ? ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100 : 0;
 
   return (
     <>
@@ -311,40 +352,53 @@ const StockDetail = memo(function StockDetail({ resolved }) {
 
       {/* Performance */}
       <section className="bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-baseline gap-3">
-            <TimeframeTabs active={timeframe} onChange={setTimeframe} />
-            {!chartLoading && arr && (
-              <span
-                className="font-[var(--font-mono)] text-[15px] font-bold tabular-nums"
-                style={{ color: pct >= 0 ? 'var(--success)' : 'var(--danger)' }}
-              >
-                {(pct >= 0 ? '+' : '') + pct.toFixed(1) + '%'}
+        {/* Compare against… (issue #160) — its own control, above the
+            graph, distinct from the page's primary search bar: that one
+            switches which stock the whole page is about, this one only
+            adds a second line to this chart and the Metrics card below.
+            Capped at one compare ticker by useStockComparison's own data
+            model, not just by this control only ever offering one slot. */}
+        <div className="flex items-center gap-2">
+          {comparison.compareTicker ? (
+            <div className="flex items-center gap-2 h-[38px] px-3 bg-[var(--bg-3)] rounded-[var(--radius-md)]">
+              <span className="text-[12px] text-[var(--fg-2)]">Comparing against</span>
+              <span className="font-[var(--font-mono)] text-[12.5px] font-bold text-[var(--accent)]">
+                {comparison.compareTicker}
               </span>
-            )}
-          </div>
-          <CandleToggle />
-        </div>
-        <div className="relative">
-          {chartLoading || !arr ? (
-            <Loading variant="chart" height={280} />
+              <button
+                onClick={comparison.clearCompare}
+                aria-label={`Stop comparing against ${comparison.compareTicker}`}
+                className="w-5 h-5 grid place-items-center rounded-full bg-transparent border-none cursor-pointer text-[var(--fg-2)] hover:text-[var(--fg)]"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="m18 6-12 12M6 6l12 12" /></svg>
+              </button>
+            </div>
           ) : (
-            <PriceChart
-              arr={arr}
-              dates={dates}
-              candles={candles}
-              pct={pct}
-              timeframe={timeframe}
-              gradientId="stockPageChart"
-              height={280}
+            <TickerSearchField
+              placeholder="Compare against…"
+              ariaLabel="Compare against another stock"
+              exclude={[ticker]}
+              onResolved={(result) => comparison.setCompare(result.symbol)}
+              className="w-full max-w-[260px]"
             />
           )}
         </div>
+
+        {comparison.compareTicker ? (
+          comparisonRuns.runs ? (
+            <ComparisonChart runs={comparisonRuns.runs} stale={comparisonRuns.stale} />
+          ) : (
+            <p className="text-[12px] text-[var(--fg-2)] m-0">Simulating each line…</p>
+          )
+        ) : (
+          <PricePerformance ticker={ticker} timeframe={timeframe} onTimeframeChange={setTimeframe} />
+        )}
       </section>
 
       {/* Metrics (issue #159) — scored against the basket-of-one Run
           above, over this card's own window, independent of the
-          Performance chart's own ?tf= timeframe. */}
+          Performance chart's own ?tf= timeframe. Swaps to a side-by-side
+          comparison (issue #160) the same moment the chart above does. */}
       <StockMetricsCard
         windowState={windowState}
         metrics={simulation?.metrics}
@@ -357,6 +411,7 @@ const StockDetail = memo(function StockDetail({ resolved }) {
         tileMetrics={stockMetrics.tileMetrics}
         activeIds={stockMetrics.activeIds}
         onOpenPicker={() => setMetricsPickerOpen(true)}
+        comparison={stockMetricsComparison}
       />
 
       {metricsPickerOpen && (
@@ -396,6 +451,53 @@ const StockDetail = memo(function StockDetail({ resolved }) {
           </p>
         )}
       </section>
+    </>
+  );
+});
+
+/** The real price chart, its timeframe tabs and its candle toggle — its
+ *  own component, not inline in StockDetail, so useLiveSeries only fires
+ *  while this is actually mounted. Rendered only while nothing is being
+ *  compared (issue #160): useLiveSeries has no "disabled" switch of its
+ *  own (see the note at the top of this file), so the only way to stop it
+ *  fetching and holding a series nobody is drawing once ComparisonChart
+ *  takes this slot is to unmount the component that calls it — the same
+ *  fix issue #158 already used for the empty-ticker case on this page. */
+const PricePerformance = memo(function PricePerformance({ ticker, timeframe, onTimeframeChange }) {
+  const { arr, dates, candles, loading: chartLoading } = useLiveSeries(ticker, timeframe);
+  const pct = arr && arr.length > 1 ? ((arr[arr.length - 1] - arr[0]) / arr[0]) * 100 : 0;
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <TimeframeTabs active={timeframe} onChange={onTimeframeChange} />
+          {!chartLoading && arr && (
+            <span
+              className="font-[var(--font-mono)] text-[15px] font-bold tabular-nums"
+              style={{ color: pct >= 0 ? 'var(--success)' : 'var(--danger)' }}
+            >
+              {(pct >= 0 ? '+' : '') + pct.toFixed(1) + '%'}
+            </span>
+          )}
+        </div>
+        <CandleToggle />
+      </div>
+      <div className="relative">
+        {chartLoading || !arr ? (
+          <Loading variant="chart" height={280} />
+        ) : (
+          <PriceChart
+            arr={arr}
+            dates={dates}
+            candles={candles}
+            pct={pct}
+            timeframe={timeframe}
+            gradientId="stockPageChart"
+            height={280}
+          />
+        )}
+      </div>
     </>
   );
 });

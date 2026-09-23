@@ -61,7 +61,8 @@ the data nor worth a link: see "Price charts and candles"):
 | `?tf=` (on `/stock/...`) | `StockPage`'s own `useTimeframeParam` — the price chart's 1W/1M/1Y/5Y timeframe; unrelated to `?window=` below, which scores the Metrics card's Run instead |
 | `?window=` / `?start=&end=` (on `/portfolio/...` **and** `/stock/:ticker`) | `useSimulationWindow` — a preset (`1m`, `3m`, `6m`, `1y`, `5y`, `ytd`, `max`) or an exact window; on the Stock page (issue #159) it scores the basket-of-one Run `StockMetricsCard` reads, the same hook and the same keys, just a different route reusing them |
 | `?stockMetrics=` (on `/stock/...`) | `useStockMetrics` — which of the Stock page's metric tiles are on (issue #159); its own key so it cannot collide with `/portfolio/...`'s `?metrics=` or `/etf/...`'s `?fundMetrics=` |
-| `?compare=` / `?benchmark=` | `useComparison` |
+| `?compare=` (on `/portfolio/...`) / `?benchmark=` | `useComparison` — `?compare=` a comma-separated list of saved portfolio ids |
+| `?compare=` (on `/stock/:ticker`) | `useStockComparison` — a *different* shape behind the same key (issue #160): at most one raw ticker symbol, never a list, structurally — anything that doesn't match one symbol's shape (including a comma-separated attempt) reads as no comparison at all. The two never collide since they live on different routes with disjoint id spaces (a saved portfolio's id there, a live ticker here) |
 | `?rf=` (on `/portfolio/...`) | `useRiskFreeRate` — an override for the risk-free rate a run is scored against (issue #103); absent or unusable falls back to the tracked series |
 | `?risk=` (on `/portfolio/...`) | `usePortfolioRisk` — which `computed_from="risk"` tiles are on, on `PortfolioRiskCard` (issue #113); its own key so it cannot collide with `?metrics=` or `?fundMetrics=` |
 | `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
