@@ -21,9 +21,25 @@
  * (`usePortfolioSimulation`, called by `StockPage` with a synthetic
  * one-holding portfolio) — there is nothing to fetch a second time here,
  * unlike FundMetricsCard's own per-fund values request.
+ *
+ * **Comparing a second stock (issue #160) swaps this card's body, not its
+ * shell.** `WindowControls` stays exactly where it is regardless — both
+ * the primary stock's own Run and a comparison's second line are scored
+ * over the same window, so the control that picks it has exactly one
+ * home whichever mode the card is in, the same way `PortfolioPanel`
+ * renders its own `WindowControls` once, outside the swap between
+ * `PortfolioSummary` and `ComparisonSummary`. The `comparison` prop
+ * (`{ runs, stale }`, `useComparisonRuns`'s own shape, or `null` when
+ * nothing is being compared) is what decides which body shows: absent,
+ * this card behaves exactly as issue #159 shipped it (the Metrics button,
+ * the picker, the tile grid); present, it shows `ComparisonSummary`
+ * instead — the "both stocks' metric tiles side by side" issue #160 asks
+ * for — and hides the picker, since `ComparisonSummary` has no toggleable
+ * columns of its own to pick.
  */
 import { memo } from 'react';
 import { WindowControls } from '../portfolio/WindowControls';
+import { ComparisonSummary } from '../portfolio/ComparisonSummary';
 import { ErrorState } from '../ui/ErrorState';
 import { describeFetchError } from '../../utils/errorCopy';
 
@@ -146,6 +162,7 @@ export const StockMetricsCard = memo(function StockMetricsCard({
   tileMetrics,
   activeIds,
   onOpenPicker,
+  comparison,
 }) {
   const activeTiles = tileMetrics.filter(m => activeIds.includes(m.id));
 
@@ -153,12 +170,14 @@ export const StockMetricsCard = memo(function StockMetricsCard({
     <section className="bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="eyebrow">METRICS</div>
-        <button
-          onClick={onOpenPicker}
-          className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] bg-transparent border border-[var(--border)] rounded-full px-3 py-1 cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-2)] hover:border-[var(--border-strong)]"
-        >
-          Metrics
-        </button>
+        {!comparison && (
+          <button
+            onClick={onOpenPicker}
+            className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] bg-transparent border border-[var(--border)] rounded-full px-3 py-1 cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-2)] hover:border-[var(--border-strong)]"
+          >
+            Metrics
+          </button>
+        )}
       </div>
 
       <WindowControls
@@ -173,7 +192,13 @@ export const StockMetricsCard = memo(function StockMetricsCard({
         onReset={() => {}}
       />
 
-      {error ? (
+      {comparison ? (
+        comparison.runs ? (
+          <ComparisonSummary runs={comparison.runs} stale={comparison.stale} />
+        ) : (
+          <p className="text-[12px] text-[var(--fg-2)] m-0">Simulating each line…</p>
+        )
+      ) : error ? (
         <ErrorState {...describeFetchError(error)} onRetry={onRetry} />
       ) : activeTiles.length === 0 ? (
         <p className="text-[13px] text-[var(--fg-2)] m-0">
