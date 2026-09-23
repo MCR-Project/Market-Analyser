@@ -39,7 +39,7 @@ src/components/
   ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, SegmentedControl, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
   charts/    PriceChart (line or candles), AreaChart, CandleChart, CandleToggle, BrushOverlay, ChartTooltip
   etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard
-  stock/     StockPopup
+  stock/     StockPopup, StocksSidebar, StockMetricsCard (issue #159)
   docs/      DocsSidebar, MeasurementDoc, DocMdx, WorkedExample
   portfolio/ the portfolio simulator UI — see its own CLAUDE.md
 ```
@@ -57,7 +57,10 @@ the data nor worth a link: see "Price charts and candles"):
 | `/docs/:measurementId` | `DocsPage` |
 | `/portfolio/:portfolioId` | `PortfolioPage` |
 | `/portfolio/shared?p=…` | `portfolioLink.decodePortfolio` |
-| `?window=` / `?start=&end=` (on `/portfolio/...`) | `useSimulationWindow` — a preset (`1m`, `3m`, `6m`, `1y`, `5y`, `ytd`, `max`) or an exact window |
+| `/stock/:ticker` | `StockPage` (issue #158) |
+| `?tf=` (on `/stock/...`) | `StockPage`'s own `useTimeframeParam` — the price chart's 1W/1M/1Y/5Y timeframe; unrelated to `?window=` below, which scores the Metrics card's Run instead |
+| `?window=` / `?start=&end=` (on `/portfolio/...` **and** `/stock/:ticker`) | `useSimulationWindow` — a preset (`1m`, `3m`, `6m`, `1y`, `5y`, `ytd`, `max`) or an exact window; on the Stock page (issue #159) it scores the basket-of-one Run `StockMetricsCard` reads, the same hook and the same keys, just a different route reusing them |
+| `?stockMetrics=` (on `/stock/...`) | `useStockMetrics` — which of the Stock page's metric tiles are on (issue #159); its own key so it cannot collide with `/portfolio/...`'s `?metrics=` or `/etf/...`'s `?fundMetrics=` |
 | `?compare=` / `?benchmark=` | `useComparison` |
 | `?rf=` (on `/portfolio/...`) | `useRiskFreeRate` — an override for the risk-free rate a run is scored against (issue #103); absent or unusable falls back to the tracked series |
 | `?risk=` (on `/portfolio/...`) | `usePortfolioRisk` — which `computed_from="risk"` tiles are on, on `PortfolioRiskCard` (issue #113); its own key so it cannot collide with `?metrics=` or `?fundMetrics=` |

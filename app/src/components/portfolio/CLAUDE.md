@@ -332,6 +332,23 @@ shape fits one of those six formats.
   independence "Comparison" below gives each comparison line — so a 503
   here costs only this card's own tiles, never the chart or
   `PortfolioSummary`.
+- **A fourth consumer, `StockMetricsCard.jsx`/`hooks/useStockMetrics.js`
+  (issue #159, `app/src/components/stock/`), filters the same manifest a
+  fourth time** — to `computed_from="run"` **and** `family === "portfolio"`
+  only, its own `?stockMetrics=` param. The Stock page's Run is always a
+  single $100 lump sum with no schedule (a stock has no open Portfolio to
+  borrow a real amount or a contribution/withdrawal from — see
+  `CONTEXT.md`'s `Benchmark` entry), so every `family === "account"` entry
+  would be permanently zero, a trivial constant, or - `moneyWeightedReturn`
+  - a literal duplicate of `cagr`; narrowing to the portfolio family there
+  is the equivalent of `PortfolioSummary`'s own "hide the account row until
+  something is actually funded" gate, just decided once in the filter
+  rather than at render time. Unlike the fund metrics card and the risk
+  card, it reads its values from an already-fetched Run
+  (`usePortfolioSimulation`, called with a synthetic one-holding
+  portfolio) rather than a second per-something fetch — the same way
+  `PortfolioSummary` itself reads a portfolio's own `metrics`, not a
+  separate request.
 
 ## Comparison
 
