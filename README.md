@@ -1,5 +1,7 @@
 # Market Analyser
 
+**Live demo:** https://market-analyser-esnf.onrender.com
+
 ETF correlation dashboard. React/Vite frontend + FastAPI backend, live market
 data via yfinance.
 
