@@ -66,13 +66,19 @@ export const Header = memo(function Header({
       {/* Stretched to its track rather than sized to its content, so the
           brand truncates inside the column instead of running past it. */}
       <div className="flex items-center gap-[11px] min-w-0">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--fg)] flex-none">
-          <path d="M12 3c-2 2.6-2 5.4 0 8 2-2.6 2-5.4 0-8Z" />
-          <path d="M12 11c-2.6-1.4-5.4-1.2-8 .4 2.2 2.2 5 2.6 8 1.1Z" />
-          <path d="M12 11c2.6-1.4 5.4-1.2 8 .4-2.2 2.2-5 2.6-8 1.1Z" />
-          <path d="M12 12.5V21" /><path d="M8.5 21h7" />
-        </svg>
+        <img src="/ma_logo_64.png" alt="" width="40" height="40" className="flex-none rounded-[var(--radius-sm)]" />
         <span className="font-extrabold tracking-tight text-[var(--accent)] text-[16px] whitespace-nowrap overflow-hidden text-ellipsis">Market Analyser</span>
+        <a
+          href="https://github.com/MCR-Project/Market-Analyser"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View source on GitHub"
+          className="flex-none text-[var(--fg-2)] hover:text-[var(--fg)] transition-colors duration-150"
+        >
+          <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+          </svg>
+        </a>
       </div>
 
       <nav aria-label="Pages" className="justify-self-center flex items-center gap-1">
