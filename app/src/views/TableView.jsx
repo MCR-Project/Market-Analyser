@@ -34,6 +34,14 @@
  *     this view computing anything about cost itself
  *  3. Filter row: sector dropdown + per-measurement filters
  *  4. Scrollable rows: one row per holding, sorted per the active sort key
+ *
+ * Height: the view takes what the page leaves it, but never less than
+ * enough for five holdings (hooks/useTableFloor.js). Below that
+ * the page itself scrolls rather than the table collapsing to its headers.
+ * The floor is measured off a real row, because wrapped metric columns make
+ * every row taller, and it holds with fewer than five rows (a search, a
+ * loading state) so the panel does not resize as you type. There is no
+ * upper bound: a tall window shows as many rows as fit.
  */
 import { memo, useState, useMemo, useCallback } from 'react';
 import { useLiveStocks } from '../hooks/useLiveStocks';
@@ -43,6 +51,7 @@ import { MdxCell } from '../components/ui/MdxCell';
 import { DocLink } from '../components/ui/DocLink';
 import { CostBadge } from '../components/ui/CostBadge';
 import { WINDOW_OPTIONS } from '../hooks/useMeasurementWindow';
+import { useTableFloor } from '../hooks/useTableFloor';
 
 const NAME_COL_WIDTH = 230;
 const NAME_SORT_KEY = '__name__';
@@ -157,6 +166,13 @@ export const TableView = memo(function TableView({
     return filtered.slice().sort((a, b) => compareRows(a, b, sort.key, sort.dir, manifest));
   }, [filtered, sort, activeMeasures]);
 
+  // The table never shrinks below its first few holdings: past
+  // this height the page scrolls instead. Drawn or not, a row is looked up
+  // again whenever the first one changes.
+  const { rootRef, rowsRef, minHeight } = useTableFloor(
+    stocksLoading || stocksError ? '' : (sortedRows[0]?.ticker ?? '')
+  );
+
   const hasActiveFilters = !!(filterSector || Object.values(measureFilters).some(v => v > 0));
 
   const clearFilters = useCallback(() => {
@@ -165,7 +181,7 @@ export const TableView = memo(function TableView({
   }, []);
 
   return (
-    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+    <div ref={rootRef} style={minHeight ? { minHeight } : undefined} className="flex-1 min-h-0 overflow-hidden flex flex-col">
       {/* ── Toolbar: measurements button + search ── */}
       <div className="flex items-center gap-3 mb-4">
         <button
@@ -272,7 +288,7 @@ export const TableView = memo(function TableView({
         </div>
 
         {/* Rows */}
-        <div className="corr-scroll flex-1 overflow-y-auto flex flex-col gap-1.5 p-[6px_0_24px]">
+        <div ref={rowsRef} className="corr-scroll flex-1 overflow-y-auto flex flex-col gap-1.5 p-[6px_0_24px]">
           {stocksLoading && (
             <div className="px-[18px] py-4">
               <Loading variant="skeleton" lines={8} />
@@ -284,7 +300,7 @@ export const TableView = memo(function TableView({
             </div>
           )}
           {!stocksLoading && !stocksError && sortedRows.map(row => (
-            <button key={row.ticker} onClick={() => onSelectStock(row.ticker)}
+            <button key={row.ticker} data-holding-row onClick={() => onSelectStock(row.ticker)}
               className="flex items-center text-left cursor-pointer w-full bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] transition-all duration-150 hover:border-[var(--border-strong)]"
             >
               {/* Stock identity */}

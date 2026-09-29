@@ -28,6 +28,7 @@ src/App.jsx                  the dashboard shell (/etf/:etfId/:view)
 src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
 src/utils/candles.js         rows -> candles, and where a candle sits; chartTooltip.js builds the hover readout (both pure, both tested)
+src/utils/tableFloor.js      how tall the holdings table must be to show five holdings (pure, tested); hooks/useTableFloor measures it
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
 src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
@@ -212,6 +213,15 @@ argument to say what it actually needs the backend for — `DocsPage` does
   page does the same for its text-only states (the landing, a bad link, an
   unknown id): a 600px column, centered, while an open portfolio keeps the
   wide layout.
+- **The holdings table never shrinks below five holdings.** The Table view
+  takes the height the page leaves it, which on a short window used to be
+  nothing but its headers. `hooks/useTableFloor` sets a `min-height` on the
+  view's root measured from a real row (`data-holding-row`), not a pixel
+  constant, because wrapped metric columns make every row taller; the page
+  (`App`'s `<main>`) scrolls past it. `utils/tableFloor.js` holds the
+  arithmetic and is tested. It holds with fewer than five rows, so a search
+  does not resize the panel. There is deliberately no ceiling: a tall window
+  shows every row that fits, as before.
 
 ## Price charts and candles (issue #152)
 
