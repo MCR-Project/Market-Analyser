@@ -5,13 +5,17 @@
  * everything below it.
  *
  *  ┌────────────────┬─────────────────────────────┐
- *  │ search         │                             │
- *  │ Official       │  MeasurementDoc:            │
- *  │  · Correlation │   prose, worked example,    │
- *  │  · % of ETF    │   reference panels          │
- *  │ Plugged-in     │                             │
- *  │  · …           │                             │
+ *  │ search         │     ┌───────────────┐       │
+ *  │ Official       │     │ MeasurementDoc│       │
+ *  │  · Correlation │     │  prose, worked│       │
+ *  │  · % of ETF    │     │  example, ref │       │
+ *  │ Plugged-in     │     │  panels       │       │
+ *  │  · …           │     └───────────────┘       │
  *  └────────────────┴─────────────────────────────┘
+ *
+ * The doc is a 760px column centered in the area beside the sidebar
+ * (which stays at the window's left edge), so a wide window is balanced
+ * rather than leaving the right side empty.
  *
  * The sidebar comes from the backend manifest, so a measurement plugged
  * into addon_measurements/ appears here on its own. Which measurement is
@@ -152,18 +156,28 @@ export function DocsPage() {
       </aside>
 
       <main className="corr-scroll flex-1 min-w-0 overflow-y-auto px-8 py-8">
-        <Content
-          measurementId={measurementId}
-          entry={entry}
-          columns={columns}
-          isMetric={isMetric}
-          families={families}
-          unknownId={unknownId}
-          doc={doc}
-          loading={docLoading || (!!measurementId && manifestLoading && !manifestData)}
-          error={docError}
-          onRetry={retryDoc}
-        />
+        {/* The reading column is centered in the space beside the sidebar, so
+            a wide window leaves margin on both sides of it rather than an
+            empty stretch on the right. The cap lives on this wrapper, inside
+            the scrolling <main>, never on <main> itself: the sidebar stays at
+            the window's left edge and the scrollbar at its right. Every state
+            (landing, not-found, error, a doc) sits in the same column and
+            keeps its own narrower text width left-aligned within it, so a
+            heading does not shift sideways when you move between them. */}
+        <div className="max-w-[760px] mx-auto">
+          <Content
+            measurementId={measurementId}
+            entry={entry}
+            columns={columns}
+            isMetric={isMetric}
+            families={families}
+            unknownId={unknownId}
+            doc={doc}
+            loading={docLoading || (!!measurementId && manifestLoading && !manifestData)}
+            error={docError}
+            onRetry={retryDoc}
+          />
+        </div>
       </main>
     </div>
   );
@@ -187,7 +201,7 @@ function Content({ measurementId, entry, columns, isMetric, families, unknownId,
 
 function Landing() {
   return (
-    <div className="max-w-[600px]">
+    <div className="max-w-[600px] mx-auto">
       <h1 className="text-[26px] font-extrabold text-[var(--fg)] tracking-tight mt-0 mb-3">
         Documentation
       </h1>
