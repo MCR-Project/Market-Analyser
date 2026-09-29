@@ -204,7 +204,14 @@ argument to say what it actually needs the backend for — `DocsPage` does
   (`App.jsx`) and the portfolio panel puts its holdings beside its results
   (`PortfolioPanel.jsx`). The cap goes on the content *inside* each scrolling
   area, never on the area itself, so the sidebar stays at the window's left
-  edge and the scrollbar at its right.
+  edge and the scrollbar at its right. The docs page is the narrow case of the
+  same rule: one 760px reading column, `mx-auto` in the space beside its
+  sidebar, holding every state (landing, not-found, error, a doc) so a heading
+  does not shift sideways between them. A doc component sets its own `max-w`
+  but never centers itself — `DocsPage` owns the centering. The portfolio
+  page does the same for its text-only states (the landing, a bad link, an
+  unknown id): a 600px column, centered, while an open portfolio keeps the
+  wide layout.
 
 ## Price charts and candles (issue #152)
 

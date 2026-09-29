@@ -17,7 +17,9 @@
  * portfolios themselves live in this browser's storage — there are no
  * accounts here, and these are simulations rather than holdings anyone
  * owns — so an id from another machine is simply unknown, which the
- * content area explains while the sidebar stays usable.
+ * content area explains while the sidebar stays usable. Those text-only
+ * states, and the landing, are a 600px column centered beside the sidebar;
+ * only an open portfolio uses the wide layout.
  *
  * `/portfolio/shared` is the exception, and the one route where the
  * portfolio is not in this browser at all: it comes out of the query
@@ -196,37 +198,49 @@ export function PortfolioPage({ shared = false }) {
             and this area's scrollbar against its right, where they are on
             every other width. */}
         <div className="max-w-[2072px] mx-auto">
-          <div className="max-w-[720px]">
-            <StorageNotice status={status} canExport={portfolios.length > 0} />
+          {/* With no portfolio open, what is left is a few lines of text
+              (the landing, a bad link, an unknown id), which is not a
+              two-column panel to spread: it sits in a 600px column centered
+              beside the sidebar, the way the docs page's reading column
+              does, rather than against the sidebar with the rest of the
+              area empty. All three states share the one column, and so
+              does the storage notice above them, so nothing shifts sideways
+              when saving a first portfolio turns the landing into a panel
+              or a link turns out to be bad. An open portfolio keeps the
+              wide, left-aligned layout, notice included. */}
+          <div className={open ? undefined : 'max-w-[600px] mx-auto'}>
+            <div className={open ? 'max-w-[720px]' : undefined}>
+              <StorageNotice status={status} canExport={portfolios.length > 0} />
+            </div>
+
+            {shared && !link.error && <SharedNotice />}
+
+            {shared && link.error ? (
+              <BadLink message={link.error} />
+            ) : open ? (
+              <PortfolioPanel
+                portfolio={open}
+                readOnly={shared}
+                onSaveCopy={handleSaveCopy}
+                onRename={name => rename(open.id, name)}
+                onUpdate={changes => update(open.id, changes)}
+                compared={compared}
+                comparison={comparison}
+                onShare={() => setSharing(true)}
+                onExport={handleExportOne}
+                onDuplicate={handleDuplicate}
+                onDelete={() => setPendingDelete(open)}
+              />
+            ) : unknownId ? (
+              <NotFound portfolioId={portfolioId} />
+            ) : (
+              <Landing
+                hasPortfolios={portfolios.length > 0}
+                onCreate={() => setCreating(true)}
+                onImport={handleImport}
+              />
+            )}
           </div>
-
-          {shared && !link.error && <SharedNotice />}
-
-          {shared && link.error ? (
-            <BadLink message={link.error} />
-          ) : open ? (
-            <PortfolioPanel
-              portfolio={open}
-              readOnly={shared}
-              onSaveCopy={handleSaveCopy}
-              onRename={name => rename(open.id, name)}
-              onUpdate={changes => update(open.id, changes)}
-              compared={compared}
-              comparison={comparison}
-              onShare={() => setSharing(true)}
-              onExport={handleExportOne}
-              onDuplicate={handleDuplicate}
-              onDelete={() => setPendingDelete(open)}
-            />
-          ) : unknownId ? (
-            <NotFound portfolioId={portfolioId} />
-          ) : (
-            <Landing
-              hasPortfolios={portfolios.length > 0}
-              onCreate={() => setCreating(true)}
-              onImport={handleImport}
-            />
-          )}
         </div>
       </main>
 
