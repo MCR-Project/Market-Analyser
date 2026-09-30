@@ -11,14 +11,40 @@ vocabulary (`weight`, `window`, `holding`) throughout.
 ### The tracked universe
 
 **Tracked**:
-A ticker with its own row in the `ticker` table: full price history, and
-weighs at least 1% (`--min-weight`) in at least one ETF that holds it. This is
-a DB-wide property, not a per-ETF one — a stock is only pruned when its
-*highest* weight across every ETF holding it falls below the threshold, so a
-stock at 0.4% in one ETF stays tracked as long as it clears 1% in any other.
-Stocks added by hand (`scripts/add_ticker.py`) belong to no ETF and are never
-pruned regardless of weight.
+A ticker with its own row in the `ticker` table: full price history, refreshed
+every day, and weighs at least 1% (`--min-weight`) in at least one ETF that
+holds it. This is a property of the stock, not of one ETF's holding of it — a
+stock stays Tracked as long as its *highest* weight across every ETF holding it
+clears the threshold, so a stock at 0.4% in one ETF is still Tracked (and still
+shown in that ETF) when it clears 1% in any other. Stocks added by hand
+(`scripts/add_ticker.py`) belong to no ETF and are Tracked regardless of weight.
 _Avoid_: Listed, covered
+
+**Untracked**:
+A constituent of an ETF that weighs under 1% in *every* ETF holding it. The app
+knows its weight in each fund and keeps what describes it (name, sector, market
+cap), refreshed weekly, but stores no prices or dividends for it — those exist
+only after a Deep-fill, and only for a while. The fund still holds it: Untracked
+says the app is not watching its prices, not that it left the fund.
+_Avoid_: Pruned (the older word for this state; it suggested the holding was
+gone), Missing
+
+**Deep-fill**:
+Fetching, on request, live market data for a fund's Untracked holdings, so the
+fund can be read as its whole basket rather than only its Tracked part. It
+writes nothing to the database: what it fetches is held in the backend's memory
+for a limited time, and a fund is deep-filled only while that copy exists.
+Slow — many minutes for a fund with hundreds of holdings — and meant to be run
+on a machine with room for it, not the live demo.
+_Avoid_: Backfill (the pipeline's write into `prices`), Complete (the
+completion script's job), Refresh
+
+**Full view**:
+A page of its own showing one whole-fund picture — the correlation matrix or the
+network — of a deep-filled ETF with every holding drawn, zoomable. Read from the
+result the Deep-fill finished with, not computed again on opening, so it says as
+of when it was drawn.
+_Avoid_: Expanded view, Fullscreen
 
 **ETF** (a.k.a. **Fund**):
 A tracked, holdings-bearing instrument in the `etfs` table. "Fund" is used
