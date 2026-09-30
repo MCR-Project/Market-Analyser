@@ -21,10 +21,27 @@ a holdings JSON produced by a `fetcher/` scraper; `fetch_daily.py` keeps
 everything fresh from then on.
 
 A stock enters either as a constituent weighing at least **1%** of a covered ETF
-(`MIN_HOLDING_WEIGHT_PCT`), or by hand via `add_ticker.py`. Below the threshold a
-holding is never inserted, and an existing one is **pruned** DB-wide when it is
-below the threshold in *every* ETF that holds it. Stocks held by no ETF at all
-(hand-added watchlist entries) are never pruned.
+(`MIN_HOLDING_WEIGHT_PCT`), or by hand via `add_ticker.py`. Below the threshold it
+is **Untracked** (issue #168, ADR 0005, `CONTEXT.md`): listed in `etf_holdings`
+with its weight and `tracked = false`, with no `ticker`, `prices`, `dividends` or
+`splits` row and no daily fetch. An existing stock is **demoted** — those rows
+deleted, its holding rows kept — when it is below the threshold in *every* ETF that
+holds it. Stocks held by no ETF at all (hand-added watchlist entries) have no
+holding row to be judged by and are never demoted.
+
+`etf_holdings.tracked` is a fact about the **stock**, denormalised onto every one of
+its rows: true when its highest weight across every fund holding it clears the
+threshold *and* it has a `ticker` row. Only `complete_database.py` writes it, and
+always onto all of a stock's rows at once (`retag_stocks` updates by `ticker`,
+never by row) — a stock at 0.4% in one fund and 2% in another is tracked in both.
+`etf_holdings.ticker` has **no foreign key** any more (`sql/006`), so the promise
+"tracked implies a `ticker` row" is kept by code, not by the database: anything
+that upserts holdings for a ticker it has no row for would take the column default
+`true` and list a holding nothing can price. `sync_etfs`'s `known_tickers` filter
+is what stops the daily job doing exactly that, and the rows it does write carry
+an explicit `tracked` copied from the stock's other rows (`_tracked_by_stock`), so
+a stock still awaiting its backfill does not get a `true` row among `false` ones.
+Only `complete_database.py` ever *changes* a stock's flag.
 
 The risk-free rate's upstream symbol (issue #103) enters the same way an ETF
 does: a row in `risk_free_rate_source`, seeded once by
@@ -46,12 +63,14 @@ Seven phases, in order:
    for the per-ticker `last_fetch` column this table has no need of, and
    it runs even on a day nothing else needs syncing.
 1. **`sync_etfs`** — refresh `etfs` metadata and `etf_holdings` weights for every
-   ETF in the DB. The DB rows are the full constituent list and the source of
-   truth; yfinance only exposes the top ~10, so the live call refreshes the
+   ETF in the DB. The DB rows are the full constituent list (tracked and
+   untracked) and the source of truth; yfinance only exposes the top ~10, so the live call refreshes the
    weights it knows about and **never shrinks** the DB set. Empty fields from
    yfinance are left out of the upsert so a flaky response cannot blank values
-   the completion script already filled. Holdings for untracked tickers are
-   skipped (`etf_holdings.ticker` has an FK to `ticker.id`), not failed.
+   the completion script already filled. Only **tracked** holding rows are read
+   back (issue #168), and live holdings for a ticker with no `ticker` row are
+   skipped, not failed — and must stay skipped, see "How something enters the
+   universe".
 2. **Price sync** — a full `max` backfill when `last_fetch` is null, otherwise a
    5-day top-up covering weekends, holidays and a missed run.
 3. **Split/dividend escalation** — if a top-up turns up a corporate action that
@@ -105,8 +124,9 @@ monthly bucket sums ~21 days and overflows int4 for any high-volume ticker.
 
 ### Which tickers a run touches
 
-`_select_tickers_needing_sync` returns every active ticker **plus** any inactive
-one whose `last_fetch` is null. That second half exists so a prices-convention
+`_select_tickers_needing_sync` reads `ticker` rows only, so an Untracked stock —
+which has none — can never match it. It returns every active ticker **plus** any
+inactive one whose `last_fetch` is null. That second half exists so a prices-convention
 migration (like `sql/003`, which resets `last_fetch` for every row) reaches
 inactive tickers too — otherwise `active=False` would strand them on the old
 convention forever. Metadata refresh stays active-only regardless, and once
@@ -125,8 +145,9 @@ python scripts/complete_database.py --holdings-json ../vaneck_holdings.json [--d
 Seven stages: load and merge the JSON files (skipping entries the fetcher flagged
 with an error or that carry no holdings), intersect with the ETFs actually
 tracked in `etfs`, complete ETF metadata, normalise holdings tickers, insert and
-backfill new tickers above the weight threshold, upsert the full holdings, then
-prune everything DB-wide that fell below the threshold.
+backfill new tickers above the weight threshold, upsert **every** constituent
+into `etf_holdings` with its `tracked` flag, then demote everything DB-wide that
+fell below the threshold.
 
 - **The DB stays the source of truth for *which* ETFs are tracked.** The JSON
   only completes them; uncovered DB ETFs are reported and left to the daily job.
@@ -142,12 +163,24 @@ prune everything DB-wide that fell below the threshold.
   `fetch_daily` run repair it.
 - `last_fetch` is stamped only **after** a full successful backfill, so a partial
   write self-heals: the next daily run re-backfills that ticker automatically.
-- Pruning follows FK order — `etf_holdings`, `prices`, `dividends`, `splits`,
-  then the `ticker` row.
-- `PRICE_UPSERT_CHUNK = 5000`, because a `max` backfill can exceed 10k rows.
+- `plan_tracking` (pure) decides every stock's flag from the stored rows read once
+  before any write (paginated, deterministic order — invariant 3, and the reason a
+  stock is not demoted on a truncated read), with this run's weights replacing the
+  stored ones for the same fund/stock pair. `retag` is the stocks whose rows in
+  funds *outside* this run's files need the new flag; `demote` is decided by
+  weight alone, so a stock flagged untracked only because its backfill failed
+  keeps its half-written `ticker` row for the next daily run to finish.
+- Demotion flags first, then deletes `dividends`, `splits`, `prices` and finally
+  the `ticker` row (FK order — `etf_holdings` is no longer one of them). A run
+  that dies in between leaves an untracked holding with a stale `ticker` row,
+  which the next run demotes again; the reverse order would leave a tracked
+  holding with nothing behind it.
+- `PRICE_UPSERT_CHUNK = 5000`, because a `max` backfill can exceed 10k rows;
+  `HOLDING_UPSERT_CHUNK = 1000`, because a total-market fund lists thousands of
+  constituents now that the light ones are written too.
 
 Every write is an upsert keyed on the primary key, so a second run finds 0 new
-tickers and changes nothing. Use `--dry-run` first when in doubt.
+tickers, demotes nothing and changes nothing. Use `--dry-run` first when in doubt.
 
 ## `add_ticker.py`
 
@@ -175,7 +208,9 @@ call.
 - They are covered by `backend/tests/test_fetch_daily.py` and
   `test_complete_database.py`, which exercise `bucket_by_age`, `compact_ticker`,
   `_select_tickers_needing_sync`, `normalize_symbol`/`normalize_holdings` and
-  `prune_below_threshold` against fakes — and `test_risk_free_rate.py`, which
+  `plan_tracking`/`complete_holdings` against fakes (`test_untracked_holdings.py`,
+  whose double applies filters and writes, so a reader that forgets
+  `.eq("tracked", True)` fails) — and `test_risk_free_rate.py`, which
   covers `fetch_risk_free_rate_rows`/`sync_risk_free_rate` the same way (issue
   #103) — and `test_fetch_run_record.py`, which runs `main()` itself against
   fakes to pin what the run record says and when it is written (issue #154).
