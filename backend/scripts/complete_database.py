@@ -24,23 +24,36 @@ fetcher/common.py):
      MIN_HOLDING_WEIGHT_PCT (1%) in one of the covered ETFs, validate that
      yfinance actually returns price history for it, then insert it with
      live yfinance metadata and backfill its full price history into
-     `prices`. Lighter holdings are never added to the tracked universe.
+     `prices`. Lighter holdings get no `ticker` row and no prices.
   6. Upsert `etf_holdings` from the JSON weights - full constituent lists,
-     not just the top ~10 that yfinance exposes.
-  7. Prune: remove every tracked stock whose weight is below the threshold
-     in ALL the ETFs that hold it (DB-wide, not just this run's files),
-     along with its price history and holdings rows. Stocks that belong to
-     no ETF (hand-added watchlist entries) are never pruned.
+     not just the top ~10 that yfinance exposes - EVERY constituent, the light
+     ones too. Each row carries `tracked`, a fact about the STOCK: true when
+     its highest weight across every fund holding it (DB-wide, not just this
+     run's files) is at least the threshold and it has a `ticker` row, false
+     otherwise. It is written on all of that stock's rows in one pass (issue
+     #168, docs/adr/0005-*), so a stock at 0.4% in fund A and 2% in fund B is
+     tracked in both. An untracked holding is the fund's real weight and
+     nothing else - the fund still holds it; the app just is not watching it.
+  7. Demote: a stock that is now under the threshold in ALL the ETFs holding it
+     has its `ticker`, `prices`, `dividends` and `splits` rows deleted and
+     keeps its `etf_holdings` rows, flagged untracked. This replaced pruning,
+     which deleted the holding row too and so threw away the only record of
+     what the fund contained. Stocks that belong to no ETF (hand-added
+     watchlist entries) have no holding row to judge them by and are never
+     demoted. Promotion needs no stage of its own: it is stage 5's
+     insert-and-backfill followed by stage 6's flag.
 
-Only columns that already exist in the DB are written - no new columns, no
-schema changes, and AUM stays a live-only value (see market_data._compute_aum).
+Only columns that already exist in the DB are written (`tracked` arrives with
+sql/006_keep_untracked_holdings.sql, which has to be applied first), and AUM
+stays a live-only value (see market_data._compute_aum).
 
 Every write is an upsert keyed on the table's primary key, so re-running is
-idempotent: a second run finds 0 new tickers and changes nothing. Newly
-inserted tickers get last_fetch stamped, so the next fetch_daily.py run gives
-them a normal 5-day top-up (not another full backfill) and takes over their
-metadata refresh. If a price backfill fails halfway, last_fetch stays null
-and the next daily run re-backfills that ticker automatically.
+idempotent: a second run finds 0 new tickers, demotes nothing and changes
+nothing. Newly inserted tickers get last_fetch stamped, so the next
+fetch_daily.py run gives them a normal 5-day top-up (not another full
+backfill) and takes over their metadata refresh. If a price backfill fails
+halfway, last_fetch stays null and the next daily run re-backfills that
+ticker automatically.
 
 Run manually with:   python scripts/complete_database.py --holdings-json ../vaneck_holdings.json
                      python scripts/complete_database.py --holdings-json ../vaneck_holdings.json --dry-run
@@ -54,6 +67,7 @@ import json
 import sys
 from datetime import date
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -67,6 +81,7 @@ from services.market_data import (
 from services.supabase_client import get_client, paginated_select
 
 PRICE_UPSERT_CHUNK = 5000  # a "max" backfill can exceed 10k rows per ticker
+HOLDING_UPSERT_CHUNK = 1000  # a total-market fund lists thousands of constituents
 
 # A stock is only worth tracking if it carries at least this weight (%) in
 # one of the ETFs that hold it - below that it barely moves the fund and
@@ -301,72 +316,177 @@ def insert_new_tickers(client, candidates, holding_names, dry_run):
     return inserted, rejected, failed, total_price_rows
 
 
-def prune_below_threshold(client, min_weight, dry_run):
-    """Remove every tracked stock whose weight is below min_weight in ALL
-    the ETFs that hold it - the mirror of the insert gate, applied DB-wide.
+class TrackingPlan(NamedTuple):
+    """What one run decides about which stocks are Tracked (see plan_tracking)."""
 
-    Stocks held by no ETF at all (hand-added via scripts/add_ticker.py) are
-    never pruned. Deletion follows the FK order: etf_holdings, prices,
-    dividends, and splits rows first (ticker.id can't be deleted while any
-    of them still reference it), then the ticker row itself. Prices are
-    re-fetchable, so a stock crossing back above the threshold later is
-    simply re-inserted and re-backfilled by a future run.
+    tracked: dict[str, bool]   # every stock either side knows -> the flag its rows get
+    retag: dict[str, bool]     # stocks whose rows OUTSIDE this run's files need a new flag
+    demote: list[str]          # stocks whose ticker/prices/dividends/splits must go
+
+
+def plan_tracking(
+    stored_rows: list[dict],
+    normalized_by_etf: dict[str, dict[str, float | None]],
+    tickers: set[str],
+    min_weight: float,
+) -> TrackingPlan:
+    """Decide, for every stock any fund holds, whether it is Tracked - a fact
+    about the STOCK, not about one fund's holding of it (issue #168, ADR 0005).
+
+    `stored_rows` is what `etf_holdings` held before this run
+    ({etf_id, ticker, weight, tracked}); `normalized_by_etf` is what this run's
+    files say, and where a pair appears in both the file wins, since it is the
+    newer weight. `tickers` is every id that has a `ticker` row once the insert
+    stage is done.
+
+    A stock's weight is its highest across every fund holding it, so 0.4% in
+    one fund and 2% in another is Tracked in both, and stays in the first fund's
+    view exactly as it did under pruning. It is flagged tracked only if it ALSO
+    has a `ticker` row: `tracked = true` is a promise that prices exist, and a
+    heavy stock yfinance had no history for (or whose backfill failed) would
+    otherwise be listed in every reader with nothing to price it by. Such a
+    stock is flagged untracked but not demoted - `demote` is decided by weight
+    alone, so a half-written `ticker` row is never deleted here; the next
+    daily run finishes its backfill and the next completion flags it.
+
+    A stock in nobody's holdings (a hand-added watchlist entry) is in neither
+    map, so it is neither flagged nor demoted. A null weight counts as 0, the
+    way `upsert_holdings` stores it.
     """
-    rows = paginated_select(
-        lambda: client.table("etf_holdings").select("ticker,weight").order("etf_id").order("ticker")
-    )
-    max_weight: dict[str, float] = {}
-    for row in rows:
-        w = float(row["weight"] or 0)
-        t = row["ticker"]
-        max_weight[t] = max(max_weight.get(t, 0.0), w)
+    weights: dict[tuple[str, str], float] = {}
+    for row in stored_rows:
+        weights[(row["etf_id"], row["ticker"])] = float(row["weight"] or 0)
+    run_pairs = set()
+    for etf_id, held in normalized_by_etf.items():
+        for ticker, weight in held.items():
+            weights[(etf_id, ticker)] = float(weight or 0)
+            run_pairs.add((etf_id, ticker))
 
-    to_remove = sorted(t for t, w in max_weight.items() if w < min_weight)
-    if not to_remove:
-        print("  nothing to prune")
-        return [], []
+    heaviest: dict[str, float] = {}
+    for (_, ticker), weight in weights.items():
+        heaviest[ticker] = max(heaviest.get(ticker, 0.0), weight)
 
-    pruned, failed = [], []
-    for sym in to_remove:
-        if dry_run:
-            print(f"  DRY     {sym:8s} would remove (max weight {max_weight[sym]:.2f}%)")
-            pruned.append(sym)
-            continue
-        try:
-            client.table("etf_holdings").delete().eq("ticker", sym).execute()
-            client.table("prices").delete().eq("ticker", sym).execute()
-            client.table("dividends").delete().eq("ticker", sym).execute()
-            client.table("splits").delete().eq("ticker", sym).execute()
-            client.table("ticker").delete().eq("id", sym).execute()
-        except Exception as e:
-            print(f"  FAILED  {sym:8s} {e}")
-            failed.append(sym)
-            continue
-        print(f"  {sym:8s} removed (max weight {max_weight[sym]:.2f}%)")
-        pruned.append(sym)
-
-    return pruned, failed
+    tracked = {t: w >= min_weight and t in tickers for t, w in heaviest.items()}
+    retag = {
+        row["ticker"]: tracked[row["ticker"]]
+        for row in stored_rows
+        if (row["etf_id"], row["ticker"]) not in run_pairs
+        and bool(row["tracked"]) != tracked[row["ticker"]]
+    }
+    demote = sorted(t for t, w in heaviest.items() if w < min_weight and t in tickers)
+    return TrackingPlan(tracked, retag, demote)
 
 
-def upsert_holdings(client, normalized_by_etf, known_tickers, dry_run):
-    """Upsert the full constituent lists from the holdings JSON - run after
-    the new tickers exist so the etf_holdings.ticker FK is satisfiable.
+def upsert_holdings(
+    client, normalized_by_etf: dict[str, dict[str, float | None]], tracked: dict[str, bool], dry_run: bool
+) -> None:
+    """Upsert the full constituent lists from the holdings JSON, every
+    constituent - an untracked one is written as a weight-only row with
+    `tracked = false` (issue #168), no `ticker` row needed now that
+    etf_holdings.ticker has no foreign key.
 
     A null weight is stored as 0 rather than null (readers do float(weight))
     or dropped - the holding stays visible either way.
     """
     for etf_id, weights in normalized_by_etf.items():
         holding_rows = [
-            {"etf_id": etf_id, "ticker": t, "weight": w if w is not None else 0}
-            for t, w in weights.items() if t in known_tickers
+            {"etf_id": etf_id, "ticker": t, "weight": w if w is not None else 0, "tracked": tracked[t]}
+            for t, w in weights.items()
         ]
-        skipped = len(weights) - len(holding_rows)
-        if holding_rows and not dry_run:
-            client.table("etf_holdings").upsert(holding_rows).execute()
+        if not dry_run:
+            for i in range(0, len(holding_rows), HOLDING_UPSERT_CHUNK):
+                client.table("etf_holdings").upsert(holding_rows[i:i + HOLDING_UPSERT_CHUNK]).execute()
 
         prefix = "DRY     " if dry_run else ""
-        note = f", {skipped} skipped (untracked ticker)" if skipped else ""
+        untracked = sum(1 for row in holding_rows if not row["tracked"])
+        note = f" ({untracked} untracked)" if untracked else ""
         print(f"  {prefix}{etf_id:8s} {len(holding_rows):4d} holdings{note}")
+
+
+def retag_stocks(client, retag: dict[str, bool], dry_run: bool) -> list[str]:
+    """Write a changed `tracked` flag onto every row of each stock - all of a
+    stock's rows in one statement, never one row, because the flag is
+    denormalised and two rows of one stock disagreeing is the failure ADR 0005
+    names. Returns the ids that failed; one bad stock never sinks the batch."""
+    failed = []
+    for sym, value in sorted(retag.items()):
+        if dry_run:
+            print(f"  DRY     {sym:8s} would flag tracked={value} in the other funds too")
+            continue
+        try:
+            client.table("etf_holdings").update({"tracked": value}).eq("ticker", sym).execute()
+        except Exception as e:
+            print(f"  FAILED  {sym:8s} {e}")
+            failed.append(sym)
+    return failed
+
+
+def demote_stocks(client, to_demote: list[str], dry_run: bool) -> tuple[list[str], list[str]]:
+    """Take a stock out of the tracked universe without taking it out of its
+    funds: delete its dividends, splits, prices and finally `ticker` row (in
+    FK order - `ticker.id` cannot go while any of them references it) and leave
+    its `etf_holdings` rows, already flagged untracked by then.
+
+    That order is deliberate. A run that dies between the flag and this leaves an
+    untracked holding with a leftover `ticker` row, which the next run demotes
+    again; the other order would leave a tracked holding with nothing behind it.
+    Prices are re-fetchable, so a stock crossing back over the threshold later
+    is simply re-inserted and re-backfilled. Returns (demoted, failed).
+    """
+    demoted, failed = [], []
+    for sym in to_demote:
+        if dry_run:
+            print(f"  DRY     {sym:8s} would demote (keeps its holding rows)")
+            demoted.append(sym)
+            continue
+        try:
+            client.table("dividends").delete().eq("ticker", sym).execute()
+            client.table("splits").delete().eq("ticker", sym).execute()
+            client.table("prices").delete().eq("ticker", sym).execute()
+            client.table("ticker").delete().eq("id", sym).execute()
+        except Exception as e:
+            print(f"  FAILED  {sym:8s} {e}")
+            failed.append(sym)
+            continue
+        print(f"  {sym:8s} demoted")
+        demoted.append(sym)
+    return demoted, failed
+
+
+def complete_holdings(
+    client,
+    normalized_by_etf: dict[str, dict[str, float | None]],
+    tickers: set[str],
+    min_weight: float,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    """Everything after the insert stage: write the holdings with their flags,
+    retag the stock's rows in funds this run did not cover, then demote what
+    fell under the threshold. `tickers` is every id with a `ticker` row now
+    (the ones that already existed plus the ones just inserted).
+
+    The stored rows are read once, before any write, with a deterministic
+    ORDER BY and through paginated_select (invariant 3): a stock's flag is
+    decided by its heaviest row, and PostgREST truncating that read at 1000 rows
+    would demote a stock whose heavy row sorted past the cap - and delete its
+    whole price history (issue #14).
+
+    Returns (demoted, failed).
+    """
+    stored = paginated_select(
+        lambda: client.table("etf_holdings").select("etf_id,ticker,weight,tracked").order("etf_id").order("ticker")
+    )
+    plan = plan_tracking(stored, normalized_by_etf, tickers, min_weight)
+
+    print("\n4. Upserting ETF holdings...")
+    upsert_holdings(client, normalized_by_etf, plan.tracked, dry_run)
+
+    print(f"\n5. Flagging stocks whose weight elsewhere changed, and demoting those under {min_weight:g}% everywhere...")
+    retag_failed = retag_stocks(client, plan.retag, dry_run)
+    if not plan.demote:
+        print("  nothing to demote")
+    demoted, demote_failed = demote_stocks(client, plan.demote, dry_run)
+    return demoted, retag_failed + demote_failed
 
 
 def main():
@@ -446,26 +566,24 @@ def main():
 
     print(
         f"\n3. Validating and inserting {len(candidates)} new ticker(s) "
-        f"({below} below the {args.min_weight:g}% weight threshold, skipped)..."
+        f"({below} below the {args.min_weight:g}% weight threshold, listed untracked)..."
     )
     inserted, rejected, ticker_failed, price_rows = insert_new_tickers(
         client, candidates, holding_names, args.dry_run
     )
 
-    print("\n4. Upserting ETF holdings...")
-    upsert_holdings(client, normalized_by_etf, existing | set(inserted), args.dry_run)
-
-    print(f"\n5. Pruning stocks below {args.min_weight:g}% in every ETF holding them...")
-    pruned, prune_failed = prune_below_threshold(client, args.min_weight, args.dry_run)
+    demoted, demote_failed = complete_holdings(
+        client, normalized_by_etf, existing | set(inserted), args.min_weight, args.dry_run
+    )
 
     label = "would be " if args.dry_run else ""
     print(
         f"\nDone: {meta_updated} ETF(s) metadata {label}updated, "
         f"{len(inserted)} ticker(s) {label}inserted "
         f"({price_rows} price rows), {len(rejected)} rejected, "
-        f"{len(pruned)} {label}pruned."
+        f"{len(demoted)} {label}demoted."
     )
-    failed = meta_failed + ticker_failed + prune_failed
+    failed = meta_failed + ticker_failed + demote_failed
     if failed:
         print(f"Failed: {', '.join(failed)}")
         sys.exit(1)
