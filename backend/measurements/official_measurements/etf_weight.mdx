@@ -47,14 +47,14 @@ number into dollars using the fund's total assets.
 
 <Warning>
 **The column does not sum to 100%, and cannot.** Only stocks weighing at
-least 1% in one of their tracked ETFs are kept in the database — lighter
-ones are pruned. A broad index fund therefore shows a few dozen of its
-several hundred constituents, and the weights shown add up to well under
-100% of the fund.
+least 1% in one of their tracked ETFs are tracked — lighter ones are still
+listed as part of their fund but carry no prices, so this table leaves them
+out. A broad index fund therefore shows a few dozen of its several hundred
+constituents, and the weights shown add up to well under 100% of the fund.
 </Warning>
 
 - The 1% test is applied across *all* tracked funds, not per fund. A stock
-  held at 0.3% here but 5% in another tracked ETF is kept, and appears here
+  held at 0.3% here but 5% in another tracked ETF is tracked, and appears here
   at its real 0.3%. That is why some rows sit below the threshold.
 - Weights move with prices between rebalances, so they are as fresh as the
   last sync rather than exact at this instant.
