@@ -36,9 +36,10 @@
 -- and the table is 319 rows today and a few thousand once the light constituents
 -- of every tracked fund are listed.
 --
--- Not applied when this file was written. Apply it via Supabase's apply_migration
--- before the first run of complete_database.py or fetch_daily.py that includes
--- this change; the file is kept here for review/history, like the ones before it.
+-- Applied via Supabase's apply_migration on 2026-09-30 (as keep_untracked_holdings);
+-- kept here for review/history. It had to go in BEFORE the first run of
+-- complete_database.py or fetch_daily.py that includes this change, and before the
+-- backend that filters on `tracked` was deployed.
 
 alter table etf_holdings
     add column if not exists tracked boolean not null default true;
