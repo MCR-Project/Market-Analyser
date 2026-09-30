@@ -21,7 +21,9 @@ shown in that ETF) when it clears 1% in any other. Stocks added by hand
 _Avoid_: Listed, covered
 
 **Untracked**:
-A constituent of an ETF that weighs under 1% in *every* ETF holding it. The app
+A constituent of an ETF that weighs under 1% in *every* ETF holding it — or that
+clears 1% but has no price history to track (yfinance had none, or its backfill
+has not finished), since Tracked promises prices exist. The app
 knows its weight in each fund and keeps what describes it (name, sector, market
 cap), refreshed weekly, but stores no prices or dividends for it — those exist
 only after a Deep-fill, and only for a while. The fund still holds it: Untracked

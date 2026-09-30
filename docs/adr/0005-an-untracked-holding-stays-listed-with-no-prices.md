@@ -6,7 +6,10 @@ and splits. It is now kept as an `etf_holdings` row with `tracked = false`, hold
 its weight and nothing else that costs storage or a daily fetch. `tracked` is a fact
 about the *stock* (highest weight across every ETF holding it clears the
 threshold), written onto every row for that stock in one pass by
-`complete_database.py`; it is not a per-fund fact, so a stock at 0.4% in one fund
+`complete_database.py` and only while the stock also has a `ticker` row (a stock
+that clears the threshold but has no price history, or whose backfill failed, is
+listed and Untracked until it does — `tracked = true` promises prices exist);
+it is not a per-fund fact, so a stock at 0.4% in one fund
 and 2% in another stays Tracked, and stays in the first fund's view, exactly as it
 does today.
 
