@@ -13,6 +13,16 @@
  *  │              │  • top sector          │
  *  └──────────────┴────────────────────────┘
  *
+ * Height (issue #176): the dialog is as tall as the window allows, up to
+ * 720px, whatever the list holds — it used to be as tall as its content and
+ * opened a fixed 14vh down, so on a 1080px screen the bottom was already
+ * off it and nothing could scroll. Now the search box stays put and the
+ * list and the preview each scroll on their own, so a hundred ETFs and
+ * three look the same size. The top offset is 14dvh where the window has
+ * room for the full 720px under it and shrinks toward 1.25rem where it
+ * does not, so a short window gives the height to the dialog rather than
+ * to empty space above it.
+ *
  * Fetches full ETF detail and sector breakdown for the hovered item from
  * the API (api.getEtf / api.getSectors). While either request is in
  * flight, the preview panel renders <Loading> placeholders instead of
@@ -67,11 +77,11 @@ export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect,
     <Overlay
       onClose={onClose}
       ariaLabel="Select an ETF"
-      className="fixed inset-0 z-80 flex items-start justify-center pt-[14vh] px-5 pb-5"
+      className="fixed inset-0 z-80 flex items-start justify-center pt-[clamp(1.25rem,calc(100dvh_-_720px_-_2.5rem),14dvh)] px-5 pb-5"
       style={{ background: 'color-mix(in oklab, var(--bg-inset) 70%, transparent)', backdropFilter: 'blur(3px)' }}
-      contentClassName="w-full max-w-[840px] bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]"
+      contentClassName="w-full max-w-[840px] h-full max-h-[720px] flex flex-col bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden animate-[corrPop_var(--dur-fast)_var(--ease-out)]"
     >
-        <div className="p-4 border-b border-[var(--divider)]">
+        <div className="flex-none p-4 border-b border-[var(--divider)]">
           <div className="eyebrow mb-3">● SELECT AN ETF</div>
           <div className="flex items-center gap-2.5 h-[42px] px-3.5 bg-[var(--bg-3)] border border-[var(--border)] rounded-[var(--radius-md)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--fg-2)] flex-none"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
@@ -79,7 +89,7 @@ export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect,
           </div>
         </div>
 
-        <div className="flex">
+        <div className="flex flex-1 min-h-0">
           <div className="corr-scroll w-[300px] flex-none overflow-y-auto p-2 border-r border-[var(--divider)]">
             {etfs.length === 0 && (
               <div className="p-3 flex flex-col gap-2.5">
@@ -101,7 +111,7 @@ export const EtfPicker = memo(function EtfPicker({ currentId, allEtfs, onSelect,
             {etfs.length > 0 && filtered.length === 0 && <div className="p-4 text-sm text-[var(--fg-2)]">No ETF matches that. Try SPY, QQQ, SMH, or ARKK.</div>}
           </div>
 
-          <div className="flex-1 p-6 flex flex-col gap-4 bg-[var(--bg)]" style={{ padding: '24px 26px' }}>
+          <div className="corr-scroll flex-1 min-w-0 overflow-y-auto *:shrink-0 p-6 flex flex-col gap-4 bg-[var(--bg)]" style={{ padding: '24px 26px' }}>
             {previewLoading || !preview ? (
               <>
                 <Loading variant="skeleton" lines={3} />
