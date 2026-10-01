@@ -40,7 +40,8 @@
 -- and every reader reads it by primary key. RLS is enabled with no policies, like
 -- every other table here: only the backend's service key can read or write it.
 --
--- Applied via Supabase's apply_migration; kept here for review/history. Apply it
+-- Applied via Supabase's apply_migration on 2026-10-01 (as untracked_metadata); kept
+-- here for review/history. It had to go in
 -- BEFORE the first run of complete_database.py or sync_untracked_metadata.py that
 -- includes this change, or the demotion copy is skipped with a warning and the
 -- weekly step errors on its first read.

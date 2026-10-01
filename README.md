@@ -77,7 +77,7 @@ in `.env` — see `.env.example`):
   untracked symbol that has no row yet, then every one last checked 7 or more
   calendar days ago, and skips the rest, so re-running it the same week calls
   yfinance for nothing. A lookup that fails keeps its row with the reason and
-  is retried the next week, leaving whatever data the row already held; one bad
+  is retried on every run, not only after a week, leaving whatever data the row already held; one bad
   symbol never stops the run, which exits 1 at the end naming each. A stock
   demoted by `complete_database.py` has its old `ticker` metadata **copied**
   across with no lookup; a promoted one loses its row, and so does a symbol no

@@ -240,8 +240,14 @@ it reads the `tracked = false` flags as they stand). One pass:
   rows checked 7 or more calendar days ago, oldest first. The age is in **calendar
   days, not hours**: GitHub starts the cron hours late by a different amount each
   week (ADR 0003), and 7 × 24 hours would skip a row last checked at 07:40 on a run
-  starting at 06:30, doubling its wait. A failed row ages like any other — retried
-  when its week is up, not on the very next run.
+  starting at 06:30, doubling its wait. A **failed** row is the exception: it is
+  always due, on every run, however recently it failed (order: new symbols, then
+  failed ones, then stale ones). `get_untracked_info` refuses a row carrying a
+  failure, so until it succeeds a Deep-fill cannot describe the symbol, and waiting
+  a week after a transient outage would leave it that way; a manual re-run is how
+  that gets fixed. The cost is bounded to the few symbols that raised — a symbol
+  yfinance merely has nothing on is stored as "nothing there", not as a failure, so
+  it is not retried every run.
 - **How** — through `_get_stock_info_live`, one symbol and one upsert at a time
   (a failed row carries fewer columns than a good one and PostgREST rejects a bulk
   payload with mixed keys; it also means a run that dies keeps what it finished). A
