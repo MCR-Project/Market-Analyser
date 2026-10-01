@@ -41,6 +41,7 @@ import { useChartBrush } from '../../hooks/useChartBrush';
 import { useFillHeight } from '../../hooks/useFillHeight';
 import { PLOT_MAX, PLOT_MIN } from './plotHeight';
 import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
+import { tooltipPlacement } from '../../utils/tooltipPlacement';
 
 const W = 360;
 const PAD = 4;
@@ -243,94 +244,95 @@ export const ComparisonChart = memo(function ComparisonChart({ runs, stale, onSe
           </span>
         ))}
 
-        <svg
-          ref={plotRef}
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          width="100%"
-          className="block"
-          style={{ height: `${H}px` }}
-          role="img"
-          aria-label="Compared portfolios over the selected window"
-        >
-          {[0.25, 0.5, 0.75].map(fraction => (
-            <line
-              key={fraction}
-              x1={0} x2={W} y1={H * fraction} y2={H * fraction}
-              stroke="var(--divider)" strokeWidth={1} vectorEffect="non-scaling-stroke"
-            />
-          ))}
+        {/* The tooltip is positioned in this box, which is exactly the plot,
+            so a percentage of it is a position on the plot whatever padding
+            the card puts around it (issue #177). */}
+        <div className="relative">
+          <svg
+            ref={plotRef}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            width="100%"
+            className="block"
+            style={{ height: `${H}px` }}
+            role="img"
+            aria-label="Compared portfolios over the selected window"
+          >
+            {[0.25, 0.5, 0.75].map(fraction => (
+              <line
+                key={fraction}
+                x1={0} x2={W} y1={H * fraction} y2={H * fraction}
+                stroke="var(--divider)" strokeWidth={1} vectorEffect="non-scaling-stroke"
+              />
+            ))}
 
-          {zeroY !== null && (
-            <line
-              x1={0} x2={W} y1={zeroY} y2={zeroY}
-              stroke="var(--fg-3)" strokeWidth={1} vectorEffect="non-scaling-stroke"
-            />
-          )}
+            {zeroY !== null && (
+              <line
+                x1={0} x2={W} y1={zeroY} y2={zeroY}
+                stroke="var(--fg-3)" strokeWidth={1} vectorEffect="non-scaling-stroke"
+              />
+            )}
 
-          {paths.map(line => (
-            <path
-              key={line.key}
-              d={line.d}
-              fill="none"
-              stroke={line.color}
-              strokeWidth={line.kind === 'benchmark' ? 1.5 : 2}
-              strokeDasharray={line.kind === 'benchmark' ? '5 3' : undefined}
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+            {paths.map(line => (
+              <path
+                key={line.key}
+                d={line.d}
+                fill="none"
+                stroke={line.color}
+                strokeWidth={line.kind === 'benchmark' ? 1.5 : 2}
+                strokeDasharray={line.kind === 'benchmark' ? '5 3' : undefined}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
 
-          <BrushShading selection={brush.selection} width={W} height={H} />
+            <BrushShading selection={brush.selection} width={W} height={H} />
+
+            {hoverIdx !== null && !brush.active && (
+              <line
+                x1={x(at)} x2={x(at)} y1={0} y2={H}
+                stroke="var(--fg)" strokeWidth={1} strokeDasharray="3 2" opacity={0.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+
+            <rect
+              x={0} y={0} width={W} height={H} fill="transparent"
+              onMouseMove={onMouseMove}
+              onMouseLeave={() => setHoverIdx(null)}
+              {...(onSelectWindow ? brush.handlers : {})}
+              style={{ cursor: 'crosshair', ...(onSelectWindow ? brush.handlers.style : {}) }}
+            />
+          </svg>
 
           {hoverIdx !== null && !brush.active && (
-            <line
-              x1={x(at)} x2={x(at)} y1={0} y2={H}
-              stroke="var(--fg)" strokeWidth={1} strokeDasharray="3 2" opacity={0.5}
-              vectorEffect="non-scaling-stroke"
-            />
+            <div
+              className="absolute top-0 bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-md)] px-3 py-2 pointer-events-none shadow-[var(--shadow-lg)] whitespace-nowrap z-20"
+              style={tooltipPlacement({ pctX: (x(at) / W) * 100 })}
+            >
+              <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] mb-1">{dates[at]}</div>
+              <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
+                {[...series]
+                  .sort((a, b) => (b.readings[at] ?? -Infinity) - (a.readings[at] ?? -Infinity))
+                  .map(line => (
+                    <li key={line.key} className="flex items-center gap-2 text-[11.5px]">
+                      <span
+                        className="w-2 h-2 rounded-[2px] flex-none"
+                        style={{ background: line.color, opacity: line.kind === 'benchmark' ? 0.6 : 1 }}
+                        aria-hidden="true"
+                      />
+                      <span className="font-[var(--font-mono)] text-[var(--fg-1)] flex-1">{line.label}</span>
+                      <span className="font-[var(--font-mono)] text-[var(--fg)] tabular-nums">
+                        {formatValue(line.readings[at], mode)}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
           )}
-
-          <rect
-            x={0} y={0} width={W} height={H} fill="transparent"
-            onMouseMove={onMouseMove}
-            onMouseLeave={() => setHoverIdx(null)}
-            {...(onSelectWindow ? brush.handlers : {})}
-            style={{ cursor: 'crosshair', ...(onSelectWindow ? brush.handlers.style : {}) }}
-          />
-        </svg>
+        </div>
 
         <BrushLabel selection={brush.selection} />
-
-        {hoverIdx !== null && !brush.active && (
-          <div
-            className="absolute top-4 bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-md)] px-3 py-2 pointer-events-none shadow-[var(--shadow-lg)] whitespace-nowrap z-20"
-            style={
-              (x(at) / W) * 100 >= 55
-                ? { right: `${Math.max(0, 98 - (x(at) / W) * 100)}%` }
-                : { left: `${Math.max(0, (x(at) / W) * 100 - 2)}%` }
-            }
-          >
-            <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] mb-1">{dates[at]}</div>
-            <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
-              {[...series]
-                .sort((a, b) => (b.readings[at] ?? -Infinity) - (a.readings[at] ?? -Infinity))
-                .map(line => (
-                  <li key={line.key} className="flex items-center gap-2 text-[11.5px]">
-                    <span
-                      className="w-2 h-2 rounded-[2px] flex-none"
-                      style={{ background: line.color, opacity: line.kind === 'benchmark' ? 0.6 : 1 }}
-                      aria-hidden="true"
-                    />
-                    <span className="font-[var(--font-mono)] text-[var(--fg-1)] flex-1">{line.label}</span>
-                    <span className="font-[var(--font-mono)] text-[var(--fg)] tabular-nums">
-                      {formatValue(line.readings[at], mode)}
-                    </span>
-                  </li>
-                ))}
-            </ul>
-          </div>
-        )}
 
         <div className="flex justify-between mt-1.5 font-[var(--font-mono)] text-[10px] text-[var(--fg-3)]">
           <span>{dates[0]}</span>
