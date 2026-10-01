@@ -41,6 +41,12 @@ class _FakeQuery:
     def select(self, *a, **k):
         return self
 
+    def eq(self, *a, **k):
+        # Filters are not applied here; that holdingCount counts tracked rows
+        # only is pinned against a double that does apply them, in
+        # test_untracked_holdings.py (issue #168).
+        return self
+
     def order(self, *a, **k):
         self.order_calls.append((a, k))
         return self
