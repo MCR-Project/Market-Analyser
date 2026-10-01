@@ -36,9 +36,17 @@ on the host (see the README). `entrypoint.sh` is what maps the provider name
 onto the right script; the flags above pass through unchanged.
 
 Both stages also run end-to-end through the "Fetch holdings and complete
-database (manual)" GitHub Action, which picks the provider from a dropdown and
-uploads the raw JSON as an artifact *before* touching Supabase, so the scrape
-survives a failed completion step.
+database (weekly)" GitHub Action (issue #169): Sundays at 06:00 UTC, or by manual
+dispatch, where the `provider` dropdown picks one provider or `all` (the weekly
+run), and `dry_run` and `limit` still apply. Each provider scrapes in its own
+parallel job and uploads the raw JSON as an artifact; one separate job then
+completes the database from every artifact that exists, so a scrape survives a
+failed completion step and a failed provider leaves its funds' rows untouched
+(the run goes red, the others still complete). "Failed" means the scrape step
+exited non-zero: a crash, an empty fund list (rule 4 below), or **every** fund
+erroring, which `run_fetcher` turns into exit 1 after still writing the file. One
+failed fund among others does not — see `note` and `error` above. This is the only scheduled
+scraping — `fetch_daily.py` never scrapes and only sees each fund's top ~10.
 
 ## The output schema
 
@@ -118,8 +126,11 @@ rather than trusting each provider's `Content-Type`.
    redesign gets discovered three weeks later.
 5. `main()` is one call to `run_fetcher`.
 6. Add fixtures and tests under `tests/fetcher/` and `tests/fixtures/<provider>/`.
-7. Add the provider to the `provider` choice list in
-   `.github/workflows/fetch-holdings.yml`.
+7. Add the provider to **both** the `provider` choice list and the `scrape`
+   job's matrix list in `.github/workflows/fetch-holdings.yml` — a provider
+   missing from the matrix is silently never scraped weekly.
+   `tests/test_fetch_holdings_workflow.py` fails if either list differs from the
+   modules in `fetcher/`.
 
 ## The country-collision hazard
 
