@@ -538,6 +538,9 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
 
 # ── Stock metadata ────────────────────────────────────────────────────────────
 
+UNTRACKED_INFO_ID_CHUNK = 200  # ids per `in` filter - the list rides in the request URL
+
+
 def _get_stock_info_live(ticker_symbol: str) -> dict:
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info or {}
@@ -615,9 +618,6 @@ def get_stock_info(ticker_symbol: str) -> dict:
     return result
 
 
-UNTRACKED_INFO_ID_CHUNK = 200  # ids per `in` filter - the list rides in the request URL
-
-
 def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
     """Descriptive data for Untracked holdings, as the weekly job last stored it
     (issue #170): one `{"info", "reason"}` entry per requested ticker.
@@ -626,8 +626,9 @@ def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
     which scripts/sync_untracked_metadata.py fills once a week for every symbol
     `etf_holdings` flags `tracked = false`. It is `None` - with a `reason` saying
     which of the four it is - for a symbol with no row yet, one whose last lookup
-    failed (the row exists to say so, and is retried next week), one stored
-    without a sector, and every symbol when Supabase cannot be read. Never a
+    failed (the row exists to say so, and is retried next week), one the weekly
+    job looked up and yfinance had nothing on (stored with every column null),
+    and every symbol when Supabase cannot be read. Never a
     blank sector, a "USD" nobody looked up or a zero market cap standing in for
     an absent figure (invariant 7): a caller shows the reason, not a guess.
 
@@ -672,7 +673,7 @@ def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
         elif row.get("failure"):
             result[symbol] = absent(f"its last lookup failed ({row['failure']}); the weekly holdings job retries it")
         elif row.get("sector") is None:
-            result[symbol] = absent("its stored row has no sector")
+            result[symbol] = absent("yfinance had no descriptive data for it when the weekly holdings job looked")
         else:
             sector = row["sector"]
             result[symbol] = {

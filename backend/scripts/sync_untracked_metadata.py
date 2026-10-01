@@ -43,21 +43,37 @@ hours late and by a different amount each week (docs/adr/0003-*), so a 7-day
 threshold in hours would skip a row last checked at 07:40 on a run starting at
 06:30 and push its refresh a whole week out.
 
-What is stored is what `_get_stock_info_live` says. A symbol yfinance knows
-nothing about comes back with the sector "Unknown" and a null market cap, which
-is exactly what the Stock page already shows for it; that is an answer, not a
-failed lookup, and it is not retried until a week has passed. A lookup that
-raises (an outage, a rate limit) is the failure.
+Two things about what `_get_stock_info_live` returns shape what is stored:
+
+  - It does not raise for a symbol yfinance has nothing on - it answers an empty
+    shell (name = the symbol, sector "Unknown", no market cap, an assumed "USD").
+    Storing that would put an "Unknown" sector and a currency nobody looked up
+    behind every cash line, future or delisted name a fund lists, and the reader
+    would hand them out as fact. So a shell is stored as "looked up, nothing
+    there": every descriptive column null, no failure. It is not a failed lookup -
+    retrying it every week would leave the job red forever over a symbol that has
+    no data to find - and `get_untracked_info` answers it as no data, with a
+    reason. A lookup that RAISES (an outage, a rate limit) is the failure.
+  - It wants yfinance's spelling, not the repo's. The repo writes share classes
+    with a dot (BRK.B, BF.B - `complete_database.normalize_symbol`), yfinance only
+    knows the dash (BRK-B), and asked for BRK.B it answers the empty shell above for
+    one of the largest companies in the market. `yahoo_symbol` converts a
+    trailing single-letter share class and nothing else, so NPN.SJ keeps its dot.
+    A single letter is also a real exchange suffix (ABC.L, London), so when the
+    dashed spelling comes back a shell the dotted original is asked too, and
+    only both coming back empty counts as nothing there. The row is keyed by the
+    repo's own symbol either way.
 
 Run with:   python scripts/sync_untracked_metadata.py
             python scripts/sync_untracked_metadata.py --dry-run
 """
 
 import argparse
+import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Callable, Iterable, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -71,6 +87,10 @@ TICKER_COLUMNS = "id,name,sector,market_cap,currency,exchange,logo,website"
 RECHECK_AFTER_DAYS = 7
 ID_CHUNK = 100          # ids per `in` filter - the list rides in the request URL
 FAILURE_MAX_LENGTH = 200
+
+# BRK.B, BF.B: a dot followed by exactly one letter at the end - a share class.
+# (Some single-letter suffixes are exchanges, e.g. ABC.L - see lookup_row.)
+_SHARE_CLASS = re.compile(r"\.([A-Z])$")
 
 
 # ── Writes shared with complete_database.py ───────────────────────────────────
@@ -98,7 +118,7 @@ def copy_ticker_metadata(client, sym: str, now: datetime | None = None) -> bool:
     return True
 
 
-def drop_metadata(client, symbols, dry_run: bool = False) -> None:
+def drop_metadata(client, symbols: Iterable[str], dry_run: bool = False) -> None:
     """Delete these symbols' rows. Promotion and "no fund lists it any more" are
     the same write; a symbol with no row is simply not matched."""
     symbols = sorted(symbols)
@@ -116,7 +136,7 @@ class LookupPlan(NamedTuple):
     orphans: list[str]  # rows for symbols that are not Untracked any more
 
 
-def plan_lookups(untracked: set[str], stored_rows: list[dict], today: date) -> LookupPlan:
+def plan_lookups(untracked: set[str], stored: list[dict], today: date) -> LookupPlan:
     """Decide which symbols this run looks up. Pure.
 
     New symbols go first so that a run cut short (a rate limit, a timeout) has
@@ -125,20 +145,20 @@ def plan_lookups(untracked: set[str], stored_rows: list[dict], today: date) -> L
     other: it was checked on its `checked_at` and is retried when a week has
     passed, not on the very next run.
     """
-    stored = {row["id"]: row for row in stored_rows}
+    by_id = {row["id"]: row for row in stored}
 
     def age(sym: str) -> int:
-        return (today - date.fromisoformat(str(stored[sym]["checked_at"])[:10])).days
+        return (today - date.fromisoformat(str(by_id[sym]["checked_at"])[:10])).days
 
-    new = sorted(s for s in untracked if s not in stored)
+    new = sorted(s for s in untracked if s not in by_id)
     stale = sorted(
-        (s for s in untracked if s in stored and age(s) >= RECHECK_AFTER_DAYS),
-        key=lambda s: (str(stored[s]["checked_at"]), s),
+        (s for s in untracked if s in by_id and age(s) >= RECHECK_AFTER_DAYS),
+        key=lambda s: (str(by_id[s]["checked_at"]), s),
     )
     return LookupPlan(
         lookup=new + stale,
         fresh=len(untracked) - len(new) - len(stale),
-        orphans=sorted(set(stored) - untracked),
+        orphans=sorted(set(by_id) - untracked),
     )
 
 
@@ -162,6 +182,44 @@ def stored_rows(client) -> list[dict]:
 
 
 # ── The weekly step ───────────────────────────────────────────────────────────
+
+def yahoo_symbol(sym: str) -> str:
+    """The repo's share-class symbol as yfinance spells it: BRK.B -> BRK-B.
+    A longer suffix (NPN.SJ) is an exchange and is unchanged."""
+    return _SHARE_CLASS.sub(r"-\1", sym)
+
+
+def lookup_row(sym: str, checked_at: str, lookup: Callable[[str], dict]) -> dict:
+    """The row to store for one successful lookup of `sym`. Raises whatever the
+    lookup raises, which the caller records as the failure.
+
+    An empty shell (see the module docstring) from every spelling tried becomes a
+    row of nulls with no failure, rather than the "Unknown" sector and assumed
+    currency it carries.
+    """
+    spellings = list(dict.fromkeys([yahoo_symbol(sym), sym]))
+    for asked in spellings:
+        info = lookup(asked)
+        if not (info["sector"] == "Unknown" and info["marketCap"] is None and info["name"] == asked):
+            break
+    else:
+        return {
+            "id": sym, "name": None, "sector": None, "market_cap": None, "currency": None,
+            "exchange": None, "logo": None, "website": None, "checked_at": checked_at, "failure": None,
+        }
+    return {
+        "id": sym,
+        "name": info["name"],
+        "sector": info["sector"],
+        "market_cap": info["marketCap"],
+        "currency": info["currency"],
+        "exchange": info["exchange"],
+        "logo": info["logo"],
+        "website": info["website"],
+        "checked_at": checked_at,
+        "failure": None,
+    }
+
 
 class SyncResult(NamedTuple):
     looked_up: list[str]
@@ -202,19 +260,7 @@ def sync(
             looked_up.append(sym)
             continue
         try:
-            info = lookup(sym)
-            row = {
-                "id": sym,
-                "name": info["name"],
-                "sector": info["sector"],
-                "market_cap": info["marketCap"],
-                "currency": info["currency"],
-                "exchange": info["exchange"],
-                "logo": info["logo"],
-                "website": info["website"],
-                "checked_at": checked_at,
-                "failure": None,
-            }
+            row = lookup_row(sym, checked_at, lookup)
         except Exception as e:
             reason = _reason(e)
             row = {"id": sym, "checked_at": checked_at, "failure": reason}
@@ -231,16 +277,23 @@ def sync(
             print(f"  FAILED  {sym:8s} {row['failure']}")
         else:
             looked_up.append(sym)
-            print(f"  {sym:8s} {row['sector']}")
+            print(f"  {sym:8s} {row['sector'] or 'no data at yfinance'}")
 
     if plan.orphans:
         verb = "would delete" if dry_run else "deleting"
         print(f"  {verb} {len(plan.orphans)} row(s) for symbols no fund lists as Untracked: {', '.join(plan.orphans)}")
-    drop_metadata(client, plan.orphans, dry_run)
+    try:
+        drop_metadata(client, plan.orphans, dry_run)
+    except Exception as e:
+        # Every lookup above is already written; losing the report of them, and the
+        # exit code that names what failed, to a traceback here would be worse.
+        failed["orphan sweep"] = _reason(e)
+        print(f"  FAILED  orphan sweep {failed['orphan sweep']}")
+        return SyncResult(looked_up, plan.fresh, failed, [])
     return SyncResult(looked_up, plan.fresh, failed, plan.orphans)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

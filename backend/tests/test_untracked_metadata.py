@@ -262,6 +262,115 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result.dropped, ["DROPPED"])
 
 
+def _shell(asked):
+    """What `_get_stock_info_live` answers for a symbol yfinance has nothing on
+    (observed live for ZZZZQQ and for BRK.B): it does not raise."""
+    return {
+        "ticker": asked, "name": asked, "sector": "Unknown", "sectorTag": "UNKNOW",
+        "marketCap": None, "currency": "USD", "exchange": "", "logo": "", "website": "",
+    }
+
+
+class YahooSymbolTests(unittest.TestCase):
+    def test_a_share_class_is_dashed(self):
+        self.assertEqual(sync_mod.yahoo_symbol("BRK.B"), "BRK-B")
+        self.assertEqual(sync_mod.yahoo_symbol("BF.B"), "BF-B")
+
+    def test_a_longer_exchange_suffix_keeps_its_dot(self):
+        self.assertEqual(sync_mod.yahoo_symbol("NPN.SJ"), "NPN.SJ")
+
+    def test_a_plain_symbol_is_unchanged(self):
+        self.assertEqual(sync_mod.yahoo_symbol("AAPL"), "AAPL")
+
+
+class EmptyShellTests(unittest.TestCase):
+    """yfinance answers a symbol it has nothing on with a shell instead of an
+    error. Stored as given it would be a sector of "Unknown" and a currency of
+    "USD" that nobody looked up, handed out as fact by the reader."""
+
+    def test_a_share_class_is_asked_for_the_way_yfinance_spells_it_and_keyed_as_the_repo_does(self):
+        db = _Db({"etf_holdings": _untracked_fund("BF.B")})
+        lookups = _Lookups()
+        _sync(db, lookups)
+
+        self.assertEqual(lookups.calls, ["BF-B"])
+        self.assertEqual([r["id"] for r in db.tables["untracked_metadata"]], ["BF.B"])
+
+    def test_a_single_letter_exchange_suffix_is_found_by_its_dotted_spelling(self):
+        """ABC.L looks like a share class, so ABC-L is tried first and comes back
+        a shell; the dotted original is what yfinance knows."""
+        db = _Db({"etf_holdings": _untracked_fund("ABC.L")})
+        calls = []
+
+        def london_only(asked):
+            calls.append(asked)
+            return _info(asked) if asked == "ABC.L" else _shell(asked)
+
+        _sync(db, london_only)
+        self.assertEqual(calls, ["ABC-L", "ABC.L"])
+        (row,) = db.tables["untracked_metadata"]
+        self.assertEqual((row["id"], row["sector"]), ("ABC.L", "Technology"))
+
+    def test_a_shell_is_stored_as_nothing_there_not_as_unknown_and_usd(self):
+        db = _Db({"etf_holdings": _untracked_fund("CASHLINE")})
+        result = _sync(db, _shell)
+
+        (row,) = db.tables["untracked_metadata"]
+        self.assertEqual(
+            {k: row[k] for k in ("name", "sector", "market_cap", "currency", "exchange", "logo", "website", "failure")},
+            {k: None for k in ("name", "sector", "market_cap", "currency", "exchange", "logo", "website", "failure")},
+        )
+        self.assertEqual(row["checked_at"], NOW.isoformat())
+        self.assertEqual(result.failed, {})      # not a failure: nothing to retry it into
+        self.assertEqual(result.looked_up, ["CASHLINE"])
+
+    def test_a_shell_is_not_looked_up_again_within_the_week(self):
+        db = _Db({"etf_holdings": _untracked_fund("CASHLINE")})
+        _sync(db, _shell)
+        calls = []
+        _sync(db, lambda sym: calls.append(sym) or _shell(sym))
+        self.assertEqual(calls, [])
+
+    def test_the_reader_answers_a_shell_as_no_data_with_a_reason(self):
+        db = _Db({"etf_holdings": _untracked_fund("CASHLINE")})
+        _sync(db, _shell)
+        with patch("services.market_data.get_client_optional", return_value=db):
+            entry = get_untracked_info(["CASHLINE"])["CASHLINE"]
+        self.assertIsNone(entry["info"])
+        self.assertIn("no descriptive data", entry["reason"])
+
+    def test_a_real_answer_with_no_market_cap_is_not_mistaken_for_a_shell(self):
+        """A real answer with no market cap (a fund, say) keeps its sector and name."""
+        def etf_like(asked):
+            return {**_info(asked, sector="Unknown", cap=None), "name": "Some Fund"}
+        db = _Db({"etf_holdings": _untracked_fund("FUNDX")})
+        _sync(db, etf_like)
+        (row,) = db.tables["untracked_metadata"]
+        self.assertEqual(row["name"], "Some Fund")
+        self.assertEqual(row["sector"], "Unknown")
+
+
+class OrphanSweepFailureTests(unittest.TestCase):
+    def test_a_failing_sweep_is_reported_and_the_lookups_before_it_are_kept(self):
+        db = _Db({
+            "etf_holdings": _untracked_fund("A"),
+            "untracked_metadata": [_stored("DROPPED", "2026-10-03T06:00:00+00:00")],
+        })
+        real_execute = _Query.execute
+
+        def refuse_delete(query):
+            if query._name == "untracked_metadata" and query._op == "delete":
+                raise RuntimeError("delete refused")
+            return real_execute(query)
+
+        with patch.object(_Query, "execute", refuse_delete):
+            result = _sync(db, _Lookups())
+
+        self.assertIn("orphan sweep", result.failed)
+        self.assertEqual(result.looked_up, ["A"])
+        self.assertIn("A", [r["id"] for r in db.tables["untracked_metadata"]])
+
+
 class MainExitCodeTests(unittest.TestCase):
     def _run(self, result):
         out = io.StringIO()
