@@ -626,7 +626,7 @@ def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
     which scripts/sync_untracked_metadata.py fills once a week for every symbol
     `etf_holdings` flags `tracked = false`. It is `None` - with a `reason` saying
     which of the four it is - for a symbol with no row yet, one whose last lookup
-    failed (the row exists to say so, and is retried next week), one the weekly
+    failed (the row exists to say so, and is retried on every run), one the weekly
     job looked up and yfinance had nothing on (stored with every column null),
     and every symbol when Supabase cannot be read. Never a
     blank sector, a "USD" nobody looked up or a zero market cap standing in for

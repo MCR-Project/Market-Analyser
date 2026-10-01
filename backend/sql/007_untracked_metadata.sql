@@ -13,9 +13,10 @@
 -- Same descriptive columns as `ticker`, with the same types, plus:
 --   checked_at  when the row was last looked up or copied; the weekly job skips a
 --               row checked within the last 7 days, so this is what keeps a
---               re-run from calling yfinance again.
+--               re-run from calling yfinance again - except for a failed row,
+--               which is retried on every run.
 --   failure     why the last lookup failed, null when it succeeded. A failed
---               lookup keeps its row (so the symbol is retried next week and the
+--               lookup keeps its row (so the symbol is retried on the next run and the
 --               reader can say why it has no answer) and leaves the descriptive
 --               columns as they were, so a stock that once had data and has a
 --               bad week does not lose it - the reader simply declines to use a

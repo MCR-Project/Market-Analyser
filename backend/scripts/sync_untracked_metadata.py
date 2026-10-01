@@ -15,14 +15,15 @@ One run, after complete_database.py (the `untracked-metadata` job of
 .github/workflows/fetch-holdings.yml):
 
   1. Read every distinct symbol that `etf_holdings` flags `tracked = false`.
-  2. Look up each one that has no row yet, then each whose row was checked a week
-     or more ago (oldest first), through `_get_stock_info_live`, and upsert one
-     row. A row checked within the last 7 calendar days is left alone, so a
-     manual re-run costs nothing.
+  2. Look up each one that has no row yet, then each whose last lookup failed, then
+     each whose row was checked a week or more ago (oldest first), through
+     `_get_stock_info_live`, and upsert one row. A good row checked within the last
+     7 calendar days is left alone, so a manual re-run costs nothing for it.
   3. A lookup that fails keeps its row: `checked_at` and the reason are written
      and the descriptive columns are left as they were. The symbol is retried on
-     the next weekly run, and `get_untracked_info` declines to use a row that
-     carries a failure. One bad symbol never stops the run; it exits 1 at the end
+     EVERY run, not only after a week - `get_untracked_info` declines to use a row
+     that carries a failure, so until it succeeds the symbol is one a Deep-fill
+     cannot describe, and a re-run after an outage should fix that at once. One bad symbol never stops the run; it exits 1 at the end
      naming each failure.
   4. Delete the rows of symbols that are not Untracked any more - promoted to
      Tracked, or listed in no fund (a fund dropped it).
@@ -131,7 +132,7 @@ def drop_metadata(client, symbols: Iterable[str], dry_run: bool = False) -> None
 # ── What to look up ───────────────────────────────────────────────────────────
 
 class LookupPlan(NamedTuple):
-    lookup: list[str]   # new symbols first, then the stale ones, oldest check first
+    lookup: list[str]   # new symbols, then failed ones, then stale ones - oldest check first
     fresh: int          # Untracked symbols whose row is recent enough to leave alone
     orphans: list[str]  # rows for symbols that are not Untracked any more
 
@@ -139,25 +140,36 @@ class LookupPlan(NamedTuple):
 def plan_lookups(untracked: set[str], stored: list[dict], today: date) -> LookupPlan:
     """Decide which symbols this run looks up. Pure.
 
-    New symbols go first so that a run cut short (a rate limit, a timeout) has
-    spent its calls on the symbols a Deep-fill cannot describe at all rather than
-    on refreshing ones it already can. A failed row is stale or fresh like any
-    other: it was checked on its `checked_at` and is retried when a week has
-    passed, not on the very next run.
+    New symbols go first, then failed ones, then the stale ones, so that a run cut
+    short (a rate limit, a timeout) has spent its calls on the symbols a Deep-fill
+    cannot describe at all - a new one has no data, and a failed one's data is
+    refused by the reader - rather than on refreshing ones it already can.
+
+    A failed row is always due, however recently it failed (it is the one
+    exception to "checked in the last 7 days is left alone"). Waiting a week would
+    leave the symbol undescribed for that long after a transient outage, and a
+    manual re-run is exactly how someone fixes that. The cost is bounded: failures
+    are the few symbols that raised, not the ~450 that did not, and a symbol
+    yfinance simply has nothing on is stored as "nothing there" and is not a
+    failure, so it is not retried every run.
     """
     by_id = {row["id"]: row for row in stored}
 
     def age(sym: str) -> int:
         return (today - date.fromisoformat(str(by_id[sym]["checked_at"])[:10])).days
 
+    def oldest_first(symbols) -> list[str]:
+        return sorted(symbols, key=lambda s: (str(by_id[s]["checked_at"]), s))
+
     new = sorted(s for s in untracked if s not in by_id)
-    stale = sorted(
-        (s for s in untracked if s in by_id and age(s) >= RECHECK_AFTER_DAYS),
-        key=lambda s: (str(by_id[s]["checked_at"]), s),
+    failed = oldest_first(s for s in untracked if s in by_id and by_id[s].get("failure"))
+    stale = oldest_first(
+        s for s in untracked
+        if s in by_id and not by_id[s].get("failure") and age(s) >= RECHECK_AFTER_DAYS
     )
     return LookupPlan(
-        lookup=new + stale,
-        fresh=len(untracked) - len(new) - len(stale),
+        lookup=new + failed + stale,
+        fresh=len(untracked) - len(new) - len(failed) - len(stale),
         orphans=sorted(set(by_id) - untracked),
     )
 

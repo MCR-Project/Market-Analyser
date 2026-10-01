@@ -8,10 +8,10 @@ part. `scripts/sync_untracked_metadata.py` stores one row per Untracked symbol
 once a week; `market_data.get_untracked_info` reads it. Four things are pinned,
 each the way a mistake would show:
 
-- `plan_lookups` / `sync`: what gets looked up and when. New symbols first, a row
-  younger than 7 calendar days never again, a failed row retried when a week has
-  passed and not before - and one bad symbol leaves the rest of the run, and the
-  data a row already held, intact.
+- `plan_lookups` / `sync`: what gets looked up and when. New symbols first, then
+  failed ones, then stale ones; a good row younger than 7 calendar days never
+  again; a failed row on EVERY run, however recently it failed - and one bad
+  symbol leaves the rest of the run, and the data a row already held, intact.
 - Standing changes in `complete_database.complete_holdings`: a demoted stock's own
   `ticker` metadata is copied across with no `.info` call; a Tracked stock has no
   row here.
@@ -116,13 +116,36 @@ class PlanLookupsTests(unittest.TestCase):
         self.assertEqual(RECHECK_AFTER_DAYS, 7)
         self.assertEqual(plan.lookup, ["X"])
 
-    def test_a_failed_row_waits_a_week_like_any_other(self):
-        """"Retried next week" - not on the very next run, which would hammer a
-        symbol yfinance has just refused."""
-        failed_yesterday = _stored("X", "2026-10-03T06:00:00+00:00", failure="boom")
-        self.assertEqual(plan_lookups({"X"}, [failed_yesterday], TODAY).lookup, [])
-        failed_last_week = _stored("X", "2026-09-27T06:00:00+00:00", failure="boom")
-        self.assertEqual(plan_lookups({"X"}, [failed_last_week], TODAY).lookup, ["X"])
+    def test_a_failed_row_is_always_due_however_recently_it_failed(self):
+        """The reader refuses a failed row, so until it succeeds the symbol is one a
+        Deep-fill cannot describe; a re-run after an outage has to fix that, not
+        skip it for a week."""
+        for checked_at in ("2026-10-04T05:00:00+00:00", "2026-10-03T06:00:00+00:00", "2026-09-27T06:00:00+00:00"):
+            failed = _stored("X", checked_at, failure="boom")
+            self.assertEqual(plan_lookups({"X"}, [failed], TODAY).lookup, ["X"], checked_at)
+
+    def test_a_failed_row_is_not_counted_as_left_alone(self):
+        plan = plan_lookups({"X"}, [_stored("X", "2026-10-04T05:00:00+00:00", failure="boom")], TODAY)
+        self.assertEqual(plan.fresh, 0)
+
+    def test_new_symbols_come_first_then_failed_then_stale(self):
+        """A run cut short should have spent its calls on what a Deep-fill cannot
+        describe (no row, or a row the reader refuses) before refreshing what it can."""
+        plan = plan_lookups(
+            {"NEW", "FAILED", "STALE", "FRESH"},
+            [
+                _stored("STALE", "2026-09-01T06:00:00+00:00"),
+                _stored("FAILED", "2026-10-03T06:00:00+00:00", failure="boom"),
+                _stored("FRESH", "2026-10-03T06:00:00+00:00"),
+            ],
+            TODAY,
+        )
+        self.assertEqual(plan.lookup, ["NEW", "FAILED", "STALE"])
+        self.assertEqual(plan.fresh, 1)
+
+    def test_a_good_row_is_still_left_alone_when_it_is_a_failure_that_cleared(self):
+        recovered = _stored("X", "2026-10-03T06:00:00+00:00", failure=None)
+        self.assertEqual(plan_lookups({"X"}, [recovered], TODAY).lookup, [])
 
     def test_rows_for_symbols_that_are_not_untracked_any_more_are_orphans(self):
         plan = plan_lookups({"KEEP"}, [_stored("KEEP", "2026-10-03T00:00:00+00:00"), _stored("GONE", "2026-10-03T00:00:00+00:00")], TODAY)
@@ -191,15 +214,23 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(row["sector"], "Technology")     # not blanked by a bad week
         self.assertEqual(row["market_cap"], 5)
 
-    def test_a_failed_symbol_is_retried_the_next_week_and_the_failure_cleared(self):
-        db = _Db({"etf_holdings": _untracked_fund("X")})
+    def test_a_failed_symbol_is_retried_by_the_very_next_run_and_the_failure_cleared(self):
+        db = _Db({"etf_holdings": _untracked_fund("X", "OK")})
         _sync(db, _Lookups(fails={"X"}))
         retry = _Lookups()
-        result = _sync(db, retry, now=datetime(2026, 10, 11, 6, 30, tzinfo=timezone.utc))
+        result = _sync(db, retry, now=datetime(2026, 10, 4, 9, 0, tzinfo=timezone.utc))  # the same day
 
-        self.assertEqual(retry.calls, ["X"])
+        self.assertEqual(retry.calls, ["X"])             # OK is a good row from three hours ago: left alone
         self.assertIsNone(db.tables["untracked_metadata"][0]["failure"])
         self.assertEqual(result.failed, {})
+
+    def test_a_symbol_that_keeps_failing_is_tried_on_every_run(self):
+        db = _Db({"etf_holdings": _untracked_fund("X")})
+        for hour in (6, 7, 8):
+            lookups = _Lookups(fails={"X"})
+            result = _sync(db, lookups, now=datetime(2026, 10, 4, hour, 0, tzinfo=timezone.utc))
+            self.assertEqual(lookups.calls, ["X"], hour)
+            self.assertEqual(list(result.failed), ["X"])
 
     def test_a_row_that_cannot_be_written_is_a_failure_not_a_lookup(self):
         db = _Db({"etf_holdings": _untracked_fund("BAD", "GOOD")})
