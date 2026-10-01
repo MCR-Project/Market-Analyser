@@ -84,6 +84,26 @@ def test_a_failing_fund_is_isolated_and_recorded_with_an_error(tmp_path):
     assert by_ticker["BBB"]["holdings"] == []
 
 
+def test_a_scrape_where_every_fund_failed_exits_nonzero_but_still_writes_the_file(tmp_path):
+    # The weekly workflow (issue #169) treats a failed scrape step as "this
+    # provider failed": no artifact, funds untouched, run red. A provider that
+    # starts blocking the runner fails every fund individually and used to exit
+    # 0, which would have uploaded an all-error file and gone green.
+    with pytest.raises(SystemExit) as exc:
+        _run(tmp_path, ["--delay", "0"], fail_for={"aaa", "bbb", "ccc"})
+
+    # A string code is printed to stderr and the process exits with status 1.
+    assert "All 3" in str(exc.value.code)
+    data = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert all(e["error"] for e in data["etfs"])
+
+
+def test_one_failing_fund_among_others_still_exits_zero(tmp_path):
+    # Per-fund isolation is the point of the loop: a single bad fund is skipped
+    # by complete_database.py and must not discard the other funds' scrape.
+    _run(tmp_path, ["--delay", "0"], fail_for={"bbb"})
+
+
 def test_no_delay_is_slept_after_the_last_fund(tmp_path, monkeypatch):
     sleeps = []
     monkeypatch.setattr(common.time, "sleep", lambda s: sleeps.append(s))

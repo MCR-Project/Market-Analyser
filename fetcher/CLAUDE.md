@@ -68,7 +68,8 @@ skipped by `complete_database.py`, but only one of them means something broke.
 **`run_fetcher(provider_name, fetch_etf_list, fetch_etf_holdings, default_output, tickers_example)`**
 is the entire CLI and orchestration: argument parsing, `--tickers`/`--limit`
 filtering, the numbered progress loop with per-fund error isolation, the pacing
-delay, `write_output`, and the summary. A fetcher differs only in its name, its
+delay, `write_output`, and the summary, then exits 1 if every fund failed (issue
+#169: the weekly workflow reads a non-zero exit as "this provider failed"). A fetcher differs only in its name, its
 two functions and its default filename — everything else lives here once instead
 of six times (issue #23). If `fetch_etf_list` accepts a `delay` parameter it is
 passed one (only `ark.py` needs it, because building its list costs one request

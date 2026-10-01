@@ -176,6 +176,15 @@ def run_fetcher(
     print(f"\nDone: {ok}/{len(results)} ETFs fetched without error, {with_tickers} with stock tickers extracted.")
     print(f"Output written to {args.output}")
 
+    if results and ok == 0:
+        # Every fund failed: the provider is down or has started blocking us,
+        # not "one bad fund". Exiting 0 here made the weekly workflow (issue
+        # #169) treat an all-error file as a successful scrape - green run,
+        # nothing completed, nobody told. The file is still written above so
+        # the errors can be read. A single failed fund is deliberately not an
+        # error here: complete_database.py skips it and the rest still count.
+        raise SystemExit(f"All {len(results)} {provider_name} ETF fetches failed.")
+
 
 class Response:
     """Adapts a Playwright APIResponse to the requests.Response surface
