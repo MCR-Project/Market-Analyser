@@ -14,6 +14,7 @@ for running pytest directly. See the README's "Running it with Docker".
 ```
 conftest.py            puts fetcher/ on sys.path
 fetcher/test_*.py      one file per provider, plus test_common.py
+test_fetch_holdings_workflow.py   parses fetch-holdings.yml (no network): Sunday-only cron, matrix == fetcher/*.py, one completion
 fixtures/<provider>/   real captured payloads: HTML, JSON, CSV, XLSX
 ```
 
