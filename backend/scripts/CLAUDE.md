@@ -248,9 +248,18 @@ it reads the `tracked = false` flags as they stand). One pass:
   lookup that raises writes `checked_at` and `failure` **only**, so a stock that once
   had data does not lose it to one bad week, and `get_untracked_info` still declines
   to use the row. A write that fails is counted as a failure too, not as a lookup.
-  What a successful lookup stores is what `_get_stock_info_live` says — a symbol
-  yfinance knows nothing about comes back as sector "Unknown" with a null market cap,
-  which is what the Stock page already shows for it; that is an answer, not a failure.
+  **`_get_stock_info_live` does not raise for a symbol yfinance has nothing on** — it
+  answers an empty shell (name = the symbol, sector "Unknown", no market cap, an
+  assumed "USD"), which is what the Stock page shows. Stored as given, that is an
+  "Unknown" sector and a currency nobody looked up, served as fact. So a shell is
+  stored as **looked up, nothing there**: every descriptive column null, no failure
+  (cash lines, futures and delisted names would otherwise keep the job red forever),
+  and the reader answers it as no data. And **yfinance spells share classes with a
+  dash** where this repo uses a dot — asked for `BRK.B` it answers that same empty
+  shell for one of the largest companies there is — so `yahoo_symbol` asks for
+  `BRK-B`, and a symbol whose dashed spelling is a shell is asked again as written
+  (`ABC.L` is a London listing, not a share class). The row is keyed by the repo's
+  symbol either way. Only a lookup that *raises* is a failure.
 - **Orphans** — rows for symbols no fund lists as Untracked (promoted, or dropped
   by every fund) are deleted at the end of each run, which also covers a promotion
   made outside `complete_database.py`.

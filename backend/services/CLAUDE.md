@@ -169,8 +169,8 @@ stock, filled weekly by `scripts/sync_untracked_metadata.py` (see
 `scripts/CLAUDE.md`) — and returns `{ticker: {"info", "reason"}}`, one entry per
 distinct symbol asked. `info` has `get_stock_info`'s keys; it is **`None` with a
 reason**, never a guess, for a symbol with no row, one whose last lookup failed
-(the row is kept precisely so the reason can be said), one stored without a sector,
-and every symbol when Supabase cannot be reached or read. Unlike `get_stock_info`
+(the row is kept precisely so the reason can be said), one the weekly job looked up
+and yfinance had nothing on (stored with every column null), and every symbol when Supabase cannot be reached or read. Unlike `get_stock_info`
 it does **not** default a missing currency to `"USD"` or an exchange to `""`, and a
 null market cap stays null: those defaults are for a page that must render
 something, and this is a reader whose caller must say what it does not know
