@@ -1,31 +1,59 @@
-name: Fetch holdings and complete database (manual)
+name: Fetch holdings and complete database (weekly)
+
+# The daily job only refreshes each fund's top ~10 weights from yfinance and
+# never scrapes, so a fund's full constituent list goes stale unless this runs.
+# Sunday keeps the schedule clear of the daily job (Monday-Friday), so the two
+# do not overlap in normal operation. Nothing stops a manual dispatch of either
+# from overlapping the other. GitHub starts crons late, sometimes by hours, which
+# is harmless: the next daily run is Monday 22:30 UTC.
 
 on:
+  schedule:
+    - cron: "0 6 * * 0"
   workflow_dispatch:
     inputs:
       provider:
-        description: "Holdings provider to fetch"
+        description: "Holdings provider to fetch (all = the weekly run)"
         type: choice
         options:
+          - all
           - vaneck
           - spdr
           - ark
           - ishares
           - vanguard
           - invesco
-        default: vaneck
+        default: all
       dry_run:
         description: "Preview changes without writing to Supabase"
         type: boolean
         default: false
       limit:
-        description: "Max ETFs to fetch (empty = all)"
+        description: "Max ETFs to fetch per provider (empty = all)"
         type: string
         default: ""
 
+# complete_database.py computes the DB-wide tracked/untracked split, so two of
+# them running at once would race. One completion job per run is enforced below;
+# this stops a scheduled run and a manual dispatch from each having one. GitHub
+# keeps only one *pending* run per group, so a third trigger replaces a queued one.
+concurrency:
+  group: fetch-holdings
+  cancel-in-progress: false
+
 jobs:
-  fetch-and-complete:
+  # One job per provider, in parallel. A scrape that fails (a provider redesign,
+  # an empty fund list) turns this run red but takes nothing else down: its JSON
+  # is never uploaded, so completion cannot see it and that provider's funds are
+  # left exactly as they were.
+  scrape:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in step with fetcher/*.py and the `provider` choices above;
+        # tests/test_fetch_holdings_workflow.py fails if they drift.
+        provider: ${{ fromJSON((inputs.provider == '' || inputs.provider == 'all') && '["vaneck","spdr","ark","ishares","vanguard","invesco"]' || format('["{0}"]', inputs.provider)) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,21 +64,58 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r fetcher/requirements.txt
-          pip install -r backend/requirements.txt
           playwright install --with-deps chromium
 
-      - name: Fetch holdings from ${{ inputs.provider }}
-        run: python fetcher/${{ inputs.provider }}.py --output holdings.json ${{ inputs.limit != '' && format('--limit {0}', inputs.limit) || '' }}
+      - name: Fetch holdings from ${{ matrix.provider }}
+        run: python fetcher/${{ matrix.provider }}.py --output holdings.json ${{ inputs.limit != '' && format('--limit {0}', inputs.limit) || '' }}
 
-      # Uploaded before the Supabase step so the raw JSON survives a failed run
+      # Only after a successful scrape (the default `if`), so a provider that
+      # failed leaves no artifact. Kept as the raw JSON, so a failed completion
+      # does not cost the scrape.
       - uses: actions/upload-artifact@v4
         with:
-          name: holdings-${{ inputs.provider }}
+          name: holdings-${{ matrix.provider }}
           path: holdings.json
 
+  # Exactly one completion, after every scrape has finished. `needs` alone would
+  # skip it when any scrape failed, which is when the other providers' funds
+  # still need completing, hence the `if`. The run is red whenever a scrape was.
+  complete:
+    needs: scrape
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: holdings-*
+          path: holdings
+
+      - name: List the scraped files
+        id: files
+        run: |
+          files=$(find "$GITHUB_WORKSPACE/holdings" -name holdings.json 2>/dev/null | sort | tr '\n' ' ')
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          if [ -z "$files" ]; then
+            echo "::warning::No provider produced a holdings file, nothing to complete."
+          else
+            echo "Completing from: $files"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.files.outputs.files != ''
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.files.outputs.files != ''
+        run: pip install -r backend/requirements.txt
+
       - name: Complete ETFs/tickers in Supabase
+        if: steps.files.outputs.files != ''
         working-directory: backend
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python scripts/complete_database.py --holdings-json ../holdings.json ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python scripts/complete_database.py --holdings-json ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}

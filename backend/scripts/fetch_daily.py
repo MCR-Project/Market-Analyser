@@ -473,7 +473,8 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     the source of truth for what an ETF contains - yfinance only exposes
     the top ~10 holdings, so the live call is used purely to refresh the
     weights it knows about and never shrinks the DB set. Full-portfolio
-    weights refresh whenever the fetch-holdings workflow runs. Of those rows
+    weights refresh whenever the fetch-holdings workflow runs (weekly, Sundays;
+    this daily job never scrapes). Of those rows
     only the TRACKED ones are counted here (issue #168): a fund's untracked
     constituents - weight only, no `ticker` row - are not, and live weights
     for them are skipped below. Every constituent counted here has a `ticker`

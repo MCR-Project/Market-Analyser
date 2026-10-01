@@ -9,7 +9,7 @@ the DB fresh — a DB-first read here would write the same rows back in a circle
 | Script | Job | Trigger |
 | --- | --- | --- |
 | `add_ticker.py` | Add or update tickers by hand | manual |
-| `complete_database.py` | Complete tracked ETFs from a provider holdings JSON | `fetch-holdings.yml` (manual dispatch) |
+| `complete_database.py` | Complete tracked ETFs from provider holdings JSON | `fetch-holdings.yml` (cron, 06:00 UTC Sundays, or manual dispatch) |
 | `fetch_daily.py` | Refresh prices, metadata and ETF holdings for everything tracked | `fetch-daily.yml` (cron, 22:30 UTC Mon–Fri) |
 
 ## How something enters the universe
@@ -19,6 +19,26 @@ Supabase dashboard or SQL. Nothing in this repo adds one. `complete_database.py`
 then fills in its metadata, its constituent tickers and their price history from
 a holdings JSON produced by a `fetcher/` scraper; `fetch_daily.py` keeps
 everything fresh from then on.
+
+**The daily job never scrapes.** It only refreshes each fund's top ~10 weights
+from yfinance, so a fund's full constituent list and its tracked/untracked split
+move only when `fetch-holdings.yml` runs — weekly, Sundays, so it never overlaps
+the Monday–Friday daily job (issue #169). That workflow is the only thing that
+runs `complete_database.py` in CI, and it runs it **once**: the six provider
+scrapes run in parallel (`fail-fast: false`, each uploading its JSON as an
+artifact), then a single `complete` job `needs` all of them, runs even if some
+failed, and passes every artifact that exists in one `--holdings-json` list. Two
+completions at once would race on the DB-wide split, which is also why the
+workflow has a `concurrency` group — a scheduled run and a manual dispatch queue
+rather than overlap.
+
+A provider whose scrape failed uploads nothing, so its funds are reported as
+"not covered" and their rows are untouched; the run is red because that scrape
+job was, while the other providers still complete. A fund-level `error` inside an
+otherwise successful scrape does **not** fail the scrape — `complete_database.py`
+skips it, as before — but a scrape where *every* fund errored does
+(`run_fetcher` exits 1 after writing the file), since that is a provider that is
+down, not a bad fund. `tests/test_fetch_holdings_workflow.py` pins this shape.
 
 A stock enters either as a constituent weighing at least **1%** of a covered ETF
 (`MIN_HOLDING_WEIGHT_PCT`), or by hand via `add_ticker.py`. Below the threshold it

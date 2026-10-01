@@ -58,8 +58,12 @@ ticker automatically.
 Run manually with:   python scripts/complete_database.py --holdings-json ../vaneck_holdings.json
                      python scripts/complete_database.py --holdings-json ../vaneck_holdings.json --dry-run
                      python scripts/complete_database.py --holdings-json ../vaneck_holdings.json --etfs SMH
-Runs end-to-end (fetch + complete) via .github/workflows/fetch-holdings.yml
-(manual dispatch).
+Runs end-to-end (fetch + complete) via .github/workflows/fetch-holdings.yml:
+weekly on Sundays, and by manual dispatch. The workflow scrapes the six providers
+in parallel but runs this script ONCE, over every JSON that exists, because it
+computes the DB-wide tracked/untracked split - parallel runs would race. A
+provider whose scrape failed contributes no file, so its funds are left as they
+were (they show up under "not covered" below).
 """
 
 import argparse

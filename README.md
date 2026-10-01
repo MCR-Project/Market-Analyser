@@ -59,16 +59,24 @@ in `.env` — see `.env.example`):
   stock at 0.4% in one fund and 2% in another is tracked in both. Every read
   of the holdings — a fund's holdings table, its `holdingCount`, the
   correlation matrix, the daily ETF sync — sees tracked rows only, so nothing
-  a fund shows changes. Idempotent; both stages run end-to-end via the "Fetch
-  holdings and complete database (manual)" GitHub Action.
-  `sql/006_keep_untracked_holdings.sql` adds the column and has to be applied
-  before the first run of either the script or the backend that reads it.
+  a fund shows changes. Idempotent; both stages run end-to-end via the
+  "Fetch holdings and complete database (weekly)" GitHub Action — Sundays at
+  06:00 UTC, or by manual dispatch (one provider or `all`, with `dry_run` and
+  `limit`). It scrapes the six providers in parallel, then completes the
+  database in one job from whichever scrapes succeeded: a provider that fails
+  leaves its funds' rows untouched and turns the run red, and the others still
+  complete. `sql/006_keep_untracked_holdings.sql` adds the column and has to be
+  applied before the first run of either the script or the backend that reads
+  it.
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
   ETF holdings, and the tracked risk-free rate (`risk_free_rate` table,
   issue #103 — see "Scoring against a risk-free rate" below) for everything
   tracked, then records the run in `fetch_run` — see
-  [Freshness](#freshness-is-the-data-from-a-recent-run). Runs on a cron via the
-  "Daily ticker data fetch" GitHub Action.
+  [Freshness](#freshness-is-the-data-from-a-recent-run). Runs on a cron
+  (Monday to Friday) via the "Daily ticker data fetch" GitHub Action. It
+  never scrapes: it only refreshes each fund's top ~10 weights, so the full
+  constituent lists move only with the weekly holdings run above, which is
+  not recorded in the header's Freshness.
 
 #### How prices are stored
 
