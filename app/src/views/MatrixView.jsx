@@ -161,8 +161,10 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
           {/* Stretched to the view's full height, and never below the
               smallest box the grid reads in: on a short screen the page
               scrolls rather than squeezing the matrix into a strip one
-              row tall (issue #139 — the network view's own minimum). */}
-          <section className="self-stretch flex-1 min-w-[320px] min-h-[380px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+              row tall (issue #139 — the network view's own minimum). The
+              minimum matches DetailAside's, so the two stand level even
+              when the window is too short to stretch either (issue #176). */}
+          <section className="self-stretch flex-1 min-w-[320px] min-h-[480px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
             <div className="flex-1 min-h-0 flex flex-col p-[18px_20px_20px]">
               {/* The scrollbar gutter is reserved whether or not there is
                   a scrollbar, so one appearing cannot change the width
