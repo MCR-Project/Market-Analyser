@@ -458,7 +458,8 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     the source of truth for what an ETF contains - yfinance only exposes
     the top ~10 holdings, so the live call is used purely to refresh the
     weights it knows about and never shrinks the DB set. Full-portfolio
-    weights refresh whenever the fetch-holdings workflow runs. Since
+    weights refresh whenever the fetch-holdings workflow runs (weekly, Sundays;
+    this daily job never scrapes). Since
     etf_holdings.ticker has an FK to ticker.id, every constituent in the
     DB also gets its prices/metadata refreshed by the main loop below.
 
