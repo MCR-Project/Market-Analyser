@@ -29,6 +29,7 @@ src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
 src/utils/candles.js         rows -> candles, and where a candle sits; chartTooltip.js builds the hover readout (both pure, both tested)
 src/utils/tableFloor.js      how tall the holdings table must be to show five holdings (pure, tested); hooks/useTableFloor measures it
+src/utils/networkBox.js      the network graph's minimum height for its width: close to a square, capped (pure, tested; issue #176)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
 src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
@@ -222,6 +223,27 @@ argument to say what it actually needs the backend for — `DocsPage` does
   arithmetic and is tested. It holds with fewer than five rows, so a search
   does not resize the panel. There is deliberately no ceiling: a tall window
   shows every row that fits, as before.
+- **Short windows scroll the page, never the content into nothing** (issue
+  #176). Three rules, one idea: a panel's height comes from the window or from a
+  floor, never from how much it holds.
+  - *The ETF picker* is as tall as the window allows up to 720px — `h-full
+    max-h-[720px]` — with the search box pinned and the list and preview each
+    scrolling inside it. Its top offset is 14dvh only where the window has room
+    for all 720px under it, and shrinks toward 1.25rem otherwise.
+  - *`DetailAside`* is `self-stretch` with a 480px floor, so beside the Matrix or
+    Network panel it is exactly as tall as that panel, and where the row wraps and
+    it sits below, it is the floor — which both panels share as their own minimum. Its content is in an absolutely
+    positioned box on purpose: the panel's own height then comes only from the
+    floor and the stretch, so a hundred peers scroll in the list instead of
+    making the plot taller. `MatrixView`'s and `NetworkView`'s panels have the
+    same 480px floor.
+  - *The network graph's box* never drops below `networkMinHeight(width)` — 0.85
+    of its width, capped at 900px — set as an inline `min-height` from the
+    measured width, so it reads close to a square on a short window. It is a
+    floor, not a size: a tall window still gives it everything it has. `App`'s
+    `<main>` reserves its scrollbar gutter (`scrollbar-gutter: stable`) so a
+    scrollbar appearing cannot narrow the box, lower its floor and make the page
+    stop scrolling — the loop `useElementSize` warns about, closed from the page.
 
 ## Price charts and candles (issue #152)
 
@@ -409,7 +431,9 @@ Issue #156 added `utils/windowCalendar.test.js` (`editWindow`, `parseTypedDate`,
 `pickableRange`, `monthGrid` and `moveFocus`: what a typed or clicked date does to the
 window, which days the calendar offers and where the keyboard goes) and
 `utils/windowPresets.test.js` (`presetWindow` and `PRESETS`; the date is passed in, so
-nothing fakes the clock).
+nothing fakes the clock). Issue #176 added `utils/networkBox.test.js`
+(`networkMinHeight`: the floor for the network graph's height, its cap, and no
+floor before the box is measured).
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that
