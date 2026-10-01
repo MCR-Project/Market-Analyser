@@ -49,9 +49,17 @@ Sentinels worth knowing:
 - `_get_stock_info_db` treats **`sector IS NULL`** as "never synced" and returns
   a miss. All six metadata columns are always written together, so a null sector
   cannot mean anything else.
+- `etf_holdings` lists a fund's **Untracked** constituents too (weight only,
+  `tracked = false`, issue #168 and ADR 0005), so **every read of it filters to
+  `tracked = true`**: `_get_etf_holdings_db`, the `holdingCount` read in
+  `list_etf_summaries`, and `sync_etfs` in the daily job. Miss it and a fund's
+  default view jumps from ~46 holdings to ~500 with nothing else changed. A fund
+  whose only rows are untracked reads as unsynced (`None`) and takes the live
+  fallback, exactly like a fund with no rows. A *new* reader of this table must
+  filter the same way.
 - `get_etf_holdings` returns `(holdings, stale)` as one tuple, cached together.
   `stale` means the holdings came from the live top-~10 fallback rather than the
-  full DB constituent list. It is deliberately not a sibling cache key — two
+  fund's tracked holdings in the DB. It is deliberately not a sibling cache key — two
   concurrent requests for the same ETF could interleave and read one without the
   other.
 

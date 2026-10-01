@@ -448,6 +448,21 @@ def compact_ticker(client, ticker_id: str, today: date) -> tuple[int, int, int, 
     return weeks_compacted, months_compacted, weeks_skipped, months_skipped
 
 
+def _tracked_by_stock(client) -> dict[str, bool]:
+    """{ticker: tracked} for every stock that has an `etf_holdings` row, read once
+    per run. `tracked` is denormalised onto all of a stock's rows and only the
+    completion script writes it, so its rows agree; `any` rather than the first
+    row only so that a half-finished retag cannot flip the answer by read order.
+    Paginated with a deterministic order (invariant 3)."""
+    rows = paginated_select(
+        lambda: client.table("etf_holdings").select("etf_id,ticker,tracked").order("etf_id").order("ticker")
+    )
+    flags: dict[str, bool] = {}
+    for row in rows:
+        flags[row["ticker"]] = flags.get(row["ticker"], False) or bool(row["tracked"])
+    return flags
+
+
 def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     """Refresh etfs/etf_holdings for every ETF already tracked in Supabase
     (market_data.list_etfs) - this only ever refreshes existing rows, it
@@ -459,9 +474,11 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     the top ~10 holdings, so the live call is used purely to refresh the
     weights it knows about and never shrinks the DB set. Full-portfolio
     weights refresh whenever the fetch-holdings workflow runs (weekly, Sundays;
-    this daily job never scrapes). Since
-    etf_holdings.ticker has an FK to ticker.id, every constituent in the
-    DB also gets its prices/metadata refreshed by the main loop below.
+    this daily job never scrapes). Of those rows
+    only the TRACKED ones are counted here (issue #168): a fund's untracked
+    constituents - weight only, no `ticker` row - are not, and live weights
+    for them are skipped below. Every constituent counted here has a `ticker`
+    row, so the main loop below refreshes its prices/metadata.
 
     The live (not DB-first) lookups are deliberate: this job is what keeps
     the DB fresh, so reading the DB back here would just write the same
@@ -470,11 +487,22 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
     the completion script already filled. aum is deliberately not stored -
     it's a live snapshot value; callers needing it use get_etf_info.
 
-    Live holdings for tickers we don't track yet are skipped
-    (etf_holdings.ticker has an FK to ticker.id) rather than failing the
-    whole ETF - they'll show up once that ticker is added.
+    Live holdings for tickers we don't track are skipped rather than failing
+    the whole ETF. This filter is load-bearing now that etf_holdings.ticker has
+    no FK (issue #168): without it a live top-~10 weight for an untracked stock
+    would upsert as a new row with the column default `tracked = true`, listing
+    a holding nothing can price.
+
+    Every row written here also states its `tracked` flag explicitly rather than
+    leaving it to the column default, copying what the stock's other rows say
+    (`_tracked_by_stock`). A stock can have a `ticker` row and still be flagged
+    untracked - its backfill is pending - and a new row for it arriving as the
+    default `true` would disagree with its siblings until the next completion
+    run. A stock no fund holds yet (hand-added) has no siblings and is tracked.
+    Only the completion script ever CHANGES a stock's flag; this copies it.
     """
     failed = []
+    tracked_by_stock = _tracked_by_stock(client)
     for etf_id in list_etfs():
         try:
             info = _get_etf_info_live(etf_id)
@@ -495,12 +523,16 @@ def sync_etfs(client, known_tickers: set[str]) -> list[str]:
             client.table("etfs").upsert(etf_row).execute()
 
         db_rows = paginated_select(
-            lambda: client.table("etf_holdings").select("ticker").eq("etf_id", etf_id).order("ticker")
+            lambda: client.table("etf_holdings")
+            .select("ticker")
+            .eq("etf_id", etf_id)
+            .eq("tracked", True)
+            .order("ticker")
         )
         db_tickers = {row["ticker"] for row in db_rows}
 
         holding_rows = [
-            {"etf_id": etf_id, "ticker": t, "weight": w}
+            {"etf_id": etf_id, "ticker": t, "weight": w, "tracked": tracked_by_stock.get(t, True)}
             for t, w in live_holdings if t in known_tickers
         ]
         skipped = len(live_holdings) - len(holding_rows)

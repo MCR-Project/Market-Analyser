@@ -345,8 +345,11 @@ def list_etf_summaries() -> list[dict]:
         # rows across page boundaries (see paginated_select's docstring),
         # which would silently corrupt holdingCount once etf_holdings grows
         # past one page.
+        # Tracked rows only (issue #168): an untracked holding is still in the
+        # fund but is not one this app reads, and counting it would take a
+        # fund's holdingCount from ~46 to ~500 without anything else changing.
         holding_rows = paginated_select(
-            lambda: db.table("etf_holdings").select("etf_id").order("etf_id")
+            lambda: db.table("etf_holdings").select("etf_id").eq("tracked", True).order("etf_id")
         )
     except Exception:
         return []
@@ -453,7 +456,14 @@ def _get_etf_holdings_live(etf_id: str) -> list[list]:
 
 def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
     """Already deduplicated by the daily sync job - no need to reapply
-    DUPLICATE_TICKERS merging on read. Returns None if unsynced/unreachable."""
+    DUPLICATE_TICKERS merging on read. Returns None if unsynced/unreachable.
+
+    Tracked rows only (issue #168): the table also lists the fund's untracked
+    constituents, weight and nothing else, and every caller of this - the
+    holdings table, the correlation matrix, every measurement - is built on
+    holdings that have prices. A fund whose only rows are untracked reads as
+    unsynced (None) and takes the live fallback, exactly as a fund with no rows.
+    """
     db = get_client_optional()
     if db is None:
         return None
@@ -462,6 +472,7 @@ def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
             lambda: db.table("etf_holdings")
             .select("ticker,weight")
             .eq("etf_id", etf_id)
+            .eq("tracked", True)
             .order("weight", desc=True)
             .order("ticker")
         )
@@ -486,8 +497,8 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
 
     Returns (holdings, stale), where stale is True when these holdings came
     from the live yfinance fallback (DB miss/error) rather than Supabase -
-    i.e. likely an incomplete top-~10 rather than the full constituent
-    list. The two are returned together (and cached together) rather than
+    i.e. likely an incomplete top-~10 rather than the fund's tracked
+    holdings (the DB read is tracked rows only - issue #168). The two are returned together (and cached together) rather than
     stale being a separate lookup keyed by etf_id, so a caller can't ever
     observe one without the other - a sibling cache key relied on the
     caller reading it right after this call, which concurrent requests for

@@ -48,15 +48,26 @@ in `.env` — see `.env.example`):
   ticker (yfinance must return price history — non-US Bloomberg-style
   tickers are skipped), insert it, backfill its full price history, and
   upsert the full holdings with weights. Only stocks weighing at least 1%
-  in one of their ETFs are tracked (`--min-weight` to override); lighter
-  ones are skipped on insert and pruned from the DB if already present.
-  Idempotent; both stages run end-to-end via the "Fetch holdings and
-  complete database (weekly)" GitHub Action — Sundays at 06:00 UTC, or by
-  manual dispatch (one provider or `all`, with `dry_run` and `limit`). It
-  scrapes the six providers in parallel, then completes the database in one
-  job from whichever scrapes succeeded: a provider that fails leaves its
-  funds' rows untouched and turns the run red, and the others still
-  complete.
+  in one of their ETFs are **tracked** (`--min-weight` to override): they get
+  a `ticker` row and daily prices. A lighter one is **untracked** — still
+  listed in `etf_holdings` with its weight and `tracked = false`, but with no
+  `ticker`, `prices`, `dividends` or `splits` rows, so a fund like SPY keeps a
+  row for all ~500 of its constituents rather than the ~46 that clear 1%. A
+  stock that falls under the bar everywhere is demoted (those rows deleted,
+  its holding row kept); one that rises over it is backfilled and flagged
+  tracked. The flag belongs to the stock, not to one fund's holding of it: a
+  stock at 0.4% in one fund and 2% in another is tracked in both. Every read
+  of the holdings — a fund's holdings table, its `holdingCount`, the
+  correlation matrix, the daily ETF sync — sees tracked rows only, so nothing
+  a fund shows changes. Idempotent; both stages run end-to-end via the
+  "Fetch holdings and complete database (weekly)" GitHub Action — Sundays at
+  06:00 UTC, or by manual dispatch (one provider or `all`, with `dry_run` and
+  `limit`). It scrapes the six providers in parallel, then completes the
+  database in one job from whichever scrapes succeeded: a provider that fails
+  leaves its funds' rows untouched and turns the run red, and the others still
+  complete. `sql/006_keep_untracked_holdings.sql` adds the column and has to be
+  applied before the first run of either the script or the backend that reads
+  it.
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
   ETF holdings, and the tracked risk-free rate (`risk_free_rate` table,
   issue #103 — see "Scoring against a risk-free rate" below) for everything
