@@ -97,7 +97,8 @@ decide what a portfolio may be and how it travels (`portfolioBackup.js`, issue
 #148; `portfolioLink.js` and `portfolioStorage.js`, issue #150), the one that holds
 the candle switch (`candlePreference.js`, issue #152), and the `utils/` ones that
 decide which candles a price chart draws and what hovering one says
-(`candles.js`, `chartTooltip.js`), and the one that decides what the header says
+(`candles.js`, `chartTooltip.js`), the one that decides where its tooltip sits beside the
+hover line (`tooltipPlacement.js`, issue #177), and the one that decides what the header says
 about how recent the daily fetch was (`freshness.js`, issue #154), and the ones that decide what a typed or clicked date does to
 the portfolio window and what its preset buttons mean (`windowCalendar.js`, `windowPresets.js`,
 issue #156). Logic that is worth

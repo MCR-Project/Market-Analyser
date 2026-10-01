@@ -53,6 +53,7 @@ import { useChartHover } from '../../hooks/useChartHover';
 import { useFillHeight } from '../../hooks/useFillHeight';
 import { PLOT_MAX, PLOT_MIN } from './plotHeight';
 import { BrushLabel, BrushShading } from '../charts/BrushOverlay';
+import { tooltipPlacement } from '../../utils/tooltipPlacement';
 
 /** Shared with useChartHover — the hover maths reads these exact numbers,
  *  so the crosshair and the bands cannot disagree about where a date is.
@@ -292,87 +293,92 @@ export const PortfolioChart = memo(function PortfolioChart({
           </span>
         ))}
 
-        <svg
-          ref={plotRef}
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          width="100%"
-          className="block"
-          style={{ height: `${H}px` }}
-          role="img"
-          aria-label={`Value of each ${groupBy === 'sector' ? 'sector' : 'holding'} over time, stacked`}
-        >
-          {[0.25, 0.5, 0.75].map(fraction => (
-            <line
-              key={fraction}
-              x1={0} x2={W}
-              y1={H * fraction} y2={H * fraction}
-              stroke="var(--divider)"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+        {/* The tooltip is positioned in this box, which is exactly the plot,
+            so a percentage of it is a position on the plot whatever padding
+            the card puts around it (issue #177). */}
+        <div className="relative">
+          <svg
+            ref={plotRef}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            width="100%"
+            className="block"
+            style={{ height: `${H}px` }}
+            role="img"
+            aria-label={`Value of each ${groupBy === 'sector' ? 'sector' : 'holding'} over time, stacked`}
+          >
+            {[0.25, 0.5, 0.75].map(fraction => (
+              <line
+                key={fraction}
+                x1={0} x2={W}
+                y1={H * fraction} y2={H * fraction}
+                stroke="var(--divider)"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
 
-          {paths.map(band => (
-            <path
-              key={band.key}
-              d={band.d}
-              fill={band.color}
-              fillOpacity={0.85}
-              stroke={band.color}
-              strokeWidth={0.5}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+            {paths.map(band => (
+              <path
+                key={band.key}
+                d={band.d}
+                fill={band.color}
+                fillOpacity={0.85}
+                stroke={band.color}
+                strokeWidth={0.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
 
-          {investedPath && (
-            <path
-              d={investedPath}
-              fill="none"
-              stroke={INVESTED_COLOR}
-              strokeWidth={1.5}
-              strokeDasharray="4 3"
-              vectorEffect="non-scaling-stroke"
+            {investedPath && (
+              <path
+                d={investedPath}
+                fill="none"
+                stroke={INVESTED_COLOR}
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+
+            <BrushShading selection={brush.selection} width={W} height={H} />
+
+            {hoverIdx != null && !brush.active && (
+              <line
+                x1={PAD + (hoverIdx / Math.max(1, simulation.dates.length - 1)) * (W - 2 * PAD)}
+                x2={PAD + (hoverIdx / Math.max(1, simulation.dates.length - 1)) * (W - 2 * PAD)}
+                y1={0} y2={H}
+                stroke="var(--fg)"
+                strokeWidth={1}
+                strokeDasharray="3 2"
+                opacity={0.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+
+            <rect
+              x={0} y={0} width={W} height={H}
+              fill="transparent"
+              onMouseMove={onMouseMove}
+              onMouseLeave={onMouseLeave}
+              {...(onSelectWindow ? brush.handlers : {})}
+              style={{ cursor: 'crosshair', ...(onSelectWindow ? brush.handlers.style : {}) }}
+            />
+          </svg>
+
+          {tooltip && !brush.active && (
+            <StackedTooltip
+              tooltip={tooltip}
+              bands={bands}
+              at={at}
+              total={totalAt}
+              paidIn={showInvested || showWithdrawn ? invested[at] : null}
+              withdrawn={showWithdrawn ? withdrawn[at] : null}
             />
           )}
-
-          <BrushShading selection={brush.selection} width={W} height={H} />
-
-          {hoverIdx != null && !brush.active && (
-            <line
-              x1={PAD + (hoverIdx / Math.max(1, simulation.dates.length - 1)) * (W - 2 * PAD)}
-              x2={PAD + (hoverIdx / Math.max(1, simulation.dates.length - 1)) * (W - 2 * PAD)}
-              y1={0} y2={H}
-              stroke="var(--fg)"
-              strokeWidth={1}
-              strokeDasharray="3 2"
-              opacity={0.5}
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-
-          <rect
-            x={0} y={0} width={W} height={H}
-            fill="transparent"
-            onMouseMove={onMouseMove}
-            onMouseLeave={onMouseLeave}
-            {...(onSelectWindow ? brush.handlers : {})}
-            style={{ cursor: 'crosshair', ...(onSelectWindow ? brush.handlers.style : {}) }}
-          />
-        </svg>
+        </div>
 
         <BrushLabel selection={brush.selection} />
-
-        {tooltip && !brush.active && (
-          <StackedTooltip
-            tooltip={tooltip}
-            bands={bands}
-            at={at}
-            total={totalAt}
-            paidIn={showInvested || showWithdrawn ? invested[at] : null}
-            withdrawn={showWithdrawn ? withdrawn[at] : null}
-          />
-        )}
 
         <div className="flex justify-between mt-1.5 font-[var(--font-mono)] text-[10px] text-[var(--fg-3)]">
           <span>{simulation.dates[0]}</span>
@@ -437,9 +443,7 @@ function StackedTooltip({ tooltip, bands, at, total, paidIn, withdrawn }) {
   // in. Money a withdrawal took was still earned (#150), so reading the gain
   // straight off the total would count every dollar spent as a loss.
   const made = paidIn != null ? total + (withdrawn ?? 0) - paidIn : 0;
-  const position = tooltip.alignRight
-    ? { right: `${Math.max(0, 98 - tooltip.pctX)}%` }
-    : { left: `${Math.max(0, tooltip.pctX - 2)}%` };
+  const position = tooltipPlacement({ pctX: tooltip.pctX });
 
   // Largest first, and never more than fits in a tooltip somebody is
   // reading with a mouse held still.
@@ -451,7 +455,7 @@ function StackedTooltip({ tooltip, bands, at, total, paidIn, withdrawn }) {
 
   return (
     <div
-      className="absolute top-4 bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-md)] px-3 py-2 pointer-events-none shadow-[var(--shadow-lg)] whitespace-nowrap z-20"
+      className="absolute top-0 bg-[var(--bg-1)] border border-[var(--border-strong)] rounded-[var(--radius-md)] px-3 py-2 pointer-events-none shadow-[var(--shadow-lg)] whitespace-nowrap z-20"
       style={position}
     >
       <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-3)] mb-1">{tooltip.label}</div>

@@ -10,7 +10,8 @@
  * candle is a stretch and not a point:
  *  - the label is the days the candle covers, and the readout carries its
  *    open/high/low, or says it has none;
- *  - it is placed on the candle's own slot, where the chart drew it;
+ *  - it is placed on the candle's own slot, where the chart drew it, and
+ *    told to stay clear of the whole slot (`clearPct`), not only its centre;
  *  - the return since the window's start is measured from `base`, the first
  *    *row's* close - the figure the chart's header uses - not from the first
  *    candle's close, which is a week's or a month's last close, not the
@@ -20,7 +21,7 @@
  * blank or zero - and keeps its close, which every row has.
  */
 import { fmtPrice } from './format';
-import { PLOT_PAD, PLOT_WIDTH, candleCentre, candleLabel } from './candles';
+import { PLOT_PAD, PLOT_WIDTH, candleCentre, candleLabel, candleSlotWidth } from './candles';
 
 const W = PLOT_WIDTH, PAD = PLOT_PAD;
 
@@ -55,7 +56,10 @@ export function buildTooltip({ arr, hoverIdx, dates = null, candleView = null })
     runPos,
     deltaPos,
     pctX,
-    alignRight: pctX >= 55,
+    // Room the tooltip must leave beyond `pctX` (utils/tooltipPlacement.js):
+    // none over a line, where the line is all there is to keep clear, but
+    // half a slot over a candle, whose whole slot the chart shades.
+    clearPct: candleView ? (candleSlotWidth(len) / 2 / W) * 100 : 0,
     candle: candle
       ? {
           complete: candle.complete,

@@ -28,6 +28,7 @@ src/App.jsx                  the dashboard shell (/etf/:etfId/:view)
 src/index.css                design tokens, theme, keyframes, scrollbar styling
 src/utils/api.js             the whole API client: dedup, TTL cache, ApiError
 src/utils/candles.js         rows -> candles, and where a candle sits; chartTooltip.js builds the hover readout (both pure, both tested)
+src/utils/tooltipPlacement.js where a chart's hover tooltip sits beside its hover line: the side, the gap, the clearance (pure, tested; issue #177)
 src/utils/tableFloor.js      how tall the holdings table must be to show five holdings (pure, tested); hooks/useTableFloor measures it
 src/utils/networkBox.js      the network graph's minimum height for its width: close to a square, capped (pure, tested; issue #176)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
@@ -275,6 +276,21 @@ not take part: a simulated value has no open, high or low.
   those: the header return %, the line, its colour. `buildTooltip` measures a
   candle's return since the start from the first *row's* close for the same reason.
   `candles` comes from the same request as `arr`, so the switch costs no fetch.
+- **A tooltip sits beside the hover line, never over it** (issue #177). Every
+  chart tooltip — `ChartTooltip`, the portfolio's `StackedTooltip` and the
+  comparison chart's own — takes its position from `utils/tooltipPlacement.js`
+  and none works out an offset itself: to the line's right in the left part of
+  the chart, to its left from 55% on, 14px away from it, at the top of the plot.
+  *`clearPct`* (from `buildTooltip`) is half a slot over a candle, because a
+  candle chart has no line but shades the hovered candle's whole slot, and that
+  is what must stay visible. The helper's percentages are of the box the tooltip
+  is positioned in, so that box has to be exactly the plot: the price charts'
+  hosts are, and the two portfolio charts, which draw their plot inside padding,
+  wrap the SVG and its tooltip in a `relative` div of the plot's own size
+  instead of positioning in the padded card (a percentage of the card is not a
+  position on the plot, and copying the padding into a constant would drift from
+  the class it mirrors). A new chart with a tooltip calls the helper; it does
+  not copy a percentage.
 - **`CandleChart` and `AreaChart` are interchangeable in a slot**: same 360-unit
   plot, same hover surface, no text inside the SVG. The chart draws candles at
   `candleCentre(i, count)` and the hover finds them with `candleIndexAt` — both from
@@ -433,7 +449,10 @@ window, which days the calendar offers and where the keyboard goes) and
 `utils/windowPresets.test.js` (`presetWindow` and `PRESETS`; the date is passed in, so
 nothing fakes the clock). Issue #176 added `utils/networkBox.test.js`
 (`networkMinHeight`: the floor for the network graph's height, its cap, and no
-floor before the box is measured).
+floor before the box is measured). Issue #177 added `utils/tooltipPlacement.test.js`
+(`tooltipPlacement`: which side of the hover line the tooltip sits on, the gap, and
+a candle's clearance) and a `clearPct` check in
+`utils/chartTooltip.test.js`.
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that

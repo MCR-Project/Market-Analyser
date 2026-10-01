@@ -42,9 +42,8 @@ test('a fall since the start reads negative', () => {
   expect(tip).toMatchObject({ returnPct: '-18.18%', runPos: false });
 });
 
-test('the tooltip flips to the left of the cursor past the middle of the chart', () => {
-  expect(buildTooltip({ arr: CLOSES, hoverIdx: 0, dates: DATES }).alignRight).toBe(false);
-  expect(buildTooltip({ arr: CLOSES, hoverIdx: 3, dates: DATES }).alignRight).toBe(true);
+test('over the line the tooltip needs no room beyond the cursor line itself', () => {
+  expect(buildTooltip({ arr: CLOSES, hoverIdx: 1, dates: DATES }).clearPct).toBe(0);
 });
 
 test('a point with no value has nothing to read out', () => {
@@ -102,4 +101,14 @@ test('a candle tooltip sits on its own slot, not on a line point', () => {
   // A line's first point is at the plot's left edge; a candle's centre is
   // half a slot in, so its tooltip starts further along.
   expect(candle.pctX).toBeGreaterThan(line.pctX);
+});
+
+test("a candle's tooltip clears the hovered slot, which the chart shades, not just its centre", () => {
+  // Four slots across a 360-unit plot with 4 units of padding each side: a
+  // slot is 88 units, so half of one is 44, 44/360 of the width.
+  const candles = toCandles(ROWS, '1M');
+  const candle = buildTooltip({
+    arr: CLOSES, hoverIdx: 0, candleView: { candles, base: CLOSES[0] },
+  });
+  expect(candle.clearPct).toBeCloseTo((44 / 360) * 100, 6);
 });

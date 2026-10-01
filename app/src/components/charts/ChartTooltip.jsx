@@ -1,7 +1,8 @@
 /**
  * ChartTooltip — floating overlay displayed when hovering a price chart.
  * Shows date, raw price/value, and cumulative return %.
- * Automatically flips left/right based on cursor position.
+ * Sits beside the hover line, never over it, on whichever side has the room
+ * (issue #177; utils/tooltipPlacement.js says where and why).
  *
  * Over a candle (issue #152) `tooltip.candle` is set and the one price line
  * becomes the candle's open, high, low and close, with the return since the
@@ -10,12 +11,11 @@
  * as a price of nothing.
  */
 import { memo } from 'react';
+import { tooltipPlacement } from '../../utils/tooltipPlacement';
 
 export const ChartTooltip = memo(function ChartTooltip({ tooltip }) {
   if (!tooltip) return null;
-  const posStyle = tooltip.alignRight
-    ? { right: Math.max(0, 98 - tooltip.pctX) + '%' }
-    : { left: Math.max(0, tooltip.pctX - 2) + '%' };
+  const posStyle = tooltipPlacement({ pctX: tooltip.pctX, clearPct: tooltip.clearPct });
   const tone = tooltip.runPos ? 'var(--success)' : 'var(--danger)';
   const { candle } = tooltip;
 
