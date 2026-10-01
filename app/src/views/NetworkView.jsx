@@ -20,7 +20,11 @@
  * the graph's measured box (issue #139; cached per ETF and shape in
  * utils/layout.js), then fitted into that box: the panel fills the
  * height the view has, and the nodes spread across whatever width and
- * height that is. The SVG's viewBox is that same box in pixels, so a
+ * height that is. The box never drops below a share of its own width
+ * (issue #176, utils/networkBox.js): on a short window the view has
+ * almost no height left, and without a floor every node was squeezed onto
+ * one horizontal line. The width is untouched; only the height grows, and
+ * the page scrolls. The SVG's viewBox is that same box in pixels, so a
  * node's radius and its label are the same size on any screen — a bigger box means more room between nodes, not
  * bigger nodes. It used to be a fixed 620×440 drawing scaled to fit,
  * which on a wide screen left a small graph in the middle of an empty
@@ -44,6 +48,7 @@ import { useLiveCorrelation } from '../hooks/useLiveCorrelation';
 import { useLiveSectors } from '../hooks/useLiveSectors';
 import { useLiveStocks } from '../hooks/useLiveStocks';
 import { computeLayout } from '../utils/layout';
+import { networkMinHeight } from '../utils/networkBox';
 import { describeClusters } from '../utils/clusters';
 import { clusterOutline } from '../utils/clusterOutline';
 import { useElementSize } from '../hooks/useElementSize';
@@ -168,16 +173,21 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
         <ErrorState onRetry={etfRetry} />
       ) : (
         <div className="flex-1 min-h-0 flex gap-5 items-start flex-wrap">
-          {/* Stretched to the view's full height, unlike DetailAside beside
-              it, which stays as tall as its own content. The minimum is
-              the smallest box the graph still reads in; below it the page
-              scrolls rather than squashing the nodes together. */}
-          <section className="self-stretch flex-1 min-w-[320px] min-h-[380px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
+          {/* Stretched to the view's full height, and DetailAside beside it
+              is stretched to this (issue #176). The graph's own box has a
+              floor in proportion to its width (utils/networkBox.js), which
+              this section grows to hold; below it the page scrolls rather
+              than squashing the nodes onto a line. The section's own minimum
+              is DetailAside's, so the two are level even where the row wraps
+              and the panel sits below the graph. */}
+          <section className="self-stretch flex-1 min-w-[320px] min-h-[480px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden animate-[corrFadeUp_var(--dur-base)_var(--ease-out)]">
             <div className="flex-1 min-h-0 flex flex-col p-2 pb-4">
               {/* Sized by the section, never by the drawing: the SVG is
                   absolutely positioned, so drawing at the measured size
-                  cannot grow the box it was measured from. */}
-              <div ref={boxRef} className="flex-1 min-h-0 relative">
+                  cannot grow the box it was measured from. Its floor comes
+                  from its width alone (issue #176), so it too is
+                  independent of what is drawn. */}
+              <div ref={boxRef} className="flex-1 min-h-0 relative" style={{ minHeight: networkMinHeight(W) }}>
                 {W > 0 && H > 0 && (
                   <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="absolute inset-0 block">
                     {/* Logo patterns */}

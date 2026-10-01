@@ -148,7 +148,11 @@ export default function App() {
 
   return (
     <>
-      <main className="w-full px-6 pt-6 flex-1 min-h-0 overflow-auto flex flex-col">
+      {/* The scrollbar's gutter is reserved whether or not the page scrolls:
+          the network graph's minimum height comes from its width, so a
+          scrollbar appearing (which narrows it) must not be able to make the
+          page stop needing one (issue #176). */}
+      <main className="w-full px-6 pt-6 flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] flex flex-col">
         <div className="max-w-[2352px] w-full mx-auto flex-1 min-h-0 flex flex-col">
           {/* Every child below assumes a loaded ETF (non-null etf, populated
               tickers), so the whole main area is gated on that one fetch:
