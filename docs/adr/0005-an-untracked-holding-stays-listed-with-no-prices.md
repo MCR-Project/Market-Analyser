@@ -20,8 +20,8 @@ in a GitHub Action). The flag lives on `etf_holdings` rather than `ticker`
 because an Untracked stock has no `ticker` row, so the foreign key from
 `etf_holdings.ticker` to `ticker.id` is dropped. Demoting a stock still deletes its
 `ticker`, `prices`, `dividends` and `splits`, so the database stays as small as it
-is now; only its weight row and a row of descriptive metadata remain (see the
-Untracked metadata table, refreshed weekly by the holdings job).
+is now; only its weight row and a row of descriptive metadata remain (the
+`untracked_metadata` table, `sql/007`, refreshed weekly by the holdings job).
 
 The cost is that **every reader of `etf_holdings` must now filter to tracked
 rows** — `get_etf_holdings`, the `holdingCount` in `market_data.py`, `sync_etfs`

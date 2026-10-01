@@ -7,7 +7,7 @@ decisions.
 | --- | --- |
 | `supabase_client.py` | Client construction, and the pagination rules every read must follow |
 | `cache.py` | Process-local TTL dict, one shared singleton |
-| `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached |
+| `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached (`get_dividends`, `get_risk_free_rate` and `get_untracked_info` have none) |
 | `freshness.py` | When the daily fetch job last finished and by when the next run is due (issue #154) — reads the job's own `fetch_run` record, no live fallback |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
 | `stats.py` | Return and risk arithmetic over a plain series, and the correlation matrix's clustering (`cluster_correlation`, issue #143) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
@@ -161,6 +161,28 @@ rather than present with an empty list, so the caller has to decide what absence
 means. `tracked_tickers()` is how it decides — a ticker with a row in `ticker`
 that paid nothing genuinely reports `0`; one with no row at all (every ETF, and
 anything resolved live) reports `null`.
+
+## Untracked holdings' descriptive data (issue #170)
+
+`get_untracked_info(tickers)` reads `untracked_metadata` — one row per Untracked
+stock, filled weekly by `scripts/sync_untracked_metadata.py` (see
+`scripts/CLAUDE.md`) — and returns `{ticker: {"info", "reason"}}`, one entry per
+distinct symbol asked. `info` has `get_stock_info`'s keys; it is **`None` with a
+reason**, never a guess, for a symbol with no row, one whose last lookup failed
+(the row is kept precisely so the reason can be said), one stored without a sector,
+and every symbol when Supabase cannot be reached or read. Unlike `get_stock_info`
+it does **not** default a missing currency to `"USD"` or an exchange to `""`, and a
+null market cap stays null: those defaults are for a page that must render
+something, and this is a reader whose caller must say what it does not know
+(invariant 7).
+
+**No live fallback**, for the reason `get_dividends` gives and a second one: the
+table exists so that a fund's ~450 Untracked stocks are *not* each looked up by
+yfinance at request time. Not cached, because a Deep-fill holds its own result. The
+`in` filter is chunked (`UNTRACKED_INFO_ID_CHUNK`, 200) because the list rides in
+the request URL, and each chunk is paginated like any read of a table that can grow.
+A Tracked symbol has no row here and reads as "no descriptive data"; its metadata
+is `get_stock_info`'s.
 
 ## The risk-free rate (issue #103)
 
