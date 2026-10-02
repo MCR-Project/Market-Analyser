@@ -33,6 +33,16 @@ constituents below the 1% threshold, and figures computed only from the
 tracked ones are describing a narrower slice of the fund than their own
 numbers might suggest.
 
+## When the fund has been deep-filled
+
+A Deep-fill fetches the prices of a fund's untracked holdings for a while
+and lists them with the tracked ones. While it lasts this figure counts
+every holding the window can price, so it rises towards 100%. A holding
+the Deep-fill could not fetch, or any untracked holding when the window
+reaches back further than the one year it fetches, is not counted as
+covered; the response names each one, with why, instead of quietly
+shrinking the figure.
+
 ## Caveats
 
 Never null: a fund with no tracked holdings at all genuinely covers 0%
