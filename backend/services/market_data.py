@@ -10,9 +10,10 @@ Most public functions follow the same pattern:
   3. Cache the result (skipping genuinely empty/failed results, so a retry
      isn't blocked for the full TTL) and return it
 
-A few deliberately don't: get_dividends and get_risk_free_rate have no live
-fallback at all (a number that sometimes comes from a record and sometimes
-from a network call is a number nobody can reconcile), and
+A few deliberately don't: get_dividends, get_risk_free_rate and
+get_untracked_info have no live fallback at all (a number that sometimes comes
+from a record and sometimes from a network call is a number nobody can
+reconcile), and
 get_stock_description has no DB path at all (prose nobody reconciles
 against a second source, and not worth a pipeline sync). Each states its
 own deviation in its own docstring rather than this one trying to stay in
@@ -537,6 +538,9 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
 
 # ── Stock metadata ────────────────────────────────────────────────────────────
 
+UNTRACKED_INFO_ID_CHUNK = 200  # ids per `in` filter - the list rides in the request URL
+
+
 def _get_stock_info_live(ticker_symbol: str) -> dict:
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info or {}
@@ -611,6 +615,81 @@ def get_stock_info(ticker_symbol: str) -> dict:
         )
 
     cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
+    """Descriptive data for Untracked holdings, as the weekly job last stored it
+    (issue #170): one `{"info", "reason"}` entry per requested ticker.
+
+    `info` has `get_stock_info`'s keys and is read from `untracked_metadata`,
+    which scripts/sync_untracked_metadata.py fills once a week for every symbol
+    `etf_holdings` flags `tracked = false`. It is `None` - with a `reason` saying
+    which of the four it is - for a symbol with no row yet, one whose last lookup
+    failed (the row exists to say so, and is retried on every run), one the weekly
+    job looked up and yfinance had nothing on (stored with every column null),
+    and every symbol when Supabase cannot be read. Never a
+    blank sector, a "USD" nobody looked up or a zero market cap standing in for
+    an absent figure (invariant 7): a caller shows the reason, not a guess.
+
+    There is no live fallback, for the reason `get_dividends` gives and a second
+    one besides: the whole point of the table is that a fund's ~450 Untracked
+    stocks are not each looked up by yfinance at request time. Not cached either
+    - a Deep-fill holds its own result, and this is a few paged reads.
+
+    A symbol that is Tracked has no row here and reads as "no descriptive data";
+    its metadata is `get_stock_info`'s, not this function's.
+    """
+    wanted = sorted({t for t in tickers if t})
+    if not wanted:
+        return {}
+
+    def absent(reason: str) -> dict:
+        return {"info": None, "reason": reason}
+
+    db = get_client_optional()
+    if db is None:
+        return {t: absent("the database could not be reached, so nothing is known about it") for t in wanted}
+
+    rows: dict[str, dict] = {}
+    try:
+        for i in range(0, len(wanted), UNTRACKED_INFO_ID_CHUNK):
+            chunk = wanted[i:i + UNTRACKED_INFO_ID_CHUNK]
+            for row in paginated_select(
+                lambda: db.table("untracked_metadata")
+                .select("id,name,sector,market_cap,currency,exchange,logo,website,failure")
+                .in_("id", chunk)
+                .order("id")
+            ):
+                rows[row["id"]] = row
+    except Exception:
+        return {t: absent("the database could not be read, so nothing is known about it") for t in wanted}
+
+    result = {}
+    for symbol in wanted:
+        row = rows.get(symbol)
+        if row is None:
+            result[symbol] = absent("no descriptive data is stored for it yet; the weekly holdings job has not looked it up")
+        elif row.get("failure"):
+            result[symbol] = absent(f"its last lookup failed ({row['failure']}); the weekly holdings job retries it")
+        elif row.get("sector") is None:
+            result[symbol] = absent("yfinance had no descriptive data for it when the weekly holdings job looked")
+        else:
+            sector = row["sector"]
+            result[symbol] = {
+                "info": {
+                    "ticker": symbol,
+                    "name": row.get("name"),
+                    "sector": sector,
+                    "sectorTag": SECTOR_TAG.get(sector, sector[:6].upper()),
+                    "marketCap": row.get("market_cap"),
+                    "currency": row.get("currency"),
+                    "exchange": row.get("exchange"),
+                    "logo": row.get("logo"),
+                    "website": row.get("website"),
+                },
+                "reason": None,
+            }
     return result
 
 

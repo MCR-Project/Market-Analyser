@@ -135,3 +135,32 @@ def test_two_runs_never_complete_at_once():
     # overlapping a manual one would race exactly as parallel completions would.
     concurrency = _load("fetch-holdings.yml")["concurrency"]
     assert concurrency["cancel-in-progress"] is False
+
+
+def _metadata_job() -> dict:
+    jobs = _load("fetch-holdings.yml")["jobs"]
+    (name,) = [n for n, j in jobs.items() if "sync_untracked_metadata.py" in _step_runs(j)]
+    return jobs[name]
+
+
+def test_untracked_metadata_runs_after_completion_even_if_it_failed():
+    # Completion decides which stocks are Untracked and copies a demoted stock's
+    # own metadata across, so the lookup follows it. It must not be skipped when
+    # a scrape or the completion went red: it reads the flags as they stand, and
+    # `needs` alone would skip it exactly then (issue #170).
+    job = _metadata_job()
+    jobs = _load("fetch-holdings.yml")["jobs"]
+    (completing,) = [n for n, j in jobs.items() if "complete_database.py" in _step_runs(j)]
+    assert job["needs"] == completing or job["needs"] == [completing]
+    assert job["if"].replace(" ", "") in {"${{!cancelled()}}", "${{always()}}"}
+
+
+def test_untracked_metadata_honours_dry_run():
+    runs = _step_runs(_metadata_job())
+    assert "inputs.dry_run" in runs
+    assert "--dry-run" in runs
+
+
+def test_untracked_metadata_is_not_gated_on_a_scrape_having_produced_a_file():
+    # Unlike the completion's steps it has nothing to do with this week's files.
+    assert all("steps.files" not in str(s.get("if", "")) for s in _steps(_metadata_job()))

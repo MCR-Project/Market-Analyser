@@ -119,3 +119,33 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/complete_database.py --holdings-json ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
+
+  # The weekly lookup of descriptive data for every Untracked holding (issue
+  # #170), so a Deep-fill can say what a stock is without ~450 live `.info`
+  # calls. After completion, because completion is what decides which stocks are
+  # Untracked and copies a demoted stock's own metadata across; it still runs when
+  # completion failed or was skipped, since it reads the flags as they stand and
+  # its work is independent of whether this week's scrape worked. Not a step of
+  # `complete`: that job's steps are conditional on a scrape having produced a
+  # file, this one is not. The workflow's concurrency group already keeps two
+  # runs from overlapping here too.
+  untracked-metadata:
+    needs: complete
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Refresh descriptive data for Untracked holdings
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/sync_untracked_metadata.py ${{ inputs.dry_run && '--dry-run' || '' }}

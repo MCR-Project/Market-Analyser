@@ -1,6 +1,6 @@
 # backend/scripts — the data pipeline
 
-Three scripts maintain the tracked universe in Supabase. All are run from
+Four scripts maintain the tracked universe in Supabase. All are run from
 `backend/` and need `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`. None of
 them is imported by the running service; they reach past `market_data`'s caching
 layer into its private `_*_live` helpers on purpose, because they are what makes
@@ -10,6 +10,7 @@ the DB fresh — a DB-first read here would write the same rows back in a circle
 | --- | --- | --- |
 | `add_ticker.py` | Add or update tickers by hand | manual |
 | `complete_database.py` | Complete tracked ETFs from provider holdings JSON | `fetch-holdings.yml` (cron, 06:00 UTC Sundays, or manual dispatch) |
+| `sync_untracked_metadata.py` | Keep descriptive data for every Untracked holding | `fetch-holdings.yml`, after the completion (same Sunday cron, or manual dispatch) |
 | `fetch_daily.py` | Refresh prices, metadata and ETF holdings for everything tracked | `fetch-daily.yml` (cron, 22:30 UTC Mon–Fri) |
 
 ## How something enters the universe
@@ -62,6 +63,27 @@ is what stops the daily job doing exactly that, and the rows it does write carry
 an explicit `tracked` copied from the stock's other rows (`_tracked_by_stock`), so
 a stock still awaiting its backfill does not get a `true` row among `false` ones.
 Only `complete_database.py` ever *changes* a stock's flag.
+
+An Untracked stock's description lives in `untracked_metadata` (issue #170,
+`sql/007`): the same descriptive columns as `ticker`, keyed by symbol, plus
+`checked_at` and a `failure` reason, and **no prices of any kind** — a Deep-fill
+fetches those live and writes nothing (ADR 0006). Three things write it, and
+nothing else may:
+
+- `complete_database.py`'s `demote_stocks` **copies** the stock's `ticker` row
+  across (`copy_ticker_metadata`) before deleting that row, so a demoted stock
+  keeps its metadata with no `.info` call. The copy never blocks the demotion — a
+  failure prints a warning and the weekly lookup fetches the stock instead — and a
+  `ticker` row with a null sector (the never-synced sentinel) is not copied as if
+  it were an answer.
+- `complete_holdings` deletes the row of every stock it flags Tracked
+  (`drop_metadata`): a promoted stock's metadata is `ticker`'s now.
+- `sync_untracked_metadata.py` (below) looks up the rest and sweeps the orphans.
+
+The table has no foreign key, for the reason `etf_holdings.ticker` has none: its
+symbol has no row to reference. Those three writers keep it honest, so a new one
+has to keep the same rule — one row per symbol that is Untracked, none for one
+that is not.
 
 The risk-free rate's upstream symbol (issue #103) enters the same way an ETF
 does: a row in `risk_free_rate_source`, seeded once by
@@ -202,6 +224,59 @@ fell below the threshold.
 Every write is an upsert keyed on the primary key, so a second run finds 0 new
 tickers, demotes nothing and changes nothing. Use `--dry-run` first when in doubt.
 
+## `sync_untracked_metadata.py`
+
+```bash
+python scripts/sync_untracked_metadata.py [--dry-run]
+```
+
+The last job of `fetch-holdings.yml` (`untracked-metadata`, `needs: complete`,
+`if: ${{ !cancelled() }}` — it runs when a scrape or the completion went red, since
+it reads the `tracked = false` flags as they stand). One pass:
+
+- **What is looked up** (`plan_lookups`, pure): every distinct symbol with a
+  `tracked = false` holding row, read paginated; symbols with no row **first**, so
+  a run cut short spends its calls on what a Deep-fill cannot describe at all, then
+  rows checked 7 or more calendar days ago, oldest first. The age is in **calendar
+  days, not hours**: GitHub starts the cron hours late by a different amount each
+  week (ADR 0003), and 7 × 24 hours would skip a row last checked at 07:40 on a run
+  starting at 06:30, doubling its wait. A **failed** row is the exception: it is
+  always due, on every run, however recently it failed (order: new symbols, then
+  failed ones, then stale ones). `get_untracked_info` refuses a row carrying a
+  failure, so until it succeeds a Deep-fill cannot describe the symbol, and waiting
+  a week after a transient outage would leave it that way; a manual re-run is how
+  that gets fixed. The cost is bounded to the few symbols that raised — a symbol
+  yfinance merely has nothing on is stored as "nothing there", not as a failure, so
+  it is not retried every run.
+- **How** — through `_get_stock_info_live`, one symbol and one upsert at a time
+  (a failed row carries fewer columns than a good one and PostgREST rejects a bulk
+  payload with mixed keys; it also means a run that dies keeps what it finished). A
+  lookup that raises writes `checked_at` and `failure` **only**, so a stock that once
+  had data does not lose it to one bad week, and `get_untracked_info` still declines
+  to use the row. A write that fails is counted as a failure too, not as a lookup.
+  **`_get_stock_info_live` does not raise for a symbol yfinance has nothing on** — it
+  answers an empty shell (name = the symbol, sector "Unknown", no market cap, an
+  assumed "USD"), which is what the Stock page shows. Stored as given, that is an
+  "Unknown" sector and a currency nobody looked up, served as fact. So a shell is
+  stored as **looked up, nothing there**: every descriptive column null, no failure
+  (cash lines, futures and delisted names would otherwise keep the job red forever),
+  and the reader answers it as no data. And **yfinance spells share classes with a
+  dash** where this repo uses a dot — asked for `BRK.B` it answers that same empty
+  shell for one of the largest companies there is — so `yahoo_symbol` asks for
+  `BRK-B`, and a symbol whose dashed spelling is a shell is asked again as written
+  (`ABC.L` is a London listing, not a share class). The row is keyed by the repo's
+  symbol either way. Only a lookup that *raises* is a failure.
+- **Orphans** — rows for symbols no fund lists as Untracked (promoted, or dropped
+  by every fund) are deleted at the end of each run, which also covers a promotion
+  made outside `complete_database.py`.
+- **`--dry-run`** prints the plan and makes no yfinance call and no write — unlike
+  `complete_database.py`'s, which does call yfinance — since a lookup is the
+  expensive part and its outcome is the one thing a preview cannot show.
+
+It exits 1 after the whole pass if any lookup failed, naming each symbol and its
+reason. The table has to exist first (`sql/007`); until it does the first read
+fails and the job is red.
+
 ## `add_ticker.py`
 
 ```bash
@@ -233,7 +308,10 @@ call.
   `.eq("tracked", True)` fails) — and `test_risk_free_rate.py`, which
   covers `fetch_risk_free_rate_rows`/`sync_risk_free_rate` the same way (issue
   #103) — and `test_fetch_run_record.py`, which runs `main()` itself against
-  fakes to pin what the run record says and when it is written (issue #154).
+  fakes to pin what the run record says and when it is written (issue #154) —
+  and `test_untracked_metadata.py`, which reuses `test_untracked_holdings.py`'s
+  double to pin the weekly lookup's plan, the demotion copy and the reader (issue
+  #170).
   Add a case whenever you touch the
   bucketing or the escalation rules — they are the parts where a mistake corrupts
   stored data rather than failing loudly.

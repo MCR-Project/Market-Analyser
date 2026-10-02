@@ -42,6 +42,10 @@ fetcher/common.py):
      watchlist entries) have no holding row to judge them by and are never
      demoted. Promotion needs no stage of its own: it is stage 5's
      insert-and-backfill followed by stage 6's flag.
+     A demoted stock's descriptive data is not thrown away with its `ticker` row:
+     it is copied into `untracked_metadata` first (no yfinance call), and a
+     stock that is Tracked has any row there deleted (issue #170; the weekly
+     lookup of everything else Untracked is scripts/sync_untracked_metadata.py).
 
 Only columns that already exist in the DB are written (`tracked` arrives with
 sql/006_keep_untracked_holdings.sql, which has to be applied first), and AUM
@@ -76,6 +80,7 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.fetch_daily import BACKFILL_PERIOD, bucket_by_age, fetch_ticker_rows
+from scripts.sync_untracked_metadata import copy_ticker_metadata, drop_metadata
 from services.market_data import (
     DUPLICATE_TICKERS,
     _get_etf_info_live,
@@ -435,7 +440,13 @@ def demote_stocks(client, to_demote: list[str], dry_run: bool) -> tuple[list[str
     untracked holding with a leftover `ticker` row, which the next run demotes
     again; the other order would leave a tracked holding with nothing behind it.
     Prices are re-fetchable, so a stock crossing back over the threshold later
-    is simply re-inserted and re-backfilled. Returns (demoted, failed).
+    is simply re-inserted and re-backfilled.
+
+    Before the `ticker` row goes, its descriptive data is copied into
+    `untracked_metadata` (issue #170), so the stock keeps its name, sector and
+    market cap with no new `.info` call. The copy never blocks the demotion: the
+    weekly lookup can always fetch what a failed copy missed. Returns
+    (demoted, failed).
     """
     demoted, failed = [], []
     for sym in to_demote:
@@ -444,6 +455,7 @@ def demote_stocks(client, to_demote: list[str], dry_run: bool) -> tuple[list[str
             demoted.append(sym)
             continue
         try:
+            copy_ticker_metadata(client, sym)
             client.table("dividends").delete().eq("ticker", sym).execute()
             client.table("splits").delete().eq("ticker", sym).execute()
             client.table("prices").delete().eq("ticker", sym).execute()
@@ -490,6 +502,14 @@ def complete_holdings(
     if not plan.demote:
         print("  nothing to demote")
     demoted, demote_failed = demote_stocks(client, plan.demote, dry_run)
+
+    # A Tracked stock's descriptive data is `ticker`'s, so a promoted one must not
+    # also keep an `untracked_metadata` row. Nothing depends on this write: the
+    # weekly sync deletes rows for anything no longer Untracked as well.
+    try:
+        drop_metadata(client, [t for t, is_tracked in plan.tracked.items() if is_tracked], dry_run)
+    except Exception as e:
+        print(f"  WARN    could not clear untracked metadata for tracked stocks: {e}")
     return demoted, retag_failed + demote_failed
 
 

@@ -23,7 +23,7 @@ e.g. a deployed frontend — see `.env.example`.
 ### Data pipeline
 
 The tracked universe lives in Supabase (`etfs`, `ticker`, `etf_holdings`,
-`prices` tables) — there is no hardcoded list. Three scripts maintain it
+`prices` tables) — there is no hardcoded list. Four scripts maintain it
 (all run from `backend/`, needing `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
 in `.env` — see `.env.example`):
 
@@ -68,6 +68,26 @@ in `.env` — see `.env.example`):
   complete. `sql/006_keep_untracked_holdings.sql` adds the column and has to be
   applied before the first run of either the script or the backend that reads
   it.
+- `python scripts/sync_untracked_metadata.py [--dry-run]` — keep one row of
+  descriptive data (name, sector, market cap, currency, exchange, logo,
+  website) per **untracked** holding in `untracked_metadata`, so a stock with no
+  `ticker` row can still say what it is without a live yfinance call for each of
+  a fund's ~450 of them. It is the last job of the same weekly workflow (it
+  runs after the completion, even if that went red). It looks up every
+  untracked symbol that has no row yet, then every one last checked 7 or more
+  calendar days ago, and skips the rest, so re-running it the same week calls
+  yfinance for nothing. A lookup that fails keeps its row with the reason and
+  is retried on every run, not only after a week, leaving whatever data the row already held; one bad
+  symbol never stops the run, which exits 1 at the end naming each. A stock
+  demoted by `complete_database.py` has its old `ticker` metadata **copied**
+  across with no lookup; a promoted one loses its row, and so does a symbol no
+  fund lists as untracked any more. Prices, volume and dividends are not
+  stored for these stocks, only what describes them.
+  `sql/007_untracked_metadata.sql` creates the table and has to be applied
+  before the first run of either script. The backend reads it with
+  `market_data.get_untracked_info`, which has no live fallback and answers
+  `None` with a reason — never a blank sector or an assumed currency — for a
+  symbol with no row, a failed one, or a database it cannot read.
 - `python scripts/fetch_daily.py` — daily refresh of prices, stock metadata,
   ETF holdings, and the tracked risk-free rate (`risk_free_rate` table,
   issue #103 — see "Scoring against a risk-free rate" below) for everything

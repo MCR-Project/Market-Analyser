@@ -52,6 +52,7 @@ PRIMARY_KEYS = {
     "dividends": ("ticker", "date"),
     "splits": ("ticker", "date"),
     "etfs": ("id",),
+    "untracked_metadata": ("id",),
 }
 
 
