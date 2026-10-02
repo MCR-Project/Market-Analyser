@@ -23,6 +23,14 @@ Endpoints:
                                    (issue #154)
   GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings, plus clusters
   GET /api/sectors/{etf_id}      — sector weight breakdown
+  GET /api/deep-fill/{etf_id}    — whether a fund can be, is being, or has been
+                                   deep-filled, with progress and expiry
+                                   (issue #171)
+  POST /api/deep-fill/{etf_id}   — start a Deep-fill of a fund's Untracked
+                                   holdings, or attach to the one running
+  POST /api/deep-fill/{etf_id}/cancel
+                                 — stop it after the current batch, keeping
+                                   what was fetched
   POST /api/portfolio/simulate   — value a basket of tickers over a window,
                                    with optional rebalancing and recurring
                                    contributions
@@ -32,14 +40,18 @@ Endpoints:
 """
 
 from fastapi import APIRouter, Query, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from services import deep_fill, deep_fill_store
 from services.market_data import (
     get_etf_info,
     get_etf_holdings,
     get_stock_info,
+    get_stock_infos,
     get_stock_description,
     get_price_series,
     compute_correlation_matrix,
+    deep_fill_exclusions,
     list_etf_summaries,
 )
 from services.freshness import get_freshness
@@ -92,7 +104,18 @@ def get_etf(
     # stale is True when holdings came from the live yfinance fallback (DB
     # miss/error) rather than Supabase - flags a likely-incomplete top-~10
     # to the frontend.
-    return {**info, "holdings": holdings, "stale": stale}
+    response = {**info, "holdings": holdings, "stale": stale}
+
+    # While the fund is deep-filled (issue #171) `holdings` also lists its
+    # Untracked ones, after the tracked; `untracked` names them so the table can
+    # mark those rows, and `deepFill` says as of when and until when. Both are
+    # absent otherwise, so a fund that is not deep-filled answers exactly as it
+    # always has.
+    deep = deep_fill_store.store.describe(etf_id)
+    if deep is not None:
+        response["untracked"] = deep["untracked"]
+        response["deepFill"] = {"asOf": deep["asOf"], "expiresAt": deep["expiresAt"]}
+    return response
 
 
 # ── Stock endpoints ───────────────────────────────────────────────────────────
@@ -263,6 +286,13 @@ def get_correlation(
     in no group joined nobody; one with no computed correlations at all
     reports a null entry in `averages`. An empty matrix (no usable price
     history) answers `clusters: []` alongside `matrix: {}`, still a 200.
+
+    While the fund is deep-filled (issue #171) the matrix covers its whole
+    basket, Untracked holdings included, and is the one the Deep-fill finished
+    with rather than a new computation. `deepFill` then says as of when, and
+    `excluded` names, with why, each Untracked holding left out: one the job could
+    not fetch, or all of them for a `period` reaching back further than the
+    one year a Deep-fill fetches. It is absent for a fund that is not deep-filled.
     """
     etf_id = etf_id.upper()
     holdings, _ = get_etf_holdings(etf_id)
@@ -270,7 +300,9 @@ def get_correlation(
         raise HTTPException(404, f"No holdings for ETF '{etf_id}'")
 
     tickers = [h[0] for h in holdings]
-    result = compute_correlation_matrix(tickers, period=period)
+    # A copy: the matrix may be the very object a Deep-fill holds (and the cache
+    # holds), and the fields added below must not outlive this request in it.
+    result = dict(compute_correlation_matrix(tickers, period=period))
 
     # Count edges above threshold for the network view. A null pair (not
     # enough overlapping history to correlate at all - issue #97) is
@@ -289,6 +321,13 @@ def get_correlation(
         result["edgeCount"] = edge_count
         result["threshold"] = threshold
 
+    deep = deep_fill_store.store.describe(etf_id)
+    if deep is not None:
+        result["deepFill"] = {
+            "asOf": deep["asOf"],
+            "expiresAt": deep["expiresAt"],
+            "excluded": deep_fill_exclusions(etf_id, period),
+        }
     return result
 
 
@@ -300,7 +339,9 @@ def get_sectors(etf_id: str):
 
     For each holding, fetches its sector via get_stock_info, then aggregates
     weights and counts by sector. Returns a ranked list with the top sector
-    highlighted.
+    highlighted. While the fund is deep-filled (issue #171) its Untracked
+    holdings are counted too, from their stored descriptions rather than ~450
+    live lookups; one with no stored sector is counted under "Unknown".
 
     The sector name comes from yfinance's Ticker.info["sector"] field,
     normalized to a short tag via SECTOR_TAG.
@@ -318,9 +359,9 @@ def get_sectors(etf_id: str):
     sector_weights: dict[str, float] = {}
     sector_counts: dict[str, int] = {}
 
+    infos = get_stock_infos(tickers)
     for t in tickers:
-        info = get_stock_info(t)
-        sector = info["sector"]
+        sector = infos[t]["sector"]
         w = weight_map.get(t, 0)
         sector_weights[sector] = sector_weights.get(sector, 0) + w
         sector_counts[sector] = sector_counts.get(sector, 0) + 1
@@ -344,6 +385,59 @@ def get_sectors(etf_id: str):
         "topSector": sectors[0] if sectors else None,
         "sectorLabel": "TOP SECTOR",
     }
+
+
+# ── Deep-fill ─────────────────────────────────────────────────────────────────
+
+def _deep_fill_response(status: dict) -> JSONResponse:
+    """202 while a job is running for the fund (it has been accepted and is not
+    done), 200 otherwise."""
+    return JSONResponse(status_code=202 if status["state"] == "running" else 200, content=status)
+
+
+@router.get("/deep-fill/{etf_id}")
+def get_deep_fill(etf_id: str):
+    """Where a fund stands with its Deep-fill (issue #171): `enabled`, `state`
+    (`idle`, `running`, `cancelled`, `failed` or `ready`), how many Untracked
+    holdings it has and what share of its weight they are (`untracked`), the
+    job's `progress` as done/total with each failure by ticker and reason,
+    `asOf`/`expiresAt` while the fund is deep-filled, and `running` - the other
+    fund's progress - while a different fund's job holds the one slot.
+
+    Always a 200 for a fund with something to say, including a server where
+    Deep-fill is switched off (`enabled: false`): that is what the page reads to
+    decide whether to offer the button. A database that cannot be read is the
+    usual retryable 503.
+    """
+    return deep_fill.status(etf_id.upper())
+
+
+@router.post("/deep-fill/{etf_id}")
+def start_deep_fill(etf_id: str):
+    """Start fetching a fund's Untracked holdings, or attach to the job already
+    running for it - pressing twice is not two jobs. Answers the status: 202 while
+    a job runs, 200 when the fund is already deep-filled and nothing was fetched.
+
+    The refusals, none of which the frontend retries: **403** when Deep-fill is
+    switched off on this server (a deployment decision asking again cannot change),
+    **409** when another fund's job is running - the body carries that job's
+    progress under `running` - and **400** for a fund that cannot be deep-filled
+    (nothing Untracked in it, or more than the server's memory allows). A database
+    that cannot say what the fund's Untracked holdings are is a retryable 503.
+    Nothing is written to the database either way.
+    """
+    try:
+        return _deep_fill_response(deep_fill.start(etf_id.upper()))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/deep-fill/{etf_id}/cancel")
+def cancel_deep_fill(etf_id: str):
+    """Stop the fund's running job after the batch it is on, keeping everything
+    fetched, so pressing start again fetches only what is missing. Idempotent:
+    with nothing running for this fund it only answers the status."""
+    return deep_fill.cancel(etf_id.upper())
 
 
 # ── Portfolio simulation ──────────────────────────────────────────────────────

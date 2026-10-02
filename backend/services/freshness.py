@@ -29,7 +29,6 @@ This says nothing about how old the latest price is. A market holiday adds no
 prices and the job still ran; that is the same freshness, not a stale one.
 """
 
-import os
 from datetime import datetime, time, timedelta, timezone
 
 from config import (
@@ -41,7 +40,7 @@ from config import (
 )
 from services.cache import cache
 from services.market_data import DataUnavailable
-from services.supabase_client import get_client_optional
+from services.supabase_client import get_client_optional, supabase_configured as _supabase_configured
 
 _CACHE_KEY = "freshness"
 
@@ -147,10 +146,3 @@ def get_freshness() -> dict:
 
 def _unknown() -> dict:
     return {"finishedAt": None, "dueBy": None, "failed": None}
-
-
-def _supabase_configured() -> bool:
-    """Whether the credentials `get_client` needs are set at all - the only way
-    to tell "not configured" (a permanent condition) from "could not connect"
-    (a blip), since `get_client_optional` answers None for both."""
-    return bool(os.environ.get("SUPABASE_URL")) and bool(os.environ.get("SUPABASE_SERVICE_KEY"))

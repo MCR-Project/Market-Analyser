@@ -325,7 +325,10 @@ class PriceFrameInputGetterTests(unittest.TestCase):
 class StockInfoInputGetterTests(unittest.TestCase):
     def test_loops_the_per_ticker_service_call(self):
         fake = {"NVDA": {"name": "NVIDIA"}, "MSFT": {"name": "Microsoft"}}
-        with patch("measurements.inputs.stock_info._get_stock_info", side_effect=lambda t: fake[t]) as mock_get:
+        # The loop lives in services.market_data.get_stock_infos now (issue #171:
+        # a deep-filled fund's tail is described from stored metadata instead),
+        # which still makes one get_stock_info call per ticker for everything else.
+        with patch("services.market_data.get_stock_info", side_effect=lambda t: fake[t]) as mock_get:
             result = stock_info.get_stock_info(["NVDA", "MSFT"])
 
         self.assertEqual(result, fake)

@@ -20,6 +20,7 @@ from api.routes import router
 from measurements.registry import measurement_router
 from portfolio_metrics.registry import metric_router
 from rate_limit import RateLimitMiddleware
+from services.deep_fill import DeepFillBusy, DeepFillDisabled
 from services.market_data import DataUnavailable, SymbolNotFound
 
 try:
@@ -100,6 +101,31 @@ def symbol_not_found(request: Request, exc: SymbolNotFound):
     schedule forever under a panel that claims it is about to work.
     """
     return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(DeepFillDisabled)
+def deep_fill_disabled(request: Request, exc: DeepFillDisabled):
+    """Answer 403 when someone asks for a Deep-fill this server has switched off
+    (`ALLOW_DEEP_FILL`, issue #171).
+
+    A 4xx, so the frontend never retries it: switching the feature on is a
+    deployment decision, and a 503 here would have the browser asking again on a
+    backoff for something that cannot change. Not a 404 either - the fund is
+    there, the server just will not do this to it.
+    """
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
+@app.exception_handler(DeepFillBusy)
+def deep_fill_busy(request: Request, exc: DeepFillBusy):
+    """Answer 409 when a Deep-fill is already running for a different fund.
+
+    The server runs one at a time, and the running job's progress rides in the
+    body as `running`, so the caller can say what it is waiting on. A 4xx and
+    never retried: it clears when that job ends, and the frontend learns that by
+    polling the job's own status, not by pressing again on a schedule.
+    """
+    return JSONResponse(status_code=409, content={"detail": str(exc), "running": exc.status})
 
 
 @app.get("/health")

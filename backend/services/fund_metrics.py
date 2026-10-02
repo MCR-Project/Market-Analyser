@@ -29,8 +29,15 @@ entirely (it still counts toward `trackedWeightCoverage`, which does not
 need a shared window at all).
 
 Cached by `services.cache` like every other derived read in this layer,
-keyed on `etf_id` alone at `CACHE_TTL_SECONDS` - the same tier the price
-series and correlation matrix this shares its window with already use.
+keyed on `etf_id` and on whether the fund is deep-filled (issue #171) at
+`CACHE_TTL_SECONDS` - the same tier the price series and correlation matrix
+this shares its window with already use. The state is part of the key because
+the two answers are different funds as far as these figures go: a fund read as
+its whole basket has ~450 more holdings in its covariance matrix, and a key on
+`etf_id` alone would serve the pruned answer for a deep-filled fund, or the
+deep-filled one for the fund after it expires (ADR 0006). The key names the
+Deep-fill's own as-of time, so a second Deep-fill of the same fund is not served
+the first one's figures either.
 Each of the three `computed_from="etf_id"` portfolio-metric classes
 (`portfolio_metrics/official_metrics/diversification_ratio.py` and its
 two siblings) calls `compute_fund_metrics` once per `value()`/`reason()`
@@ -42,8 +49,9 @@ three times over.
 """
 
 from config import CACHE_TTL_SECONDS, CORRELATION_PERIOD
+from services import deep_fill_store
 from services.cache import cache
-from services.market_data import get_closes, get_etf_holdings
+from services.market_data import deep_fill_exclusions, get_closes, get_etf_holdings
 from services.stats import diversification_ratio, risk_contribution
 
 # How many of a fund's largest risk contributors sum into "the top five"
@@ -64,7 +72,13 @@ def compute_fund_metrics(etf_id: str) -> dict:
 
     `trackedWeightCoverage` is answerable from the holdings list alone
     and is never null - a fund with no tracked holdings at all genuinely
-    covers 0% of itself, which is a real answer, not a missing one. The
+    covers 0% of itself, which is a real answer, not a missing one. While
+    the fund is deep-filled (issue #171) the list also holds its Untracked
+    holdings, and the figure counts every holding the window can price: the
+    ones the Deep-fill failed to fetch are not counted as covered, and are
+    named, with why, under `deepFill.withoutHistory` (which is present only
+    while the fund is deep-filled, with the as-of time and the Untracked
+    weight beside it). The
     other two need a joint covariance across the tracked basket; where
     that cannot be built (fewer than two holdings with a complete price
     history over the window, or a basket with no measurable variance at
@@ -73,13 +87,20 @@ def compute_fund_metrics(etf_id: str) -> dict:
     rather than inventing a third condition.
     """
     etf_id = etf_id.upper()
-    cache_key = f"fund_metrics:{etf_id}"
+    deep = deep_fill_store.store.fund(etf_id)
+    cache_key = f"fund_metrics:{etf_id}:{'deep-' + str(deep.as_of) if deep else 'pruned'}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     result = _compute(etf_id)
-    cache.set(cache_key, result, CACHE_TTL_SECONDS)
+    # `_compute` reads the fund's Deep-fill state again of its own, so a Deep-fill
+    # that finished or expired between the key above and here would put figures
+    # for one state under the other's key, and serve them for the whole TTL. Only
+    # a result computed while the state was still the one the key names is kept.
+    now = deep_fill_store.store.fund(etf_id)
+    if (now.as_of if now else None) == (deep.as_of if deep else None):
+        cache.set(cache_key, result, CACHE_TTL_SECONDS)
     return result
 
 
@@ -88,15 +109,28 @@ def _compute(etf_id: str) -> dict:
     weights = {ticker: weight for ticker, weight in holdings}
     tickers = list(weights)
 
+    without_history = deep_fill_exclusions(etf_id, CORRELATION_PERIOD)
+    covered = sum(w for t, w in weights.items() if t not in without_history)
+
     result = {
         "etfId": etf_id,
-        "trackedWeightCoverage": round(sum(weights.values()), 2),
+        "trackedWeightCoverage": round(covered, 2),
         "diversificationRatio": None,
         "top5VarianceShare": None,
         "reasons": {},
     }
+    deep = deep_fill_store.store.fund(etf_id)
+    if deep is not None:
+        result["deepFill"] = {
+            "asOf": deep_fill_store.iso(deep.as_of),
+            "untrackedWeight": round(sum(w for _, w in deep.tail), 2),
+            "withoutHistory": without_history,
+        }
 
-    closes = get_closes(tickers, period=CORRELATION_PERIOD, min_tickers=1) if tickers else None
+    closes = (
+        get_closes(tickers, period=CORRELATION_PERIOD, min_tickers=1, deep_fill_tail=True)
+        if tickers else None
+    )
 
     # Only a holding priced for every date in the frame can safely join a
     # joint covariance matrix - see the module docstring for why this
