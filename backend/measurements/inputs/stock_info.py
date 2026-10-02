@@ -13,14 +13,20 @@ was: services.market_data.get_stock_info is already cached per ticker
 costs one cache lookup per holding rather than one query per holding -
 the concern the README's data pipeline section reserves for something
 that actually hits Supabase or yfinance.
+
+The one exception is a deep-filled fund's Untracked holdings (issue #171),
+which have no `ticker` row: looping get_stock_info over ~450 of them would be
+~450 live lookups. `get_stock_infos` describes those from the stored
+`untracked_metadata` instead, and a holding with none stored comes back with
+every descriptive field null and a `reason`.
 """
 
-from services.market_data import get_stock_info as _get_stock_info
+from services.market_data import get_stock_infos
 
 
 def get_stock_info(tickers: list[str]) -> dict:
     """Fetch name/sector/market cap/... for every ticker in `tickers`."""
-    return {ticker: _get_stock_info(ticker) for ticker in tickers}
+    return get_stock_infos(tickers)
 
 
 def _sample(etf_id: str, tickers: list[str]):
@@ -33,7 +39,10 @@ INPUT_SPEC = {
     "description": (
         "Each holding's own metadata: name, sector, market cap in USD, "
         "currency and exchange. Read from the database per ticker, "
-        "falling back to a live lookup for anything not yet synced."
+        "falling back to a live lookup for anything not yet synced. An "
+        "Untracked holding of a deep-filled fund is described from the "
+        "weekly-refreshed record instead, and is null, with a reason, "
+        "where there is none."
     ),
     "defaults": {},
     "sample": _sample,

@@ -63,6 +63,12 @@ import inspect
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from measurements.inputs.holdings import get_tail_reasons
+
+# The inputs a Deep-fill supplies prices for - a measurement using none of them
+# has nothing to say about whether the tail was fetched.
+_PRICE_INPUTS = {"price_frame", "fund_index", "correlation_matrix"}
+
 
 class MeasurementBase(ABC):
     """Abstract base for measurement plugins."""
@@ -354,6 +360,7 @@ class MeasurementBase(ABC):
         result = self.compute(inputs)
         if self.window_options:
             result["window"] = params["window"]
+        self._explain_deep_fill_gaps(result, params)
         per_ticker = result.get("per_ticker", {})
         columns = self.resolved_columns
 
@@ -392,6 +399,47 @@ class MeasurementBase(ABC):
         if per_ticker_reason_out:
             result["per_ticker_reason"] = per_ticker_reason_out
         return result
+
+    def _explain_deep_fill_gaps(self, result: dict, params: dict) -> None:
+        """Say why a deep-filled fund's Untracked holding is null (issue #171).
+
+        A measurement reads the tail through the same inputs as everything else and
+        reports a holding it got no series for as null with its own generic reason
+        ("fewer than two priced dates"). For a tail ticker that is not the real
+        reason: the Deep-fill failed to fetch it, or the window reaches back further
+        than the year it fetched. So where a tail ticker's value is null and the
+        Deep-fill can say that was why, its reason replaces the generic one - done
+        here, once, rather than in every measurement. Nothing is added for a fund
+        that is not deep-filled, for a value that is not null, or for a null the
+        fetched data does not explain (that measurement's own reason stands).
+        """
+        # Only a measurement built on price history: a tail ticker's null in a
+        # metadata column (market cap) is a missing description, not a missing
+        # fetch, and that measurement's own reason is the true one.
+        if not _PRICE_INPUTS.intersection(self.uses_inputs):
+            return
+        etf_id = params.get("etf_id")
+        if not etf_id:
+            return
+        reasons = get_tail_reasons(etf_id, params.get("window"))
+        if not reasons:
+            return
+
+        per_ticker = result.get("per_ticker", {})
+        columns = self.resolved_columns
+        if len(columns) == 1:
+            nulls = {t: r for t, r in reasons.items() if t in per_ticker and per_ticker[t] is None}
+            if nulls:
+                result["per_ticker_reason"] = {**(result.get("per_ticker_reason") or {}), **nulls}
+            return
+        by_column = dict(result.get("per_ticker_reason") or {})
+        for column in columns:
+            values = per_ticker.get(column["key"], {})
+            nulls = {t: r for t, r in reasons.items() if t in values and values[t] is None}
+            if nulls:
+                by_column[column["key"]] = {**(by_column.get(column["key"]) or {}), **nulls}
+        if by_column:
+            result["per_ticker_reason"] = by_column
 
     # ── Documentation ────────────────────────────────────────────────────
 

@@ -24,7 +24,7 @@ dividend history reads it in one call rather than one bounded to whatever
 window a price-based column happens to be showing.
 """
 
-from services.market_data import get_dividends, tracked_tickers
+from services.market_data import get_deep_dividends, get_dividends, tracked_tickers
 
 
 def get_dividend_events(tickers: list[str]) -> dict:
@@ -32,7 +32,8 @@ def get_dividend_events(tickers: list[str]) -> dict:
     tracked at all.
 
     Returns {ticker: {"events": [[date, amount], ...], "tracked": bool}}
-    for every requested ticker. `tracked=False` (every ETF, and anything
+    for every requested ticker (`tracked` also being true for a holding a
+    Deep-fill fetched, whose year of events is its whole record). `tracked=False` (every ETF, and anything
     resolved outside the tracked universe) means "no record here", not
     "paid nothing" - `events` is `[]` either way, so a caller must read
     `tracked` to tell the two apart rather than treating an empty list on
@@ -40,6 +41,13 @@ def get_dividend_events(tickers: list[str]) -> dict:
     """
     events = get_dividends(tickers)
     on_record = tracked_tickers(tickers)
+    # A deep-filled fund's Untracked holdings (issue #171) have no rows in either
+    # table, but the Deep-fill fetched a year of their dividends: that is a record
+    # (a year of data and none paid is `[]` and a real answer), so they read as
+    # on record. One it failed to fetch is in neither and stays "no record here".
+    deep = get_deep_dividends(tickers)
+    events = {**events, **deep}
+    on_record = on_record | set(deep)
     return {
         ticker: {
             "events": [list(pair) for pair in events.get(ticker, [])],
