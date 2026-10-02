@@ -82,6 +82,13 @@ def assert_not_truncated(rows: list[dict], page_size: int = SUPABASE_PAGE_SIZE) 
     return rows
 
 
+def supabase_configured() -> bool:
+    """Whether the credentials `get_client` needs are set at all - the only way
+    to tell "not configured" (a permanent condition) from "could not connect"
+    (a blip), since `get_client_optional` answers None for both."""
+    return bool(os.environ.get("SUPABASE_URL")) and bool(os.environ.get("SUPABASE_SERVICE_KEY"))
+
+
 _client_singleton: Client | None = None
 
 

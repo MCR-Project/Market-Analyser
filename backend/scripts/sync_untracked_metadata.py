@@ -70,7 +70,6 @@ Run with:   python scripts/sync_untracked_metadata.py
 """
 
 import argparse
-import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -78,7 +77,7 @@ from typing import Callable, Iterable, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from services.market_data import _get_stock_info_live
+from services.market_data import _get_stock_info_live, yahoo_symbol
 from services.supabase_client import get_client, paginated_select
 
 TABLE = "untracked_metadata"
@@ -88,11 +87,6 @@ TICKER_COLUMNS = "id,name,sector,market_cap,currency,exchange,logo,website"
 RECHECK_AFTER_DAYS = 7
 ID_CHUNK = 100          # ids per `in` filter - the list rides in the request URL
 FAILURE_MAX_LENGTH = 200
-
-# BRK.B, BF.B: a dot followed by exactly one letter at the end - a share class.
-# (Some single-letter suffixes are exchanges, e.g. ABC.L - see lookup_row.)
-_SHARE_CLASS = re.compile(r"\.([A-Z])$")
-
 
 # ── Writes shared with complete_database.py ───────────────────────────────────
 
@@ -194,12 +188,6 @@ def stored_rows(client) -> list[dict]:
 
 
 # ── The weekly step ───────────────────────────────────────────────────────────
-
-def yahoo_symbol(sym: str) -> str:
-    """The repo's share-class symbol as yfinance spells it: BRK.B -> BRK-B.
-    A longer suffix (NPN.SJ) is an exchange and is unchanged."""
-    return _SHARE_CLASS.sub(r"-\1", sym)
-
 
 def lookup_row(sym: str, checked_at: str, lookup: Callable[[str], dict]) -> dict:
     """The row to store for one successful lookup of `sym`. Raises whatever the

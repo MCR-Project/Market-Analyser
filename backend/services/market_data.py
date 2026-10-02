@@ -32,6 +32,7 @@ yfinance is free but has quirks:
 """
 
 import math
+import re
 import time
 from datetime import date, timedelta
 
@@ -537,6 +538,19 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
 
 
 # ── Stock metadata ────────────────────────────────────────────────────────────
+
+# BRK.B, BF.B: a dot followed by exactly one letter at the end - a share class.
+# (Some single-letter suffixes are exchanges, e.g. ABC.L - callers that must
+# not lose those ask again with the symbol as written.)
+_SHARE_CLASS = re.compile(r"\.([A-Z])$")
+
+
+def yahoo_symbol(sym: str) -> str:
+    """The repo's share-class symbol as yfinance spells it: BRK.B -> BRK-B.
+    A longer suffix (NPN.SJ) is an exchange and is unchanged. Shared by the
+    weekly metadata job and the Deep-fill, which both ask yfinance about
+    symbols the repo spelled its own way."""
+    return _SHARE_CLASS.sub(r"-\1", sym)
 
 UNTRACKED_INFO_ID_CHUNK = 200  # ids per `in` filter - the list rides in the request URL
 
