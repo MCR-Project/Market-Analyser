@@ -10,14 +10,20 @@ Most public functions follow the same pattern:
   3. Cache the result (skipping genuinely empty/failed results, so a retry
      isn't blocked for the full TTL) and return it
 
-A few deliberately don't: get_dividends, get_risk_free_rate and
-get_untracked_info have no live fallback at all (a number that sometimes comes
-from a record and sometimes from a network call is a number nobody can
-reconcile), and
+A few deliberately don't: get_dividends, get_risk_free_rate,
+get_untracked_info and get_untracked_holdings have no live fallback at all (a
+number that sometimes comes from a record and sometimes from a network call is a
+number nobody can reconcile), and
 get_stock_description has no DB path at all (prose nobody reconciles
 against a second source, and not worth a pipeline sync). Each states its
 own deviation in its own docstring rather than this one trying to stay in
 sync with every exception.
+
+One more thing is read here without being fetched here (issue #171): while a fund
+is deep-filled, `deep_fill_store` holds its Untracked holdings' prices in memory,
+and the holdings list, the price frames and the correlation matrix answer for that
+tail from it - never from `prices`, and never by a live call made from inside a
+request. See `get_etf_holdings`, `_merge_deep_tail` and `compute_correlation_matrix`.
 
 The private "_..._live" helpers are the original all-yfinance
 implementations, unchanged - kept both as the fallback path here and reused
@@ -616,6 +622,7 @@ def yahoo_symbol(sym: str) -> str:
     symbols the repo spelled its own way."""
     return _SHARE_CLASS.sub(r"-\1", sym)
 
+
 UNTRACKED_INFO_ID_CHUNK = 200  # ids per `in` filter - the list rides in the request URL
 
 
@@ -769,6 +776,74 @@ def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
                 "reason": None,
             }
     return result
+
+
+def get_stock_infos(tickers: list[str]) -> dict[str, dict]:
+    """`get_stock_info` for every ticker in `tickers`, except that a ticker in the
+    tail of a deep-filled fund is described from `untracked_metadata`
+    (`get_untracked_info`) instead (issue #171).
+
+    A fund-level read asks about every holding in the fund, and for ~450 Untracked
+    ones `get_stock_info`'s live fallback would be ~450 yfinance lookups from inside
+    one request - the very cost the weekly metadata job exists to pay once a week
+    instead. A tail ticker with no stored description gets `get_stock_info`'s keys
+    with every descriptive one `None` (sector `"Unknown"`, the word the live
+    fallback already uses for a symbol it knows nothing about) and a `reason`,
+    never a guessed currency or a zero market cap (invariant 7).
+    """
+    tail = deep_fill_store.store.tail_tickers()
+    wanted = [t for t in tickers if t in tail]
+    # `get_untracked_info` is several paginated reads and deliberately uncached,
+    # and a fund's sector breakdown and every metadata column ask for ~450 of them
+    # each time. The table changes weekly, so a description that was found is held
+    # per ticker for `CACHE_TTL_HOLDINGS`; one that was not is asked about again,
+    # since "no row yet" is one weekly run from changing and a failed read must
+    # never be remembered.
+    described = {t: cache.get(f"untracked_info:{t}") for t in wanted}
+    stored = get_untracked_info([t for t in wanted if described[t] is None])
+    for ticker, entry in stored.items():
+        if entry["info"] is not None:
+            described[ticker] = entry["info"]
+            cache.set(f"untracked_info:{ticker}", entry["info"], CACHE_TTL_HOLDINGS)
+    result = {}
+    for ticker in tickers:
+        if ticker not in tail:
+            result[ticker] = get_stock_info(ticker)
+            continue
+        if described[ticker] is not None:
+            result[ticker] = described[ticker]
+        else:
+            entry = stored.get(ticker, {"reason": "no descriptive data is stored for it"})
+            result[ticker] = {
+                "ticker": ticker, "name": None, "sector": "Unknown", "sectorTag": SECTOR_TAG.get("Unknown", "Unknown"[:6].upper()),
+                "marketCap": None, "currency": None, "exchange": None, "logo": None,
+                "website": None, "reason": entry["reason"],
+            }
+    return result
+
+
+def get_deep_dividends(tickers: list[str]) -> dict[str, list[tuple[str, float]]]:
+    """The dividends a Deep-fill fetched for those of `tickers` in the tail of a
+    deep-filled fund (issue #171), `{ticker: [(date, amount), ...]}`. A ticker with
+    no fetched data is absent - and so reads, to `get_dividend_events`, as "no
+    record here" rather than "paid nothing". Amounts are as declared, unadjusted,
+    like the `dividends` table's."""
+    tail = deep_fill_store.store.tail_tickers()
+    return deep_fill_store.store.dividends([t for t in tickers if t in tail])
+
+
+def deep_fill_exclusions(etf_id: str, period: str | None) -> dict[str, str]:
+    """`{ticker: reason}` for the tail holdings of `etf_id` that cannot answer a
+    read over `period`: the ones the Deep-fill failed to fetch, and all of them for
+    a window reaching further back than the year it fetched. `{}` when the fund is
+    not deep-filled. This is what a response names so a missing tail figure is
+    explained rather than silent, and what a figure built from the tail leaves out
+    of its coverage."""
+    result = deep_fill_store.store.fund(etf_id)
+    if result is None:
+        return {}
+    lower, _ = _window_bounds(period, None, None)
+    return deep_fill_store.store.explain([ticker for ticker, _ in result.tail], lower)
 
 
 def _get_stock_description_live(ticker_symbol: str) -> str:
@@ -1566,6 +1641,74 @@ def _merge_missing_live(
     return merged
 
 
+def _deep_tail(tickers: list[str], interval: str) -> list[str]:
+    """Those of `tickers` in the tail of a fund that is deep-filled right now
+    (issue #171) - the ones to answer from the Deep-fill's memory rather than
+    `prices`. Daily reads only: the Deep-fill holds daily rows and nothing else."""
+    if interval != "1d":
+        return []
+    tail = deep_fill_store.store.tail_tickers()
+    return [t for t in tickers if t in tail]
+
+
+def _merge_deep_tail(
+    closes: pd.DataFrame | None,
+    volume: pd.DataFrame | None,
+    granularity: pd.DataFrame | None,
+    tail: list[str],
+    period: str | None,
+    start: str | None,
+    end: str | None,
+):
+    """Add a deep-filled fund's tail columns to the frames read for the rest,
+    returning `(closes, volume, granularity)`.
+
+    The tail is read over the same window (`deep_fill_store.frames`), and a ticker
+    that cannot answer it - the job failed to fetch it, or the window reaches
+    further back than the year it fetched - is simply left out of the frame, the
+    way a symbol with no prices in a window is, never padded with a shorter series.
+    What was left out and why is `deep_fill_exclusions`' to say. Each column goes
+    onto the calendar of the frame it joins by `_onto_calendar`, the rule a live
+    column already follows; a window the Deep-fill can answer is under a year, so
+    that calendar is daily and the alignment is one row to one row.
+
+    Volume is the Deep-fill's own and granularity is `"D"` throughout: a fetched row
+    is a trading day, never a weekly or monthly bucket.
+    """
+    lower, upper = _window_bounds(period, start, end)
+    deep_closes, deep_volume, _ = deep_fill_store.store.frames(tail, lower, upper)
+    if deep_closes.empty:
+        return closes, volume, granularity
+
+    if closes is None:
+        return (
+            deep_closes,
+            deep_volume,
+            pd.DataFrame("D", index=deep_closes.index, columns=deep_closes.columns),
+        )
+
+    calendar = pd.to_datetime(closes.index).sort_values()
+    closes = closes.copy()
+    closes.index = pd.to_datetime(closes.index)
+    aligned = _onto_calendar(deep_closes, calendar)
+    aligned_volume = _onto_calendar(deep_volume, calendar)
+    if volume is not None:
+        volume = volume.copy()
+        volume.index = pd.to_datetime(volume.index)
+    if granularity is not None:
+        granularity = granularity.copy()
+        granularity.index = pd.to_datetime(granularity.index)
+    for column in aligned.columns:
+        if not aligned[column].notna().any():
+            continue
+        closes[column] = aligned[column]
+        if volume is not None:
+            volume[column] = aligned_volume[column]
+        if granularity is not None:
+            granularity[column] = aligned[column].map(lambda v: "D" if pd.notna(v) else None)
+    return closes, volume, granularity
+
+
 def _price_frame_bundle(
     tickers: list[str],
     period: str | None,
@@ -1610,22 +1753,33 @@ def _price_frame_bundle(
     if cached is not None:
         return cached
 
+    # A deep-filled fund's tail (issue #171) is answered from the Deep-fill's own
+    # memory and never asked of the database or yfinance: it has no `prices` rows,
+    # so the merge below would fetch ~450 symbols live from inside this request.
+    tail = _deep_tail(tickers, interval)
+    rest = [t for t in tickers if t not in tail]
+
     closes, volume, granularity = None, None, None
-    if interval == "1d":
-        db_result = _price_frame_db(
-            tickers, period, start=start, end=end, min_tickers=min_tickers
-        )
-        if db_result is not None:
-            closes = db_result["close"]
-            volume = db_result["volume"]
-            granularity = db_result["granularity"]
-            absent = [t for t in tickers if t not in closes.columns]
-            if absent:
-                closes = _merge_missing_live(closes, absent, period, interval, start, end)
-    if closes is None:
-        closes = _live(
-            "price history for these holdings",
-            _closes_live, tickers, period, interval, start=start, end=end,
+    if rest:
+        if interval == "1d":
+            db_result = _price_frame_db(
+                rest, period, start=start, end=end, min_tickers=min_tickers
+            )
+            if db_result is not None:
+                closes = db_result["close"]
+                volume = db_result["volume"]
+                granularity = db_result["granularity"]
+                absent = [t for t in rest if t not in closes.columns]
+                if absent:
+                    closes = _merge_missing_live(closes, absent, period, interval, start, end)
+        if closes is None:
+            closes = _live(
+                "price history for these holdings",
+                _closes_live, rest, period, interval, start=start, end=end,
+            )
+    if tail:
+        closes, volume, granularity = _merge_deep_tail(
+            closes, volume, granularity, tail, period, start, end
         )
 
     bundle = {"close": None, "volume": None, "granularity": None}
@@ -1657,6 +1811,7 @@ def get_closes(
     start: str | None = None,
     end: str | None = None,
     min_tickers: int = 2,
+    deep_fill_tail: bool = False,
 ) -> pd.DataFrame | None:
     """Close prices for several tickers as one wide date x ticker frame,
     from Supabase when it can answer and from a single live download when
@@ -1674,14 +1829,25 @@ def get_closes(
     simulator deciding where a month boundary falls - would be reading a
     different type depending on which path happened to answer.
 
+    `deep_fill_tail` (issue #171) is for a caller reading a *fund*: the tickers in
+    the tail of a deep-filled fund are then answered from the Deep-fill's memory
+    (`_merge_deep_tail`) instead of the database and yfinance, and one the Deep-fill
+    cannot answer for is left out of the frame, not fetched live. Off by default, so
+    the portfolio simulator - which can ask about any ticker over any window - never
+    has its answer depend on whether somebody happened to deep-fill a fund holding it.
+
     Returns None when neither path has usable data. Raises ValueError for
     an unusable period/window pair (see resolve_window), and DataUnavailable
     / SymbolNotFound from the live path.
     """
     period, start, end = resolve_window(period, start, end)
 
+    tail = _deep_tail(tickers, interval) if deep_fill_tail else []
+    if tail:
+        tickers = [t for t in tickers if t not in tail]
+
     closes = None
-    if interval == "1d":
+    if interval == "1d" and tickers:
         closes = _closes_db(
             tickers, period, start=start, end=end, min_tickers=min_tickers
         )
@@ -1697,11 +1863,13 @@ def get_closes(
                 closes = _merge_missing_live(
                     closes, absent, period, interval, start, end
                 )
-    if closes is None:
+    if closes is None and tickers:
         closes = _live(
             "price history for these holdings",
             _closes_live, tickers, period, interval, start=start, end=end,
         )
+    if tail:
+        closes, _, _ = _merge_deep_tail(closes, None, None, tail, period, start, end)
     if closes is None:
         return None
 
@@ -1807,6 +1975,14 @@ def compute_correlation_matrix(
     ticker in none of them either has no computed pair to anyone (its
     `averages` entry is null) or simply joined nobody.
     """
+    # The matrix a Deep-fill finished with, when this is exactly the basket it was
+    # computed for (issue #171): a Full view says "as of when it was drawn", which
+    # is only true if it is read back, not computed again.
+    if interval == CORRELATION_INTERVAL:
+        derived = deep_fill_store.store.derived_correlation(tickers, period)
+        if derived is not None:
+            return derived
+
     key = f"corr_matrix:{'_'.join(sorted(tickers))}:{period}:{interval}"
     cached = cache.get(key)
     if cached:
