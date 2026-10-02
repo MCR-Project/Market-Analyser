@@ -1617,8 +1617,17 @@ looks wrong:
   finished booting — so it retries forever instead of failing loudly. Open
   the browser console; the real cause is there.
 - **The free plan sleeps the API after 15 minutes idle** and takes about a
-  minute to wake up. The frontend's existing cold-start retry (see
-  "The endpoints" above) already covers that wait with no changes needed.
+  minute to wake up. The static frontend loads instantly, so it covers that
+  wait itself: before anything else mounts it probes `GET /health` (at the
+  API's root, derived from `VITE_API_BASE`), and until that answers it shows
+  a "Waking up the server" screen instead of the dashboard
+  (`components/layout/BackendGate.jsx`). It draws nothing for the first 400ms
+  so a warm API never flashes it, and after 90s it stops promising a quick
+  start and says the server may be down or misconfigured. Render's own
+  wake-up page is only shown to a browser that opens the API's URL itself; a
+  `fetch` from the frontend never sees it. Once the API has answered, the
+  screen does not come back for that page load — a later sleep is handled by
+  the per-request cold-start retry (see "The endpoints" above).
 - **An ETF's price series is always a live yfinance call** — ETFs live in
   `etfs`, not `prices`, so they never have DB rows to answer from. That
   makes `GET /api/series/SPY?period=1mo` a quick way to check whether

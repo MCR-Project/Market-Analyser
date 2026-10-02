@@ -31,6 +31,7 @@ src/utils/candles.js         rows -> candles, and where a candle sits; chartTool
 src/utils/tooltipPlacement.js where a chart's hover tooltip sits beside its hover line: the side, the gap, the clearance (pure, tested; issue #177)
 src/utils/tableFloor.js      how tall the holdings table must be to show five holdings (pure, tested); hooks/useTableFloor measures it
 src/utils/networkBox.js      the network graph's minimum height for its width: close to a square, capped (pure, tested; issue #176)
+src/utils/launchScreen.js    which phase the launch screen is in for a given wait: quiet, waking, slow (pure, tested)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
 src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
@@ -133,6 +134,28 @@ Three things about it:
   and a consumed flag left the second (the one the UI shows) unforced. Any
   call to `retry()` — forced or not — also resets the auto-retry budget above,
   since a deliberate click should always get a fresh attempt.
+
+**The launch screen holds the whole app back until `/health` answers.**
+`AppLayout` wraps everything below the theme in `layout/BackendGate`, which
+renders its children only once `hooks/useBackendReady` has seen the backend
+respond (`api.ping`, deliberately outside `fetchJson`'s cache and dedup). The
+reason is the cold start above from the other side: on Render's free plan the
+backend sleeps and takes about a minute, and without the gate every page mounts
+and fires its requests at once, each hanging with its own retry loop. One probe
+wakes it instead. Rules that come with it:
+
+- **Nothing that talks to the backend goes above the gate.** `AppLayout` itself
+  only resolves the theme (so the launch screen is already in the right colours);
+  `useFreshness` and the `Outlet` live in `Shell`, below it. A new always-on
+  request in the layout belongs in `Shell`.
+- **The gate latches.** Once `ready`, it never comes back for that page load;
+  a backend that falls asleep later is `useFetch`'s retries' job, not a screen
+  laid over a page someone is reading.
+- **Phases, not a boolean** (`utils/launchScreen.js`, tested): `quiet` for the
+  first 400ms (background only, so a warm backend never flashes a screen),
+  `waking` ("about a minute"), and `slow` past 90s, which stops promising a
+  recovery — a wrong `CORS_ORIGINS`/`VITE_API_BASE` or a local backend never
+  started looks identical to a sleeping one from here.
 
 `useMeasurements` fetches outside `useFetch` (one request per active measurement,
 keyed off a diff) and therefore reimplements the same retry rule by hand,
