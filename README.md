@@ -59,7 +59,9 @@ in `.env` — see `.env.example`):
   stock at 0.4% in one fund and 2% in another is tracked in both. Every read
   of the holdings — a fund's holdings table, its `holdingCount`, the
   correlation matrix, the daily ETF sync — sees tracked rows only, so nothing
-  a fund shows changes. Idempotent; both stages run end-to-end via the
+  a fund shows changes — unless the fund has been
+  [deep-filled](#deep-fill-reading-a-fund-as-its-whole-basket), which reads the
+  untracked ones from memory for a while. Idempotent; both stages run end-to-end via the
   "Fetch holdings and complete database (weekly)" GitHub Action — Sundays at
   06:00 UTC, or by manual dispatch (one provider or `all`, with `dry_run` and
   `limit`). It scrapes the six providers in parallel, then completes the
@@ -209,6 +211,126 @@ completeness fact about that one answer.
 
 `sql/005` has to be applied before the first run of a `fetch_daily.py` that
 writes to it, or that run goes red on the insert.
+
+### Deep-fill: reading a fund as its whole basket
+
+A fund like SPY lists ~500 constituents and this app stores prices for ~46 of
+them, the **tracked** ones (see [Data pipeline](#data-pipeline)). The rest are
+**untracked**: listed with their weight and described weekly, but with no
+prices. A **Deep-fill** fetches those prices from yfinance on request, holds
+them in the backend's memory for a while, and lets every read of that fund see
+the whole basket until they expire (issue #171). **It writes nothing to the
+database** — not `prices`, not `ticker`, not any table — which is the point of
+[ADR 0006](docs/adr/0006-deep-fill-writes-nothing-to-the-database.md): written
+into `prices` the tail would be Tracked in all but name and would go stale, and
+silently drop out of every fund-level number, a week later.
+
+It is **off unless `ALLOW_DEEP_FILL` is set**: fetching ~450 tickers is more
+than the live demo should be asked to do, and the work is lost on a restart
+(and a free Render instance sleeps). Four settings, all in `backend/.env` (see
+`.env.example`); a value that is not a positive whole number falls back to its
+default rather than stopping the API booting:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `ALLOW_DEEP_FILL` | off | `1`, `true`, `yes` or `on` enables it |
+| `DEEP_FILL_TTL_SECONDS` | `86400` | how long a fetched ticker, and so a deep-filled fund, is held |
+| `DEEP_FILL_MAX_FUNDS` | `3` | how many funds may be deep-filled at once; the one finished longest ago is evicted past it |
+| `DEEP_FILL_BATCH_SIZE` | `50` | tickers per `yf.download` call, which is also how much raw data is in memory at once while it runs |
+
+A fund with more than 1000 untracked holdings is refused up front: its
+correlation matrix is N × N, so a bigger one would not fit a 512 MB instance
+three times over, and finding that out twenty minutes into a job is worse than
+being told first.
+
+**The job.** Fetching is slow (minutes, and longer when rate limited), so it is
+a background job, one at a time, with progress:
+
+- `POST /api/deep-fill/{etf_id}` starts it. Pressing again for the running fund
+  *attaches* to it (and withdraws a pending cancel); for another fund it is
+  refused, with the running job's progress in the body.
+- `GET /api/deep-fill/{etf_id}` is what a page polls: `enabled`, `state`
+  (`idle`, `running`, `cancelled`, `failed`, `ready`), `untracked` (how many
+  holdings, their weight, and what share of the fund's weight that is),
+  `progress` (`done`/`total`, and each failure by ticker and reason), `asOf` and
+  `expiresAt`, and `running` — the other fund's progress — when a different
+  fund's job holds the slot. It answers even when Deep-fill is switched off,
+  with `enabled: false`.
+- `POST /api/deep-fill/{etf_id}/cancel` stops it after the batch it is on (a
+  download cannot be interrupted) and **keeps everything fetched**. Pressing
+  start again fetches only what is missing, which is also how a `failed` job
+  resumes, and how a second fund that shares tickers with the first costs only
+  the difference.
+- Tickers are fetched `DEEP_FILL_BATCH_SIZE` at a time with
+  `auto_adjust=True` — adjusted on every path for the reason `prices` is
+  ([How prices are stored](#how-prices-are-stored)) — one year of daily history,
+  with volume and the dividends paid in it. A symbol yfinance has no history for
+  is **named with a reason** and the job carries on; the fund is deep-filled
+  without it. A batch that cannot be fetched at all (the upstream is down) is
+  tried three times and then ends the job `failed`, keeping what was fetched,
+  because those tickers are not bad, only not fetched yet. yfinance does not
+  raise for a ticker it cannot fetch (a rate limit included) — it logs it and
+  returns an empty frame — so a batch that comes back with *nothing* in it is
+  treated that way too, waited out for a minute and asked again, rather than
+  recorded as fifty bad symbols. A batch that is only partly empty cannot be told
+  from a few missing symbols: those are named as failures, and pressing start
+  again retries them. Share classes are asked for as yfinance spells them
+  (`BRK.B` as `BRK-B`).
+- It **respects the rate-limit cooldown** (issue #92): every download goes
+  through the same `_live` wrapper as everything else, so a 429 starts the
+  cooldown and the job waits it out instead of adding to the traffic that keeps
+  the limit in place. The wait is not counted as a failed attempt.
+
+| Status | When | Retried by the frontend? |
+| --- | --- | --- |
+| 202 | a job is running for the fund (started, or attached to) | — |
+| 200 | status, cancel, or start for a fund already deep-filled (nothing is fetched) | — |
+| 400 | the fund has nothing untracked to fill, or more than 1000 | never |
+| 403 | `ALLOW_DEEP_FILL` is off | never |
+| 409 | a different fund's job is running (body: `running`) | never |
+| 503 | the database cannot say what the fund's untracked holdings are | on a backoff |
+
+**What is held.** Two things, kept apart: each ticker's data, which expires
+`DEEP_FILL_TTL_SECONDS` after *it* was fetched whichever fund asked for it, and
+one result per fund — its untracked holdings and weights as they were when the
+job started, which of them have data and which failed, and the correlation matrix
+and clusters over the whole basket, computed once when the job finished. A fund
+is deep-filled exactly while its result exists, and the result expires when the
+oldest ticker it was built from does. Expiry is checked on every read rather than
+by a timer, so nothing can be served past it.
+
+**What a deep-filled fund reads.** Its holdings list grows the untracked ones,
+after the tracked, and everything built on that list follows:
+
+- `GET /api/etf/{id}` lists them in `holdings`, names them in `untracked`, and
+  says `deepFill.asOf` / `expiresAt`. A fund that is not deep-filled answers
+  exactly as before: none of these fields is there.
+- The correlation matrix and clusters cover the whole basket, and are the result
+  the job finished with — read back, not computed again, so they say as of when
+  they were drawn. `deepFill.excluded` names each untracked holding left out,
+  with why.
+- The Fund Index, every measurement, the sector breakdown and the fund metrics
+  read the tail the same way. The sector breakdown and market cap describe it from
+  the weekly `untracked_metadata` record, never a live lookup; a holding with none
+  is `Unknown` / null with a reason.
+- **A figure the fetched history cannot support is `null` with a reason, never
+  `0`** (invariant 7). The job fetches one year, so a window reaching back
+  further — 5Y or Max — leaves every untracked holding null, "a Deep-fill fetches
+  one year of history, and this window reaches further back", while the tracked
+  holdings answer as always. A ticker the job failed to fetch is null with its
+  failure as the reason. Fund metrics' `trackedWeightCoverage` counts only the
+  holdings the window can price, and `deepFill.withoutHistory` names the rest.
+
+**After it expires, every read returns exactly the answer it gave before.** The
+tail is laid over the cached tracked list on each read and never cached with it,
+and every cache that keys a fund-level answer includes whether the fund is
+deep-filled in its key (`fund_metrics`, the correlation matrix, the price
+frames), so a pruned answer is never served for a deep-filled fund or the
+reverse. Pressing start again pays for all of it again.
+
+Not part of this: any screen for it, and keeping results across a restart (the
+ADR defers a snapshot behind the same interface). A restart — including
+`--reload` on every edit in development — loses the lot.
 
 ### Measurements
 
@@ -1282,7 +1404,10 @@ its five largest *risk contributors* — not necessarily its five largest
 *positions* — account for), and **tracked weight coverage** (how much of
 the fund's weight its tracked, ≥1%-weighted holdings add up to — the
 caveat every copied portfolio already carries in prose, `etf_weight`'s
-own `total_weight`, given its own tile).
+own `total_weight`, given its own tile; while the fund is
+[deep-filled](#deep-fill-reading-a-fund-as-its-whole-basket) it counts every
+holding the window can price, and `deepFill.withoutHistory` names the ones
+it cannot).
 
 These three are `computed_from: "etf_id"` entries in the same
 `backend/portfolio_metrics/` registry the twelve run-based tiles above
@@ -1371,6 +1496,13 @@ caller can cost:
   `MAX_HOLDINGS`, shared rather than duplicated. Comfortably more than any
   real portfolio built here has needed, and well inside what a single
   request from an unauthenticated caller should be able to ask for.
+
+A fourth bound covers the one request that is expensive on purpose: a
+[Deep-fill](#deep-fill-reading-a-fund-as-its-whole-basket) is off unless
+`ALLOW_DEEP_FILL` is set, runs one job at a time, holds at most
+`DEEP_FILL_MAX_FUNDS` funds, and refuses a fund over 1000 untracked holdings.
+Polling its status counts against the general rate limit like any other `/api/*`
+request.
 
 ## Frontend
 

@@ -1,6 +1,6 @@
 # backend/services — data access and arithmetic
 
-Seven modules, and the large ones carry most of the project's load-bearing
+Nine modules, and the large ones carry most of the project's load-bearing
 decisions.
 
 | Module | Responsibility |
@@ -8,6 +8,8 @@ decisions.
 | `supabase_client.py` | Client construction, and the pagination rules every read must follow |
 | `cache.py` | Process-local TTL dict, one shared singleton |
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached (`get_dividends`, `get_risk_free_rate` and `get_untracked_info` have none) |
+| `deep_fill.py` | The Deep-fill job (issue #171): fetches a fund's Untracked holdings from yfinance on request, one background job at a time, with progress, cancel and resume — writes nothing to the database |
+| `deep_fill_store.py` | What a Deep-fill holds in memory: per-ticker data and one result per fund, with TTL expiry and oldest-first eviction. Imported by `market_data`, so it imports nothing from it |
 | `freshness.py` | When the daily fetch job last finished and by when the next run is due (issue #154) — reads the job's own `fetch_run` record, no live fallback |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
 | `stats.py` | Return and risk arithmetic over a plain series, and the correlation matrix's clustering (`cluster_correlation`, issue #143) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
@@ -57,6 +59,10 @@ Sentinels worth knowing:
   whose only rows are untracked reads as unsynced (`None`) and takes the live
   fallback, exactly like a fund with no rows. A *new* reader of this table must
   filter the same way.
+- `get_etf_holdings` is `_base_etf_holdings` (the tracked list, cached) with a
+  deep-filled fund's Untracked holdings laid over it **per call, never cached with
+  it** (issue #171) — see "Deep-fill" in `backend/CLAUDE.md`. Every other reader of the
+  tracked list in this file means `_base_etf_holdings`.
 - `get_etf_holdings` returns `(holdings, stale)` as one tuple, cached together.
   `stale` means the holdings came from the live top-~10 fallback rather than the
   fund's tracked holdings in the DB. It is deliberately not a sibling cache key — two
@@ -183,6 +189,36 @@ yfinance at request time. Not cached, because a Deep-fill holds its own result. 
 the request URL, and each chunk is paginated like any read of a table that can grow.
 A Tracked symbol has no row here and reads as "no descriptive data"; its metadata
 is `get_stock_info`'s.
+
+## Deep-filled reads (issue #171)
+
+Four helpers in `market_data.py` are what let the readers treat a deep-filled fund's
+tail like prices they have, without a request ever fetching it:
+
+- `get_untracked_holdings(etf_id)` — `[[ticker, weight]]` for the rows flagged
+  `tracked = false`, the list a job is told to fetch. No live fallback (yfinance
+  exposes ~10 holdings and the other copy is a scrape the backend cannot run); an
+  unconfigured database answers `[]`, a configured one that cannot be read raises
+  `DataUnavailable` — the same split `freshness.py` draws, via
+  `supabase_client.supabase_configured`.
+- `_deep_tail(tickers, interval)` / `_merge_deep_tail(...)` — the split-and-merge
+  `_price_frame_bundle` and `get_closes(deep_fill_tail=True)` use: the tail is answered
+  by `deep_fill_store.frames` and added to the frame by `_onto_calendar`, the rule a live
+  column already follows. A tail ticker the store cannot answer for the window is
+  *left out of the frame*, not fetched live. Volume is the Deep-fill's own and
+  granularity is `D`.
+- `get_stock_infos(tickers)` — `get_stock_info` per ticker, except the tail, which is
+  described from `untracked_metadata` (`Unknown` / null with a `reason` when there is
+  none), because ~450 live lookups from one request is the cost the weekly job exists
+  to pay once a week.
+- `get_deep_dividends` and `deep_fill_exclusions(etf_id, period)` — the fetched
+  dividends, and `{ticker: reason}` for the tail holdings a read over `period` cannot
+  price (failed to fetch, or the window reaches back further than one year).
+
+`compute_correlation_matrix` first asks the store for the matrix the Deep-fill finished
+with (`derived_correlation`, exact ticker order and period), so a Full view reads back
+what was drawn. The Fund Index has no stored copy: its inputs are the per-ticker series
+the store already holds.
 
 ## The risk-free rate (issue #103)
 
@@ -594,9 +630,13 @@ from `diversificationRatio`/`top5VarianceShare` instead; it still counts
 toward `trackedWeightCoverage`, which needs no shared window at all and
 is never null.
 
-Cached by `services.cache`, keyed on `etf_id` alone at
-`CACHE_TTL_SECONDS` — the same tier the price series and correlation
-matrix it shares a window with already use. This is what keeps the three
+Cached by `services.cache`, keyed on `etf_id` **and whether the fund is deep-filled**
+(issue #171) at `CACHE_TTL_SECONDS` — the same tier the price series and correlation
+matrix it shares a window with already use. A key on `etf_id` alone would serve the pruned
+figures for a deep-filled fund, or the deep-filled ones after it expires. While deep-filled,
+`trackedWeightCoverage` counts every holding the window can price and a `deepFill` entry
+(`asOf`, `untrackedWeight`, `withoutHistory` by name with reasons) is added; it is absent
+otherwise. This is what keeps the three
 `computed_from="etf_id"` portfolio-metric classes
 (`portfolio_metrics/official_metrics/diversification_ratio.py` and its
 two siblings), each independently calling this once per `value()`/

@@ -20,7 +20,7 @@ Interactive API docs at `http://localhost:8000/docs`, liveness at `/health`.
 
 ```
 main.py                  app object, CORS, rate limiting, exception→status mapping, /health
-config.py                TTLs, period→days table, sector-tag normalisation, doc-example defaults
+config.py                TTLs, period→days table, sector-tag normalisation, doc-example defaults, the Deep-fill settings (read when asked, from the environment)
 rate_limit.py            per-client request limiting on /api/* — see "Errors are the API"
 api/routes.py            every /api endpoint except the measurement/portfolio-metric ones
 services/                data access and arithmetic — see services/CLAUDE.md
@@ -66,7 +66,9 @@ Three exceptions map onto three of these status codes, and the difference
 between them is the whole reason the frontend recovers from a cold start
 instead of parking on an error panel. The fourth, 429, isn't an exception at
 all — `RateLimitMiddleware` (`rate_limit.py`) decides it before a route ever
-runs, the same way `CORSMiddleware` can answer a preflight without one.
+runs, the same way `CORSMiddleware` can answer a preflight without one. The last
+two rows are the Deep-fill's own refusals (issue #171): both 4xx on purpose, so
+the frontend never retries them.
 
 | Raised | Mapped in | Status | Meaning |
 | --- | --- | --- | --- |
@@ -74,6 +76,8 @@ runs, the same way `CORSMiddleware` can answer a preflight without one.
 | `SymbolNotFound` | `main.py` handler | 404 | upstream answered, and the symbol does not exist |
 | *(none — `RateLimitMiddleware`)* | `rate_limit.py`, before the route | 429 + `Retry-After` | this client exceeded its own request budget (issue #93) |
 | `DataUnavailable` | `main.py` handler | 503 + `Retry-After: exc.retry_after` | upstream could not be reached right now |
+| `DeepFillDisabled` | `main.py` handler | 403 | the server has `ALLOW_DEEP_FILL` off (issue #171) — a deployment decision, so never retried |
+| `DeepFillBusy` | `main.py` handler | 409 + the running job's progress under `running` | a Deep-fill for a *different* fund holds the one slot — never retried; it clears by polling that job, not by pressing again |
 
 `useFetch` retries 5xx/429 and never retries a 4xx, on a backoff schedule
 (`app/src/utils/retrySchedule.js`) rather than a flat interval — see issue
@@ -104,6 +108,68 @@ traffic that kept Yahoo's rate limit in place.
 
 `measurements/registry.py` re-raises both exceptions untouched rather than
 wrapping them in its generic 500, for the same reason.
+
+## Deep-fill (issue #171)
+
+`services/deep_fill.py` (the one-at-a-time background job) and
+`services/deep_fill_store.py` (what it holds) read a fund's Untracked holdings from
+yfinance on request and keep them in memory so the fund can be read as its whole
+basket. The reasoning is `docs/adr/0006-deep-fill-writes-nothing-to-the-database.md`;
+the user-facing description is the README's "Deep-fill" section. What matters when
+changing anything near it:
+
+- **It writes nothing, anywhere.** Not `prices`, not `ticker`, not any table. It
+  *reads* `etf_holdings` (`get_untracked_holdings`) for what to fetch and
+  `untracked_metadata` (`get_untracked_info`) for what the holdings are.
+  `tests/test_deep_fill.py`'s Supabase double refuses every write and each test
+  that runs a job asserts none was attempted — keep that true of any new path.
+- **The store is the seam `market_data` reads, so it imports nothing from it**
+  (`deep_fill.py` imports both). `get_etf_holdings` lays the tail over the cached
+  tracked list on every call and never caches the two together, which is what makes
+  "after the TTL every read returns exactly the pre-Deep-fill answer" true without
+  anything to invalidate. Expiry is checked on every read, never by a timer.
+- **Every cache that keys a fund-level answer includes the deep-filled state.**
+  `fund_metrics` keys on `etf_id` *and* the Deep-fill's as-of time (or `pruned`);
+  the correlation matrix and price frames key on the ticker list, which differs.
+  A new fund-level cache that keys on `etf_id` alone will serve a pruned answer for a
+  deep-filled fund or the reverse.
+- **A tail ticker is never sent to the database or to yfinance by a read.** It has no
+  `prices` rows, so `_merge_missing_live` would fetch ~450 symbols from inside one
+  request. `_price_frame_bundle` and `get_closes(deep_fill_tail=True)` split it off
+  and answer it from the store. `get_closes` defaults to *off*: the portfolio simulator
+  can ask about any ticker over any window, and must not have its answer depend on
+  whether someone deep-filled a fund holding it. (Known edge: a request that read the
+  holdings a millisecond before the result expired can still reach the live merge for
+  the tail.)
+- **A figure the fetched year cannot support is `null` with a reason** (invariant 7):
+  the store answers only windows opening within the year it fetched, never a shorter
+  series standing in for a longer one, and `MeasurementBase.run` replaces a tail
+  ticker's generic null reason with the Deep-fill's (`get_tail_reasons`).
+- **Memory is bounded three ways**: a batch at a time (`DEEP_FILL_BATCH_SIZE`), at most
+  `DEEP_FILL_MAX_FUNDS` results (oldest evicted, with the tickers only it used), and a
+  fund over `config.DEEP_FILL_MAX_UNTRACKED` (1000) refused up front — its N×N matrix is
+  ~64 bytes a cell as nested dicts.
+- **`yf.download` does not raise for a ticker it could not fetch** — it catches the error
+  (a 429 included), logs it and returns an empty frame. So `_live`'s 429 handling never
+  fires for it: a batch of several tickers with none usable is treated as the upstream
+  refusing (waited out, retried, then the job ends `failed`), not as that many bad
+  symbols. A *partly* empty batch is indistinguishable from a few delisted ones and is
+  named as failures; start again retries them.
+- **Tail membership is per held result, frozen when the job started.** A ticker promoted
+  to Tracked meanwhile (the weekly job) stays in the tail until its fund expires, so for
+  up to the TTL it is read from the one-year memory copy rather than `prices`, and a
+  window longer than a year leaves it out. Rare (weekly job, one threshold crossing) and
+  self-healing at expiry, so it is documented rather than guarded.
+- The manager's lock guards job state only. Anything that can wait on the database or
+  yfinance (the untracked-holdings read, the weight-share read in a status) happens
+  outside it, because the job thread takes the same lock for every progress update.
+- The job honours the rate-limit cooldown by going through `market_data._live` and
+  waiting `_rate_limit_cooldown` out without counting it as an attempt. Tests that
+  involve a cooldown replace `services.deep_fill._wait`, which is the job's only sleep.
+
+Settings are read *when asked* (`config.deep_fill_enabled()` …), not at import:
+`main.py` loads `.env` after importing the routes. A malformed value falls back to its
+default rather than raising.
 
 ## Bounding one anonymous client (issue #93)
 
@@ -297,7 +363,11 @@ Conventions:
   only prices left the tests reaching Supabase — eight seconds a run, and a
   different result depending on whether it answered.
 - Supabase is faked with a write-hostile double where the point is that nothing
-  is written.
+  is written (`test_deep_fill.py`'s refuses every insert, upsert, update and delete
+  and records the attempt).
+- A test that makes many `/api/*` calls patches in its own `FixedWindowLimiter`s
+  (`test_deep_fill.py` does, for both limiters) rather than spend the shared bucket
+  every other file depends on.
 - **Every `TestClient` reports the same address** (`("testclient", 50000)`), so
   every `/api/*` call made anywhere in this suite shares one bucket on the real
   `rate_limit.general_limiter`/`simulate_limiter` (issue #93) — there is real,

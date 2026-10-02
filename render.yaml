@@ -41,6 +41,14 @@ services:
       # unset until that origin is known - see the README section.
       - key: CORS_ORIGINS
         sync: false
+      # Deep-fill (issue #171) is deliberately NOT enabled here: it fetches ~450
+      # tickers from yfinance on request, holds them in memory (a free 512MB
+      # instance has little room for that) and loses them when the instance
+      # sleeps. ALLOW_DEEP_FILL is off unless set, so there is nothing to
+      # configure to keep it off. To try it on a bigger plan, add
+      # ALLOW_DEEP_FILL=true in the dashboard; DEEP_FILL_TTL_SECONDS (86400),
+      # DEEP_FILL_MAX_FUNDS (3) and DEEP_FILL_BATCH_SIZE (50) are optional - see
+      # backend/.env.example and the README's "Deep-fill" section.
 
   # ── Frontend ─────────────────────────────────────────────────────────
   - type: web
