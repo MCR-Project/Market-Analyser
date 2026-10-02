@@ -5,7 +5,12 @@ Cache TTLs, period-to-days lookback windows, and sector label normalization
 map. yfinance and Yahoo Finance use inconsistent sector names across endpoints
 (e.g. "Technology" vs "Information Technology"), so SECTOR_TAG maps all
 known variants to a short uppercase tag for display.
+
+The Deep-fill settings (issue #171) are the one exception to "constants": they
+come from the environment, so they are functions read when asked.
 """
+
+import os
 
 # How long to cache different data types (in seconds).
 # Price data changes intraday; holdings change rarely.
@@ -170,3 +175,56 @@ SECTOR_TAG = {
     "Real Estate": "RE",
     "Basic Materials": "MATL",
 }
+
+
+# ── Deep-fill (issue #171) ────────────────────────────────────────────────────
+#
+# Read when asked rather than once at import: main.py loads `.env` after it has
+# imported the routes (and so this module), so a module-level read would see an
+# environment without the file's values. A malformed value falls back to its
+# default instead of raising - these are typed into a dashboard by hand, and a
+# typo must never stop the API booting.
+
+DEEP_FILL_DEFAULT_TTL_SECONDS = 86400
+DEEP_FILL_DEFAULT_MAX_FUNDS = 3
+DEEP_FILL_DEFAULT_BATCH_SIZE = 50
+
+# Not an environment setting: the most Untracked holdings one fund may ask a
+# Deep-fill for. A fund's correlation matrix is N x N, held as nested dicts at
+# roughly 64 bytes a cell, so 1000 names is ~64MB a fund and three funds is
+# most of a 512MB Render instance before anything else is loaded. A fund over
+# the bound is refused up front rather than allowed to take the process down
+# partway through a twenty-minute job.
+DEEP_FILL_MAX_UNTRACKED = 1000
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def deep_fill_enabled() -> bool:
+    """ALLOW_DEEP_FILL: off unless explicitly turned on. A fetch of ~450
+    tickers is far more than the live demo should be asked to do."""
+    return os.environ.get("ALLOW_DEEP_FILL", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def deep_fill_ttl_seconds() -> int:
+    """DEEP_FILL_TTL_SECONDS: how long a fetched ticker, and so a deep-filled
+    fund, is held in memory (default one day)."""
+    return _positive_int_env("DEEP_FILL_TTL_SECONDS", DEEP_FILL_DEFAULT_TTL_SECONDS)
+
+
+def deep_fill_max_funds() -> int:
+    """DEEP_FILL_MAX_FUNDS: how many funds may be deep-filled at once; the
+    oldest is evicted past it."""
+    return _positive_int_env("DEEP_FILL_MAX_FUNDS", DEEP_FILL_DEFAULT_MAX_FUNDS)
+
+
+def deep_fill_batch_size() -> int:
+    """DEEP_FILL_BATCH_SIZE: tickers per yf.download call - also how much raw
+    data is in memory at once while a job runs."""
+    return _positive_int_env("DEEP_FILL_BATCH_SIZE", DEEP_FILL_DEFAULT_BATCH_SIZE)
