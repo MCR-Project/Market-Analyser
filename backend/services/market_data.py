@@ -40,9 +40,10 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from yfinance.exceptions import YFException, YFRateLimitError
+from services import deep_fill_store
 from services.cache import cache
 from services.stats import cluster_correlation
-from services.supabase_client import get_client_optional, paginated_select
+from services.supabase_client import get_client_optional, paginated_select, supabase_configured
 from config import (
     CACHE_TTL_SECONDS,
     CACHE_TTL_HOLDINGS,
@@ -486,6 +487,28 @@ def _get_etf_holdings_db(etf_id: str) -> list[list] | None:
 
 
 def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[list], bool]:
+    """A fund's holdings as `(holdings, stale)` - its tracked holdings
+    (`_base_etf_holdings`) and, while the fund is deep-filled (issue #171), its
+    Untracked ones after them.
+
+    The tail is laid over the cached base read on every call and never cached
+    with it: `etf_holdings:{id}` holds the tracked list only, so the moment a
+    Deep-fill expires this returns exactly what it returned before it, with no
+    entry to invalidate. Every fund-level read - the holdings table, the Fund Index,
+    the correlation matrix, the sector breakdown, every measurement - starts from
+    this list, which is how a deep-filled fund is read as its whole basket
+    everywhere at once. A tail ticker the base list already has (promoted to
+    Tracked since the job started) is listed once, as tracked.
+    """
+    holdings, stale = _base_etf_holdings(etf_id, force_refresh)
+    result = deep_fill_store.store.fund(etf_id)
+    if result is None:
+        return holdings, stale
+    listed = {ticker for ticker, _ in holdings}
+    return holdings + [list(row) for row in result.tail if row[0] not in listed], stale
+
+
+def _base_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[list], bool]:
     """Fetch top holdings for an ETF as [[ticker, weight%], ...].
 
     Holdings are sorted by weight descending. Read from Supabase when
@@ -534,6 +557,47 @@ def get_etf_holdings(etf_id: str, force_refresh: bool = False) -> tuple[list[lis
     # a cached empty list, so this isn't skipped for a falsy result.
     result = (holdings, stale)
     cache.set(key, result, ttl)
+    return result
+
+
+def get_untracked_holdings(etf_id: str) -> list[list]:
+    """A fund's Untracked holdings as [[ticker, weight%], ...], heaviest first
+    (issue #171) - the list a Deep-fill is told to fetch, and the only place the
+    app still knows it: `etf_holdings` keeps the rows with `tracked = false`
+    (issue #168, ADR 0005), and every other reader filters them out.
+
+    No live fallback: yfinance exposes a fund's top ~10 only, and the other copy
+    of the constituent list is a provider scrape the backend cannot run. So a
+    database that is not configured at all answers `[]` - there is nothing it can
+    say, and asking again will not change that - while one that is configured but
+    cannot be read raises `DataUnavailable` (503, retried), because "the database
+    is down" must not look like "this fund has no Untracked holdings". Cached for
+    `CACHE_TTL_HOLDINGS` like the tracked list beside it, and only on success.
+    """
+    key = f"untracked_holdings:{etf_id}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    db = get_client_optional()
+    if db is None:
+        if supabase_configured():
+            raise DataUnavailable("could not connect to Supabase")
+        return []
+    try:
+        rows = paginated_select(
+            lambda: db.table("etf_holdings")
+            .select("ticker,weight")
+            .eq("etf_id", etf_id)
+            .eq("tracked", False)
+            .order("weight", desc=True)
+            .order("ticker")
+        )
+    except Exception as exc:
+        raise DataUnavailable(f"could not read the Untracked holdings of '{etf_id}'") from exc
+
+    result = [[row["ticker"], round(float(row["weight"]), 2)] for row in rows]
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
     return result
 
 
