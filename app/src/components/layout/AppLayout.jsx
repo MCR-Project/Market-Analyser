@@ -15,6 +15,10 @@
  * (there is no equivalent of DEFAULT_ETF_ID for stocks — invariant 4 rules
  * out a hardcoded one), so the tab points at the bare `/stock` landing
  * state until something has actually been viewed.
+ *
+ * Nothing below the BackendGate mounts until the backend has answered, so a
+ * sleeping Render instance is woken by one /health probe behind a launch
+ * screen instead of by every page's requests at once.
  */
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
@@ -22,10 +26,23 @@ import { useTheme } from '../../hooks/useTheme';
 import { useFreshness } from '../../hooks/useFreshness';
 import { LiveStatusContext } from '../../hooks/useLiveStatus';
 import { DEFAULT_ETF_ID } from '../../store/useEtfStore';
+import { BackendGate } from './BackendGate';
 import { Header } from './Header';
 
 export function AppLayout() {
+  // The theme is resolved out here, above the gate, so the launch screen is
+  // already in the colours the app will open in rather than flashing light.
   const { theme, toggleTheme } = useTheme('light');
+  return (
+    <BackendGate>
+      <Shell theme={theme} onToggleTheme={toggleTheme} />
+    </BackendGate>
+  );
+}
+
+// Everything that talks to the backend lives below the gate: useFreshness
+// fires a request on mount, and it must not do so before the backend is up.
+function Shell({ theme, onToggleTheme }) {
   const { pathname, search } = useLocation();
 
   // Whichever page owns live data publishes it here for the badge.
@@ -59,7 +76,7 @@ export function AppLayout() {
       <div className="h-screen overflow-hidden flex flex-col bg-[var(--bg)] text-[var(--fg-1)] font-[var(--font-body)]">
         <Header
           theme={theme}
-          onToggleTheme={toggleTheme}
+          onToggleTheme={onToggleTheme}
           isLive={isLive}
           freshness={freshness}
           dashboardPath={dashboardPath}

@@ -11,6 +11,11 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000/api';
 // network request per distinct URL without touching any call site.
 const CACHE_TTL_MS = 2000;
 
+// `/health` lives at the API's root, not under `/api` (backend/main.py), so
+// the liveness probe below derives its URL from the same VITE_API_BASE
+// rather than asking for a second variable that could drift from it.
+const HEALTH_URL = `${API_BASE.replace(/\/api\/?$/, '')}/health`;
+
 const cache = new Map(); // url -> { data, expiresAt }
 const inFlight = new Map(); // url -> { promise, controller, refCount, abortTimer }
 
@@ -159,6 +164,16 @@ async function fetchJson(path, { signal, body } = {}) {
 }
 
 export const api = {
+  // Is the backend process answering at all? Not routed through
+  // fetchJson: it must never be served from the 2s cache or shared with
+  // another caller, since the whole point is to learn whether the server is
+  // up *now*. Resolves on any 2xx; anything else - a 5xx from Render's proxy
+  // while the instance boots, or the TypeError a CORS-less wake-up page
+  // becomes - rejects, and useBackendReady treats every rejection as "not yet".
+  ping: async ({ signal } = {}) => {
+    const res = await fetch(HEALTH_URL, { signal, cache: 'no-store' });
+    if (!res.ok) throw new ApiError(res.status, '/health');
+  },
   listEtfs: (opts = {}) => fetchJson('/etfs', opts),
   getEtf: (id, { refresh = false, signal } = {}) =>
     fetchJson(`/etf/${id}${refresh ? '?refresh=true' : ''}`, { signal }),
