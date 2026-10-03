@@ -160,6 +160,14 @@ changing anything near it:
   up to the TTL it is read from the one-year memory copy rather than `prices`, and a
   window longer than a year leaves it out. Rare (weekly job, one threshold crossing) and
   self-healing at expiry, so it is documented rather than guarded.
+- **`GET /api/stocks` goes through `get_stock_infos`, not `get_stock_info` per ticker**
+  (issue #172): the Table tab asks it for every holding a deep-filled fund lists, and a
+  live `.info` lookup for ~450 Untracked ones from one request is what the stored
+  `untracked_metadata` exists to avoid. A new route that describes "every holding of a
+  fund" takes the same path.
+- **The status carries `ttlSeconds`** (what `DEEP_FILL_TTL_SECONDS` is now) so the
+  frontend's warning can say how long a result is kept before there is one to read an
+  expiry off. The frontend learns `enabled` from the same answer; keep both there.
 - The manager's lock guards job state only. Anything that can wait on the database or
   yfinance (the untracked-holdings read, the weight-share read in a status) happens
   outside it, because the job thread takes the same lock for every progress update.

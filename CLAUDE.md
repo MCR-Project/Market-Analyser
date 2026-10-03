@@ -176,7 +176,9 @@ locally reasonable.
 | Status | Meaning | Frontend behaviour |
 | --- | --- | --- |
 | 400 | The request cannot be answered as asked | never retried |
+| 403 | The server will not do this by deployment choice (Deep-fill off, issue #171) | never retried |
 | 404 | The thing asked for does not exist | never retried |
+| 409 | Another job holds the one slot (a Deep-fill of a different fund) | never retried; the page polls the job's own status |
 | 429 | This client is asking faster than its own limit allows | retried on a backoff schedule |
 | 503 | The upstream could not be reached *right now* | retried on a backoff schedule |
 
