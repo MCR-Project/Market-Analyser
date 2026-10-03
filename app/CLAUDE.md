@@ -32,17 +32,18 @@ src/utils/tooltipPlacement.js where a chart's hover tooltip sits beside its hove
 src/utils/tableFloor.js      how tall the holdings table must be to show five holdings (pure, tested); hooks/useTableFloor measures it
 src/utils/networkBox.js      the network graph's minimum height for its width: close to a square, capped (pure, tested; issue #176)
 src/utils/launchScreen.js    which phase the launch screen is in for a given wait: quiet, waking, slow (pure, tested)
+src/utils/deepFill.js        which state a fund's Deep-fill control is in, the dialog's wording, when to poll next (pure, tested; issue #172)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
 src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
 src/hooks/                   data fetching and view state
-src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup, candlePreference (+ their tests)
+src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup, candlePreference, deepFillEpoch (+ their tests)
 src/views/                   one file per route or tab panel
 src/components/
   layout/    AppLayout, Header, FreshnessBadge
   ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, SegmentedControl, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
   charts/    PriceChart (line or candles), AreaChart, CandleChart, CandleToggle, BrushOverlay, ChartTooltip
-  etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard
+  etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard, DeepFillControl, DeepFillDialog
   stock/     StockPopup, StocksSidebar, StockMetricsCard (issue #159)
   docs/      DocsSidebar, MeasurementDoc, DocMdx, WorkedExample
   portfolio/ the portfolio simulator UI — see its own CLAUDE.md
@@ -362,6 +363,62 @@ reads prices: not on `/docs`, and no request at all if the app opens there.
   fallback), and not the date of the latest close: a market holiday adds no
   prices and the job still ran.
 
+## The Deep-fill (issue #172)
+
+The fund card's Deep-fill button, its chip and its "full fund as of ..." note, and
+the dialog behind all three. `utils/deepFill.js` decides everything that is a
+decision - which of seven states the control is in (`deepFillControl`), every word
+of the dialog (`deepFillDialog`), when the status is worth asking for again
+(`nextStatusPoll`) - and is tested; `DeepFillControl` and `DeepFillDialog` only draw
+it, and `hooks/useDeepFill` keeps the status current. Rules that come with it:
+
+- **A state with no `start` action cannot start anything.** The dialog renders the
+  actions the module lists, so "disabled on this version" and "another fund is
+  running" have no Start button to hide or forget to disable. Whether Deep-fill is
+  allowed comes from the status's `enabled`, never from a build variable: this is a
+  static build.
+- **The hook and the dialog live in `App`, above the `!etf` gate, not in
+  `EtfDashboard`.** Completion refetches every fund-level request, `etf` is null
+  while it does, and the card is unmounted with it; state owned by the card (the job's
+  status, an open dialog) would go with it. The card takes the status and an opener as
+  props, the one thing in it that is not self-fetched.
+- **`useDeepFill` is outside `useFetch`, so it applies the retry contract itself**
+  (the rule above for any such path): a transient failure is asked again on the shared
+  schedule up to `MAX_AUTO_RETRIES`, a 4xx never - except that a job last seen
+  *running* is asked about at the 60s cap indefinitely, since giving up would freeze the
+  chip at its last count and the page would never learn the fund had finished. Its own cadence is not a retry - 2s
+  while a job runs, 5s while another fund's job holds the slot, just after a result
+  should expire, and otherwise none (the tab returning to view asks once). A press of
+  Start or Cancel is never retried; a 403 (off), 409 (busy) or 400 (cannot be
+  deep-filled) is shown in words by `describeActionError`.
+- **`api.js`'s `fresh` option** is for exactly these three calls: a status is a moving
+  fact, so it neither reads nor fills the 2s cache; `method: 'POST'` is a POST with no
+  body.
+- **A fund's deep-filled state is an input to every fund-level request**, and none of
+  them has a parameter for it, so `store/deepFillEpoch` holds a number per fund that
+  moves when `asOf` does (finished, expired, redone) and `useLiveEtf`,
+  `useLiveCorrelation`, `useLiveSectors`, `useFundMetrics` and `useMeasurements` add
+  it to their dependencies (`useDeepFillEpoch`). The *first* status seen is the
+  baseline and moves nothing - the page's own requests already got that answer - and a
+  merely running job moves nothing, because the backend lays a tail over a fund only
+  once its result exists. The baseline is forgotten when the page stops watching the
+  fund (`forgetDeepFill`), or a result that expired meanwhile would read as a change
+  on return. **Known cost:** `useFetch` clears its data when a dependency changes, so a
+  fund's refetch on completion or expiry briefly shows the page's loading skeleton and
+  drops the Table's local state (search, sector filter, sort) and the card's
+  timeframe. Accepted: the data really did change, and keeping stale rows on screen
+  under a "full fund" note would be worse - but an *expiry* is not something the
+  reader did, so if this proves irritating the fix is `useFetch` keeping stale data
+  while it refetches, not a workaround here. A new hook that reads a fund's holdings, matrix, sectors or
+  metrics adds it too; forgetting is how a table keeps showing 46 holdings under a
+  "full fund" note.
+- **Untracked rows are marked, not separated.** `TableView` takes the `untracked`
+  set from the ETF response and badges those rows; the order is the backend's (tracked,
+  then the tail heaviest first). A holding with no stored description arrives with a
+  null name and sector, and the table substitutes the ticker and "Unknown" so search and
+  the sector filter never meet a null. The Matrix and Network are unchanged: top *N*
+  and tracked-only.
+
 ## MDX: two vocabularies, deliberately separate
 
 Both compile backend-authored source into real React components at runtime, which
@@ -472,7 +529,11 @@ window, which days the calendar offers and where the keyboard goes) and
 `utils/windowPresets.test.js` (`presetWindow` and `PRESETS`; the date is passed in, so
 nothing fakes the clock). Issue #176 added `utils/networkBox.test.js`
 (`networkMinHeight`: the floor for the network graph's height, its cap, and no
-floor before the box is measured). Issue #177 added `utils/tooltipPlacement.test.js`
+floor before the box is measured). Issue #172 added `utils/deepFill.test.js` (the
+control's states and their precedence, the dialog's wording including that a disabled
+or busy fund has no Start, the poll schedule and the action errors) and
+`store/deepFillEpoch.test.js` (when a fund's deep-filled state counts as having
+changed, and that the first look does not). Issue #177 added `utils/tooltipPlacement.test.js`
 (`tooltipPlacement`: which side of the hover line the tooltip sits on, the gap, and
 a candle's clearance) and a `clearPct` check in
 `utils/chartTooltip.test.js`.
