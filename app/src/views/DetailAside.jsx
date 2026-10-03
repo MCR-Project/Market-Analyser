@@ -26,6 +26,7 @@
 import { memo, useMemo, useCallback } from 'react';
 import { useLiveStocks } from '../hooks/useLiveStocks';
 import { fmtCorr, fmtMoney } from '../utils/format';
+import { pairInsights } from '../utils/pairInsights';
 
 export const DetailAside = memo(function DetailAside({ etf, tickers, selected, onSelect, correlationData, sectorData }) {
   const { stockMap } = useLiveStocks(tickers);
@@ -42,6 +43,16 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
   // dropped by the backend for insufficient price history) resolves to
   // null and is filtered out below rather than shown with a fake ρ.
   const corrFn = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
+
+  // The backend's strongest/loosest/hub cover its whole matrix, which for a
+  // deep-filled fund includes Untracked holdings this view does not draw
+  // (issue #172) - so they are recomputed over the tickers shown. A fund that is
+  // not deep-filled keeps the backend's own figures, which are the same thing.
+  const insights = useMemo(() => (
+    correlationData?.deepFill
+      ? pairInsights(corrMatrix, tickers)
+      : { strongest: correlationData?.strongest, weakest: correlationData?.weakest, hub: correlationData?.hub }
+  ), [correlationData, corrMatrix, tickers]);
 
   const peers = useMemo(() => {
     if (!selData) return [];
@@ -101,15 +112,15 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
               Daily-return correlation across <strong className="text-[var(--fg)]">{etf.id}</strong> holdings — how tightly they move together, beyond their sector labels.
             </p>
 
-            {correlationData.strongest && correlationData.weakest && correlationData.hub ? (
+            {insights.strongest && insights.weakest && insights.hub ? (
               <div className="flex flex-col gap-3">
-                <InsightRow label="Strongest pair" pair={correlationData.strongest} color="var(--accent)" />
-                <InsightRow label="Loosest pair" pair={correlationData.weakest} color="var(--fg-2)" />
+                <InsightRow label="Strongest pair" pair={insights.strongest} color="var(--accent)" />
+                <InsightRow label="Loosest pair" pair={insights.weakest} color="var(--fg-2)" />
                 <div className="flex items-center justify-between p-3 bg-[var(--bg-3)] rounded-[var(--radius-md)]">
                   <span className="text-[13px] text-[var(--fg-2)]">Most connected</span>
                   <span className="font-[var(--font-mono)] text-[13px] text-[var(--fg)]">
-                    {correlationData.hub.ticker}{' '}
-                    <span className="text-[var(--accent)] font-bold">{fmtCorr(correlationData.hub.avgCorr)}</span>
+                    {insights.hub.ticker}{' '}
+                    <span className="text-[var(--accent)] font-bold">{fmtCorr(insights.hub.avgCorr)}</span>
                   </span>
                 </div>
               </div>

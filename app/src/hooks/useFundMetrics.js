@@ -21,9 +21,13 @@ import { useSearchParams } from 'react-router';
 import { useFetch } from './useFetch';
 import { api } from '../utils/api';
 import { readList, withParams } from '../utils/searchParams';
+import { useDeepFillEpoch } from './useDeepFillEpoch';
 
 export function useFundMetrics(etfId) {
   const [params, setParams] = useSearchParams();
+  // Fund-level figures change when the fund is deep-filled and when that
+  // expires (issue #172); the manifest above does not.
+  const deepFillEpoch = useDeepFillEpoch(etfId);
 
   const {
     data: manifestData,
@@ -62,7 +66,7 @@ export function useFundMetrics(etfId) {
     retry: retryValues,
   } = useFetch(
     (signal) => (etfId ? api.getFundMetrics(etfId, { signal }) : Promise.resolve(null)),
-    [etfId],
+    [etfId, deepFillEpoch],
     { fallback: null }
   );
 

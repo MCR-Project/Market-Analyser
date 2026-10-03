@@ -2,6 +2,8 @@ import { useMemo, useCallback } from 'react';
 import { useFetch } from './useFetch';
 import { api } from '../utils/api';
 import { useEtfStore } from '../store/useEtfStore';
+import { useDeepFillEpoch } from './useDeepFillEpoch';
+import { trackedHoldings } from '../utils/trackedHoldings';
 
 /**
  * Fetches the currently selected ETF (per useEtfStore, i.e. the URL) plus
@@ -15,10 +17,13 @@ import { useEtfStore } from '../store/useEtfStore';
  */
 export function useLiveEtf() {
   const { etfId, switchEtf } = useEtfStore();
+  // The holdings list grows while the fund is deep-filled and shrinks back when
+  // it expires (issue #172), so a change of that state is a reason to ask again.
+  const deepFillEpoch = useDeepFillEpoch(etfId);
 
   const { data: etf, loading, error, retry } = useFetch(
     (signal, force) => api.getEtf(etfId, { refresh: force, signal }),
-    [etfId],
+    [etfId, deepFillEpoch],
     { fallback: null }
   );
 
@@ -28,6 +33,12 @@ export function useLiveEtf() {
   const forceRefresh = useCallback(() => retry(true), [retry]);
 
   const tickers = useMemo(() => etf?.holdings?.map(h => h[0]) ?? [], [etf]);
+
+  // The same fund without the Untracked holdings a Deep-fill adds. The Matrix and
+  // the Network draw these, never the whole basket (issue #172); everything else
+  // reads `tickers` above.
+  const trackedList = useMemo(() => trackedHoldings(etf?.holdings, etf?.untracked), [etf]);
+  const trackedTickers = useMemo(() => trackedList.map(h => h[0]), [trackedList]);
 
   const weightOf = useCallback((ticker) => {
     const h = etf?.holdings?.find(x => x[0] === ticker);
@@ -41,7 +52,7 @@ export function useLiveEtf() {
   );
 
   return {
-    etf, etfId, tickers, weightOf, switchEtf,
+    etf, etfId, tickers, trackedHoldings: trackedList, trackedTickers, weightOf, switchEtf,
     allEtfs: allEtfs || [], loading, error, retry, forceRefresh,
     isLive: !!etf?.holdings?.length,
   };

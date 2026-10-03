@@ -94,7 +94,8 @@ function nodeRadius(weightPct) {
 }
 
 export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
-  const { etf, etfId, tickers, weightOf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
+  // The tracked holdings only: a Deep-fill does not change the Network (issue #172).
+  const { etf, etfId, trackedTickers: tickers, trackedHoldings: holdings, weightOf, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   const [threshold, setThreshold] = useState(0.5);
   const { showClusters, setShowClusters } = useNetworkClusters();
   const corrData = useLiveCorrelation(etfId);
@@ -106,7 +107,6 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
   // dropped by the backend for insufficient price history) resolve to
   // null and are treated as "unknown", not filled with a fake value.
   const corr = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
-  const holdings = useMemo(() => etf?.holdings ?? [], [etf]);
   const [boxRef, { width: W, height: H }] = useElementSize();
   const layout = useMemo(
     // Room for the largest node at the edge, plus its label below it.

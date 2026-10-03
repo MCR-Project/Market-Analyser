@@ -18,4 +18,10 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // Runs in Node, not the browser: it reads `process.env` (issue #89's
+    // CHOKIDAR_USEPOLLING), which the browser globals above do not declare.
+    files: ['vite.config.js'],
+    languageOptions: { globals: globals.node },
+  },
 ])

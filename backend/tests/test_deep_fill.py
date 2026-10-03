@@ -776,6 +776,31 @@ class SectorTests(ReadCase):
         self.assertEqual(by_name["Energy"]["count"], 5)
 
 
+class StockBatchTests(ReadCase):
+    def test_the_batch_describes_the_tail_from_stored_metadata_not_a_live_lookup(self):
+        # The Table tab asks /api/stocks for every holding the fund lists, which
+        # once deep-filled is ~450 Untracked ones (issue #172). `ReadCase` makes
+        # any live yfinance read raise, so this passing means none was made.
+        self.run_job()
+
+        rows = self.get("/api/stocks?tickers=U1,U2,U3")
+
+        self.assertEqual([r["ticker"] for r in rows], ["U1", "U2", "U3"])
+        self.assertTrue(all(r["sector"] == "Energy" for r in rows))
+
+    def test_a_tail_holding_with_nothing_stored_is_unknown_with_a_reason(self):
+        self.db.tables["untracked_metadata"] = [
+            r for r in self.db.tables["untracked_metadata"] if r["id"] != "U2"
+        ]
+        self.run_job()
+
+        rows = {r["ticker"]: r for r in self.get("/api/stocks?tickers=U1,U2")}
+
+        self.assertEqual(rows["U2"]["sector"], "Unknown")
+        self.assertIsNone(rows["U2"]["name"])
+        self.assertTrue(rows["U2"]["reason"])
+
+
 class MeasurementTests(ReadCase):
     def column(self, path):
         return self.get(path)
@@ -865,6 +890,15 @@ class EndpointTests(DeepFillCase):
         self.assertEqual(body["untracked"]["count"], 6)
         self.assertIsNone(body["progress"])
         self.assertIsNone(body["asOf"])
+
+    def test_status_says_how_long_a_result_is_kept_before_there_is_one(self):
+        # The warning dialog (issue #172) tells someone how long the fund will
+        # stay deep-filled *before* they press start, so the figure cannot wait
+        # for a result to carry an expiry. It follows the setting, and is there
+        # while Deep-fill is off too, where the dialog does not offer it.
+        self.assertEqual(client.get("/api/deep-fill/FAKE").json()["ttlSeconds"], 3600)
+        with patch.dict(os.environ, {"DEEP_FILL_TTL_SECONDS": "120"}):
+            self.assertEqual(client.get("/api/deep-fill/FAKE").json()["ttlSeconds"], 120)
 
     def test_starting_answers_202_while_running_and_200_once_it_is_done(self):
         entered, release = threading.Event(), threading.Event()

@@ -150,10 +150,15 @@ def get_stocks(tickers: str = Query(..., description="Comma-separated ticker lis
     """Batch stock metadata — fetches info for each ticker in parallel-ish.
 
     Useful for populating the table view after loading an ETF's holdings.
-    Each ticker is fetched (or cache-hit) individually.
+    Each ticker is fetched (or cache-hit) individually - except those in the tail
+    of a deep-filled fund, which are described from their stored metadata
+    (`get_stock_infos`, issue #172): the table of a deep-filled SPY asks about
+    ~450 of them at once, and ~450 live lookups from one request is what the
+    weekly metadata job exists to avoid.
     """
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
-    return [get_stock_info(t) for t in ticker_list]
+    infos = get_stock_infos(ticker_list)
+    return [infos[t] for t in ticker_list]
 
 
 # ── Ticker lookup ─────────────────────────────────────────────────────────────

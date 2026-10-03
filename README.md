@@ -249,8 +249,9 @@ a background job, one at a time, with progress:
 - `POST /api/deep-fill/{etf_id}` starts it. Pressing again for the running fund
   *attaches* to it (and withdraws a pending cancel); for another fund it is
   refused, with the running job's progress in the body.
-- `GET /api/deep-fill/{etf_id}` is what a page polls: `enabled`, `state`
-  (`idle`, `running`, `cancelled`, `failed`, `ready`), `untracked` (how many
+- `GET /api/deep-fill/{etf_id}` is what a page polls: `enabled`, `ttlSeconds`
+  (how long a result is kept, known before there is one, so a warning can say it),
+  `state` (`idle`, `running`, `cancelled`, `failed`, `ready`), `untracked` (how many
   holdings, their weight, and what share of the fund's weight that is),
   `progress` (`done`/`total`, and each failure by ticker and reason), `asOf` and
   `expiresAt`, and `running` — the other fund's progress — when a different
@@ -309,6 +310,10 @@ after the tracked, and everything built on that list follows:
   the job finished with — read back, not computed again, so they say as of when
   they were drawn. `deepFill.excluded` names each untracked holding left out,
   with why.
+- `GET /api/stocks` describes a tail ticker from the same stored record, never a
+  live lookup: the Table tab asks it about every holding the fund lists, ~450 of
+  them once deep-filled (issue #172). One with nothing stored comes back with a
+  null name and sector `Unknown`, and a `reason`.
 - The Fund Index, every measurement, the sector breakdown and the fund metrics
   read the tail the same way. The sector breakdown and market cap describe it from
   the weekly `untracked_metadata` record, never a live lookup; a holding with none
@@ -328,9 +333,10 @@ deep-filled in its key (`fund_metrics`, the correlation matrix, the price
 frames), so a pruned answer is never served for a deep-filled fund or the
 reverse. Pressing start again pays for all of it again.
 
-Not part of this: any screen for it, and keeping results across a restart (the
-ADR defers a snapshot behind the same interface). A restart — including
-`--reload` on every edit in development — loses the lot.
+The screen for it is described under [The Deep-fill button](#the-deep-fill-button).
+Not part of this: keeping results across a restart (the ADR defers a snapshot
+behind the same interface). A restart — including `--reload` on every edit in
+development — loses the lot.
 
 ### Measurements
 
@@ -1515,6 +1521,42 @@ npm run dev
 Runs at http://localhost:5173 (or the port Vite reports) and talks to the
 backend at `http://localhost:8000` by default. Set `VITE_API_BASE` in
 `app/.env` to point a build at a different backend — see `.env.example`.
+
+### The Deep-fill button
+
+On the fund card, for a fund that has untracked holdings (and nowhere else — a
+fund without any has no button), the page offers the [Deep-fill](#deep-fill-reading-a-fund-as-its-whole-basket)
+(issue #172). What it shows follows `GET /api/deep-fill/{etf_id}`, which the page
+reads when the fund opens and then polls only while something is moving:
+
+| The fund is | The card shows | The dialog |
+| --- | --- | --- |
+| idle, or its last run kept nothing | a **Deep-fill** button and "N untracked holdings" | how many holdings and what share of the fund's weight are untracked, that it takes "several minutes to tens of minutes, longer on a small server", that **nothing is saved to the database**, how long the result is kept (from `ttlSeconds`), and a recommendation to run the containerised version. **Start** and **Cancel** |
+| cancelled or failed with some holdings kept | **Resume Deep-fill** and "N of M fetched" | the same, plus what was kept: starting again fetches only the rest |
+| running | a "Deep-filling 212/457" chip | the phase (fetching prices, putting the fund together, stopping after this batch), done/total and a bar. **Cancel Deep-fill** stops it after the batch it is on, keeping what was fetched; **Close** leaves it running |
+| on a server with Deep-fill off | the button, captioned "disabled on this version" | "Deep-filling is disabled on this version. To enable it, set `ALLOW_DEEP_FILL` in the project configuration", and no Start |
+| waiting on another fund's job | the button, captioned with the other fund | which fund is running and its progress, and no Start |
+| deep-filled | "Full fund as of 2 Oct 2026, 09:30" in place of the button | when it was drawn, when it expires, and which holdings could not be fetched and why |
+
+The frontend learns whether Deep-fill is allowed from the status, not from a
+build setting: it is a static build and cannot read the server's environment.
+Closing the dialog never stops a job — the chip is the way back to it.
+
+**When it completes, and when it expires, the fund is read again.** The holdings
+list, the correlation matrix, the sector breakdown, the fund metrics and every
+measurement column are requested again, so the page switches from the tracked
+holdings to the whole fund, and back to them when the result expires. Nothing
+changes while a job is merely running: a partial tail is not read by anything.
+The Table tab then lists every holding, the untracked ones after the tracked,
+heaviest first, marked **Untracked**; a column with nothing for one shows a dash
+whose tooltip gives the reason (a window longer than the fetched year, a ticker
+that could not be fetched). The Matrix still shows its top *N* and the Network
+its tracked holdings, exactly as before the Deep-fill — the whole-basket views are
+a later issue. The side panel beside them follows the drawing: its strongest pair,
+loosest pair and most-connected holding are worked out over the holdings drawn, not
+the whole basket's matrix, so they never name a pair that is not on the screen. Its
+sector mix, like the fund card's, describes the fund and counts the untracked
+holdings.
 
 ### The correlation matrix and its clusters
 

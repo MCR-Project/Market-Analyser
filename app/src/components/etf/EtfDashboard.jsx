@@ -17,6 +17,10 @@
  *  │  description,    │ hover     │ timeframe tabs  │
  *  │  AUM/holdings/ρ) │ ranking   │ and sparkline   │
  *  └──────────────────┴───────────┴─────────────────┘
+ *
+ * Takes the fund's Deep-fill status and a way to open its dialog as props,
+ * unlike everything else here: the dialog and the polling live in App, which
+ * outlasts this card's reloads (issue #172).
  */
 import { memo, useState, useMemo } from 'react';
 import { fmtMoney, fmtCorr } from '../../utils/format';
@@ -31,8 +35,9 @@ import { SectorZone } from './SectorZone';
 import { Loading } from '../ui/Loading';
 import { ErrorState } from '../ui/ErrorState';
 import { EtfPicker } from './EtfPicker';
+import { DeepFillControl } from './DeepFillControl';
 
-export const EtfDashboard = memo(function EtfDashboard() {
+export const EtfDashboard = memo(function EtfDashboard({ deepFillStatus, onOpenDeepFill }) {
   const [timeframe, setTimeframe] = useState('1Y');
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -105,6 +110,9 @@ export const EtfDashboard = memo(function EtfDashboard() {
             <div className="eyebrow mb-2">DESCRIPTION</div>
             <p className="text-sm leading-relaxed text-[var(--fg-1)] m-0">{etf.desc}</p>
           </div>
+
+          {/* Renders nothing for a fund with no Untracked holdings (issue #172). */}
+          <DeepFillControl status={deepFillStatus} onOpen={onOpenDeepFill} />
 
           <div className="flex justify-between items-center">
             <div className="relative group/stats flex gap-6 flex-wrap pt-3 border-t border-[var(--divider)]">

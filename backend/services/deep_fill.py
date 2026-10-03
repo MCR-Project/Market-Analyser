@@ -36,10 +36,10 @@ one longer - so it is a background job with progress, not a request:
   the wait as a failed attempt - instead of adding to the traffic that keeps the
   limit in place.
 
-`status()` is what the frontend polls: whether the feature is enabled, how many
-Untracked holdings the fund has and what share of its weight they are, the job's
-progress as done/total with its failures by name, and when the result was drawn and
-when it expires. It never raises for a fund with nothing to show - that is `idle`.
+`status()` is what the frontend polls: whether the feature is enabled, how long a
+result is kept (`ttlSeconds`), how many Untracked holdings the fund has and what
+share of its weight they are, the job's progress as done/total with its failures
+by name, and when the result was drawn and when it expires. It never raises for a fund with nothing to show - that is `idle`.
 
 Off unless `ALLOW_DEEP_FILL` is set (`config.deep_fill_enabled`): fetching ~450
 tickers is more than the live demo should be asked to do, so `start` raises
@@ -270,6 +270,9 @@ class DeepFill:
         return {
             "etfId": snapshot.pop("etfId"),
             "enabled": deep_fill_enabled(),
+            # How long a result is kept, known before there is one: the warning
+            # dialog (issue #172) states it before anyone presses start.
+            "ttlSeconds": deep_fill_ttl_seconds(),
             "state": snapshot.pop("state"),
             "untracked": self._untracked_summary(etf_id, tail),
             **snapshot,

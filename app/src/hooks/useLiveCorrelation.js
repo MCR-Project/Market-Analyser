@@ -1,5 +1,6 @@
 import { useFetch } from './useFetch';
 import { api } from '../utils/api';
+import { useDeepFillEpoch } from './useDeepFillEpoch';
 
 /** Shape returned before live data has arrived, or if the fetch never resolves. */
 const EMPTY = { matrix: {}, tickers: [], averages: {}, strongest: null, weakest: null, hub: null, edgeCount: 0, clusters: [] };
@@ -15,9 +16,11 @@ const EMPTY = { matrix: {}, tickers: [], averages: {}, strongest: null, weakest:
  * populated.
  */
 export function useLiveCorrelation(etfId) {
+  // The matrix covers the whole basket while the fund is deep-filled (issue #172).
+  const deepFillEpoch = useDeepFillEpoch(etfId);
   const { data, loading, error } = useFetch(
     (signal) => api.getCorrelation(etfId, '1y', { signal }),
-    [etfId],
+    [etfId, deepFillEpoch],
     { fallback: null }
   );
 

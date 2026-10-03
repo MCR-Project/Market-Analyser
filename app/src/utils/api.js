@@ -119,27 +119,36 @@ function attachSignal(entry, path, signal) {
  * different answers, so the body has to be part of the key that
  * deduplicates and caches them.
  */
-function requestKey(path, body) {
-  return body === undefined ? path : `POST ${path} ${JSON.stringify(body)}`;
+function requestKey(path, body, method) {
+  if (body !== undefined) return `POST ${path} ${JSON.stringify(body)}`;
+  return method === 'POST' ? `POST ${path}` : path;
 }
 
-async function fetchJson(path, { signal, body } = {}) {
-  const key = requestKey(path, body);
-  const cached = getCached(key);
+// `method: 'POST'` is for a POST with no body (the Deep-fill's start and
+// cancel, issue #172: the fund is in the path). `fresh` skips the 2s cache
+// both ways - it neither serves from it nor fills it - for a request whose
+// answer is a moving fact: a status being polled must not be answered with
+// the one it gave a second ago. Concurrent identical requests still share one
+// fetch either way.
+async function fetchJson(path, { signal, body, method, fresh = false } = {}) {
+  const key = requestKey(path, body, method);
+  const cached = fresh ? undefined : getCached(key);
   if (cached !== undefined) return cached;
 
   let entry = inFlight.get(key);
   if (!entry) {
     const controller = new AbortController();
     entry = { controller, refCount: 0, abortTimer: null };
-    const init = body === undefined
-      ? { signal: controller.signal }
-      : {
+    const init = body !== undefined
+      ? {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
           signal: controller.signal,
-        };
+        }
+      : method === 'POST'
+        ? { method: 'POST', signal: controller.signal }
+        : { signal: controller.signal };
     entry.promise = fetch(`${API_BASE}${path}`, init)
       .then(async (res) => {
         if (!res.ok) {
@@ -150,7 +159,7 @@ async function fetchJson(path, { signal, body } = {}) {
           throw new ApiError(res.status, path, retryAfter);
         }
         const data = await res.json();
-        cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+        if (!fresh) cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
         return data;
       })
       .finally(() => {
@@ -196,6 +205,20 @@ export const api = {
   // Freshness indicator (hooks/useFreshness.js). All three fields null, with
   // a 200, means there is nothing to report; a 503 is retried like any other.
   getFreshness: (opts = {}) => fetchJson('/freshness', opts),
+
+  // Deep-fill (issues #171, #172): where a fund stands with it, and the two
+  // presses that change that. All three are `fresh` - a status is a moving fact
+  // and a press must reach the server - and none is retried by the caller on a
+  // refusal: 403 (off on this version), 409 (another fund's job holds the
+  // slot) and 400 (this fund cannot be deep-filled) are 4xx, so
+  // isTransientError is false for them. The status poll lives in
+  // hooks/useDeepFill.js, which applies that rule itself.
+  getDeepFill: (etfId, { signal } = {}) =>
+    fetchJson(`/deep-fill/${encodeURIComponent(etfId)}`, { signal, fresh: true }),
+  startDeepFill: (etfId, { signal } = {}) =>
+    fetchJson(`/deep-fill/${encodeURIComponent(etfId)}`, { signal, method: 'POST', fresh: true }),
+  cancelDeepFill: (etfId, { signal } = {}) =>
+    fetchJson(`/deep-fill/${encodeURIComponent(etfId)}/cancel`, { signal, method: 'POST', fresh: true }),
 
   // Ticker lookup. Search is the as-you-type path and never leaves the
   // tracked universe; resolve is asked once, for a symbol somebody chose,

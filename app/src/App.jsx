@@ -41,16 +41,19 @@
  * the source of truth for both the fund and the open view, so a reload
  * or a shared link lands on exactly what the sender was looking at.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { useLiveEtf } from './hooks/useLiveEtf';
 import { useLiveCorrelation } from './hooks/useLiveCorrelation';
 import { useMeasurements } from './hooks/useMeasurements';
 import { useMeasurementWindow } from './hooks/useMeasurementWindow';
 import { useFundMetrics } from './hooks/useFundMetrics';
+import { useDeepFill } from './hooks/useDeepFill';
+import { deepFillControl } from './utils/deepFill';
 import { usePublishLiveStatus } from './hooks/useLiveStatus';
 import { EtfDashboard } from './components/etf/EtfDashboard';
 import { FundMetricsCard } from './components/etf/FundMetricsCard';
+import { DeepFillDialog } from './components/etf/DeepFillDialog';
 import { StockPopup } from './components/stock/StockPopup';
 import { ViewTabs } from './components/ui/ViewTabs';
 import { Loading } from './components/ui/Loading';
@@ -77,6 +80,7 @@ export default function App() {
   const [stockPopup, setStockPopup] = useState(null);
   const [measurePickerOpen, setMeasurePickerOpen] = useState(false);
   const [fundMetricsPickerOpen, setFundMetricsPickerOpen] = useState(false);
+  const [deepFillOpen, setDeepFillOpen] = useState(false);
 
   // This copy is unrelated to NetworkView's own edge-ρ threshold — it's
   // only used for the Header's live badge and StockPopup's peer
@@ -85,6 +89,25 @@ export default function App() {
   const { window: measurementWindow, setWindow: setMeasurementWindow } = useMeasurementWindow();
   const measurements = useMeasurements(etfId, measurementWindow);
   const fundMetrics = useFundMetrics(etfId);
+
+  // The Deep-fill (issue #172) lives here, above the `!etf` gate below, because
+  // its completion makes every fund-level request run again (store/deepFillEpoch)
+  // and `etf` is null while that one does: owned by the card it is drawn on, the
+  // job's state and an open dialog would be thrown away with it.
+  const deepFill = useDeepFill(etfId);
+  // Stable, so the status ticking every couple of seconds while a job runs does
+  // not hand the memoised fund card a new function each time as well.
+  const openDeepFill = useCallback(() => setDeepFillOpen(true), []);
+  // An open dialog whose state has nothing to say (the status went away, or the
+  // fund has nothing untracked) is closed rather than left to reappear on its own
+  // when a later state has something to show. Adjusted during render, as below.
+  if (deepFillOpen && deepFillControl(deepFill.status).kind === 'hidden') {
+    setDeepFillOpen(false);
+  }
+
+  // Which of the listed holdings the table should mark Untracked: the ones the
+  // backend names while the fund is deep-filled, none otherwise.
+  const untracked = useMemo(() => new Set(etf?.untracked ?? []), [etf]);
 
   // The shared Header shows the connectivity badge, but this is the page
   // that knows whether anything actually loaded.
@@ -99,6 +122,7 @@ export default function App() {
   if (etfId !== prevEtfId) {
     setPrevEtfId(etfId);
     setSelected(null);
+    setDeepFillOpen(false);
   }
 
   // If the manifest fetch failed earlier (e.g. the page loaded before the
@@ -140,6 +164,7 @@ export default function App() {
         onOpenMeasurePicker={openMeasurePicker}
         measurementWindow={measurementWindow}
         onMeasurementWindowChange={setMeasurementWindow}
+        untracked={untracked}
       />
     ),
     Matrix: <MatrixView selected={selected} onSelect={setSelected} />,
@@ -176,7 +201,7 @@ export default function App() {
             <>
               <div className="flex-none flex flex-col 2xl:flex-row 2xl:items-stretch gap-5 mb-5">
                 <div className="2xl:flex-[2] min-w-0 flex flex-col">
-                  <EtfDashboard />
+                  <EtfDashboard deepFillStatus={deepFill.status} onOpenDeepFill={openDeepFill} />
                 </div>
                 {/* Renders nothing when no fund metric is registered, and
                     the ETF card then takes the whole row. */}
@@ -194,6 +219,18 @@ export default function App() {
 
       {stockPopup && tickers.includes(stockPopup) && (
         <StockPopup ticker={stockPopup} etf={etf} tickers={tickers} weightOf={weightOf} onClose={() => setStockPopup(null)} onNavigate={setStockPopup} corrMatrix={corrData.matrix} corrLoading={corrData.loading} corrIsLive={corrData.isLive} etfLoading={etfLoading} etfIsLive={etfLive} />
+      )}
+
+      {deepFillOpen && deepFill.status && (
+        <DeepFillDialog
+          etfId={etfId}
+          status={deepFill.status}
+          pending={deepFill.pending}
+          actionError={deepFill.actionError}
+          onStart={deepFill.start}
+          onCancel={deepFill.cancel}
+          onClose={() => setDeepFillOpen(false)}
+        />
       )}
 
       {measurePickerOpen && (
