@@ -116,7 +116,7 @@ export function FullNetwork({ fund, positions, ranked, threshold, selected, onSe
     const named = [];
     for (let i = 0; i < n; i++) {
       const x = px(i), y = py(i);
-      const r = Math.max(1.8, radii[i] * s);
+      const r = Math.max(2.5, radii[i] * s);
       if (x < -r || x > size.width + r || y < -r || y > size.height + r) continue;
 
       const isSel = i === selectedIdx;

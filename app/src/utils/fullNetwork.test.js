@@ -40,6 +40,9 @@ describe('nodeRadius', () => {
     expect(nodeRadius(1)).toBeLessThan(nodeRadius(7));
     expect(nodeRadius(500)).toBe(nodeRadius(8));
     expect(nodeRadius(0)).toBeGreaterThan(0);
+    // Big enough that the lightest holding is a visible circle, not a speck, once zoomed in.
+    expect(nodeRadius(0)).toBeGreaterThanOrEqual(8);
+    expect(nodeRadius(8)).toBeGreaterThanOrEqual(30);
   });
 });
 

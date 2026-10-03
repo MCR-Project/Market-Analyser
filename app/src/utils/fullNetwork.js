@@ -43,7 +43,7 @@ export const NETWORK_MAX_SCALE = 12;
 const EPS = 1e-4;
 // Node size by weight: the normal network's exponential (utils NetworkView), so a
 // 7% holding is dramatically bigger than a 2% one, in world units here.
-const MIN_R = 4, MAX_R = 20, REF_WEIGHT = 8, GROWTH = 4;
+const MIN_R = 8, MAX_R = 34, REF_WEIGHT = 8, GROWTH = 4;
 
 export function nodeRadius(weightPct) {
   const t = Math.min(1, Math.max(0, weightPct) / REF_WEIGHT);
