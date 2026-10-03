@@ -76,6 +76,7 @@ export const TableView = memo(function TableView({
   tickers, onSelectStock,
   measurements, onOpenMeasurePicker,
   measurementWindow, onMeasurementWindowChange,
+  untracked,
 }) {
   const [query, setQuery] = useState('');
   const [filterSector, setFilterSector] = useState('');
@@ -128,14 +129,23 @@ export const TableView = memo(function TableView({
       const mVals = measurements.getTickerValues(t);
       const mMdx = measurements.getTickerMdx(t);
       const mReason = measurements.getTickerReason(t);
-      return { ticker: t, name: stock.name, sector: stock.sector, mVals, mMdx, mReason };
+      // A holding with no stored description (an Untracked one the weekly job has
+      // not reached, issue #172) comes back with a null name and sector: the
+      // ticker and "Unknown" stand in, so a search never meets a null.
+      return {
+        ticker: t,
+        name: stock.name ?? t,
+        sector: stock.sector ?? 'Unknown',
+        untracked: untracked?.has(t) ?? false,
+        mVals, mMdx, mReason,
+      };
     });
     // Deliberately narrowed to the functions actually called here, not the
     // whole `measurements` object — that object's other fields (e.g.
     // loading) change far more often and would invalidate this memo for
     // no reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickers, stockMap, measurements.getTickerValues, measurements.getTickerMdx, measurements.getTickerReason]);
+  }, [tickers, stockMap, untracked, measurements.getTickerValues, measurements.getTickerMdx, measurements.getTickerReason]);
 
   // Apply filters
   const filtered = useMemo(() => {
@@ -309,7 +319,13 @@ export const TableView = memo(function TableView({
                 <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
                   <div className="font-[var(--font-mono)] text-[15px] font-bold text-[var(--accent)] tracking-tight">{row.ticker}</div>
                   <div className="text-sm font-semibold text-[var(--fg)] whitespace-nowrap overflow-hidden text-ellipsis">{row.name}</div>
-                  <span className="self-start text-[11px] text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full px-2.5 py-0.5 mt-0.5 whitespace-nowrap">{row.sector}</span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="self-start text-[11px] text-[var(--fg-2)] bg-[var(--bg-3)] rounded-full px-2.5 py-0.5 whitespace-nowrap">{row.sector}</span>
+                    {/* Listed with no prices of its own until the fund is deep-filled (ADR 0005). */}
+                    {row.untracked && (
+                      <span title="No prices are stored for this holding; its figures come from a Deep-fill" className="text-[11px] text-[var(--warning)] border border-[var(--warning-ring)] rounded-full px-2 py-0.5 whitespace-nowrap">Untracked</span>
+                    )}
+                  </div>
                 </div>
               </MetricSlot>
 
