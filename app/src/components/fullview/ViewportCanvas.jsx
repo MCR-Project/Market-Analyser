@@ -10,6 +10,9 @@
  * drawn in; because `draw` is a `useCallback` over everything the picture depends on
  * (selection, hover, threshold), a repaint is exactly "its identity changed".
  *
+ * Always a square, centred in the room it is given (the smaller of that room's width
+ * and height).
+ *
  * Sized by its container, never by what is drawn (the canvas is absolutely
  * positioned), for the reason `useElementSize` gives: drawing at the measured size
  * must not be able to grow the box it was measured from.
@@ -28,7 +31,12 @@ export function ViewportCanvas({
   content, areaFor, limitsFor, pad = 0, resetKey, colors, draw, onHover, onTap,
   cursor, label, children,
 }) {
-  const [boxRef, size] = useElementSize();
+  const [boxRef, box] = useElementSize();
+  // A square, the larger the better: the side is the smaller of the room's two. A
+  // matrix is square by nature and a graph reads better in an even box, and a wide
+  // window then shows the picture at its tallest instead of stretched sideways.
+  const side = Math.min(box.width, box.height);
+  const size = useMemo(() => ({ width: side, height: side }), [side]);
   // The element is held twice: in state, so the viewport hook re-attaches its
   // listeners when it mounts, and in a ref, which the paint below may write to.
   const [canvas, setCanvas] = useState(null);
@@ -63,20 +71,25 @@ export function ViewportCanvas({
 
   return (
     <div ref={boxRef} className="relative flex-1 min-h-0 overflow-hidden">
-      <canvas
-        ref={attachCanvas}
-        tabIndex={0}
-        role="img"
-        aria-label={label}
-        className="absolute inset-0 block w-full h-full touch-none outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
-        style={{ cursor: dragging ? 'grabbing' : (cursor ?? 'grab') }}
-      />
-      <div className="absolute bottom-2 right-2 flex gap-1">
-        <ZoomButton onClick={zoomIn} title="Zoom in (+)">+</ZoomButton>
-        <ZoomButton onClick={zoomOut} title="Zoom out (−)">−</ZoomButton>
-        <ZoomButton onClick={reset} disabled={atFit} title="Show everything (0)">Fit</ZoomButton>
+      <div
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)]"
+        style={{ width: side, height: side }}
+      >
+        <canvas
+          ref={attachCanvas}
+          tabIndex={0}
+          role="img"
+          aria-label={label}
+          className="absolute inset-0 block w-full h-full touch-none outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
+          style={{ cursor: dragging ? 'grabbing' : (cursor ?? 'grab') }}
+        />
+        <div className="absolute bottom-2 right-2 flex gap-1">
+          <ZoomButton onClick={zoomIn} title="Zoom in (+)">+</ZoomButton>
+          <ZoomButton onClick={zoomOut} title="Zoom out (−)">−</ZoomButton>
+          <ZoomButton onClick={reset} disabled={atFit} title="Show everything (0)">Fit</ZoomButton>
+        </div>
+        {children}
       </div>
-      {children}
     </div>
   );
 }
