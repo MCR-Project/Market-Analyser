@@ -11,7 +11,8 @@ Two kinds of thing, deliberately kept apart:
 - **A fund's result** - which Untracked holdings it has (and their weights, taken
   when the job started, so reading the fund never needs the database again), which
   of them have data and which failed and why, and what was derived from them once
-  (the correlation matrix). A fund is *deep-filled* exactly while a result for it
+  (the correlation matrix, and the compact copy of it a Full view serves - issue #173).
+  A fund is *deep-filled* exactly while a result for it
   exists. It expires when the oldest ticker it was built from does, and at most
   `DEEP_FILL_MAX_FUNDS` results are held: the one finished longest ago goes first,
   taking with it the tickers no remaining result uses.
@@ -225,6 +226,21 @@ class DeepFillStore:
             result = self._funds.get(etf_id)
             if result is not None:
                 result.derived[name] = value
+
+    def full_view(self, etf_id: str) -> dict | None:
+        """What a Full view is drawn from, or None when there is none to draw: the
+        fund is not deep-filled (never, expired, or its job is still running - a
+        partial tail has no result yet), or the job finished without being able to
+        derive one. `asOf` and `expiresAt` are the Deep-fill's own, so the page says
+        exactly what `GET /api/deep-fill/{id}` does. A copy at the top level, since
+        a route may add to what it gets back."""
+        with self._lock:
+            self._purge()
+            result = self._funds.get(etf_id)
+            held = result.derived.get("fullView") if result is not None else None
+            if held is None:
+                return None
+            return {"etfId": etf_id, "asOf": iso(result.as_of), "expiresAt": iso(result.expires_at), **held}
 
     def derived_correlation(self, tickers: list[str], period: str) -> dict | None:
         """The correlation matrix a Deep-fill finished with, if `tickers` in this

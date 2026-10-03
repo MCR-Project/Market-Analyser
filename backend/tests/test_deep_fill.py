@@ -1156,5 +1156,153 @@ class ReviewReadTests(ReadCase):
         self.assertEqual(after["trackedWeightCoverage"], 50.0)
 
 
+# ── The Full view's stored result ─────────────────────────────────────────────
+
+class FullViewTests(ReadCase):
+    """`GET /api/deep-fill/{id}/full-view` (issue #173): the whole-basket matrix and
+    clusters the Deep-fill finished with, in a payload bounded for a ~500-holding
+    fund, read back and never computed. A 404 - never retried - says there is no
+    result to draw: never deep-filled, expired, or still running (a partial
+    picture is not served)."""
+
+    URL = "/api/deep-fill/FAKE/full-view"
+    ALL = ["AAA", "BBB"] + ReadCase.TAIL
+
+    def test_a_deep_filled_fund_answers_with_its_whole_basket(self):
+        self.run_job()
+        status = deep_fill.status("FAKE")
+
+        body = self.get(self.URL)
+
+        self.assertEqual(body["etfId"], "FAKE")
+        self.assertEqual(body["period"], "1y")
+        self.assertEqual(body["tickers"], self.ALL)
+        self.assertEqual(body["weights"], [30.0, 20.0] + [0.5] * 6)
+        self.assertEqual(body["excluded"], {})
+        # The Deep-fill's own times, not the time of the request.
+        self.assertEqual(body["asOf"], status["asOf"])
+        self.assertEqual(body["expiresAt"], status["expiresAt"])
+
+    def test_the_matrix_is_the_one_the_correlation_endpoint_serves_rounded_to_two_places(self):
+        self.run_job()
+        full = self.get(self.URL)
+        matrix = self.get("/api/correlation/FAKE")
+
+        self.assertEqual(full["correlation"]["decimals"], 2)
+        rows = full["correlation"]["triangle"]
+        # Lower triangle without the diagonal: row i is the i pairs to the
+        # tickers before it, so 28 numbers carry all of an 8 x 8 matrix.
+        self.assertEqual([len(row) for row in rows], list(range(len(self.ALL))))
+        for i, a in enumerate(self.ALL):
+            for j in range(i):
+                self.assertEqual(rows[i][j], round(matrix["matrix"][a][self.ALL[j]], 2))
+        self.assertEqual(full["clusters"], matrix["clusters"])
+        self.assertEqual(
+            full["averages"], [matrix["averages"][t] for t in self.ALL]
+        )
+
+    def test_a_pair_with_no_correlation_is_null_never_zero_and_a_small_negative_is_not_minus_zero(self):
+        from services import full_view
+
+        matrix = {
+            "A": {"A": 1.0, "B": None, "C": -0.001},
+            "B": {"A": None, "B": 1.0, "C": 0.4549},
+            "C": {"A": -0.001, "B": 0.4549, "C": 1.0},
+        }
+        built = full_view.build(
+            [["A", 3.0], ["B", 2.0], ["C", 1.0], ["D", 0.5]],
+            {"matrix": matrix, "tickers": ["A", "B", "C"], "averages": {"A": -0.001, "B": 0.4549, "C": 0.2269},
+             "clusters": []},
+            {"D": "it could not be fetched"}, "1y",
+        )
+
+        self.assertEqual(built["correlation"]["triangle"], [[], [None], [0.0, 0.45]])
+        self.assertEqual(str(built["correlation"]["triangle"][2][0]), "0.0")   # not "-0.0"
+        self.assertEqual(built["excluded"], {"D": "it could not be fetched"})
+
+    def test_it_is_read_back_never_computed_and_never_touches_the_database(self):
+        self.run_job()
+        expected = self.get(self.URL)
+        reads = len(self.db.reads)
+
+        with patch("services.market_data._price_frame_bundle", side_effect=AssertionError("recomputed")),                 patch("services.market_data.compute_correlation_matrix", side_effect=AssertionError("recomputed")),                 patch("services.market_data.cache", TTLCache()):
+            again = self.get(self.URL)
+
+        self.assertEqual(again, expected)
+        self.assertEqual(len(self.db.reads), reads, "serving the stored result read the database")
+        self.assertNothingWritten()
+
+    def test_a_ticker_the_job_could_not_fetch_is_named_with_its_reason_and_not_drawn(self):
+        self.yahoo.missing = {"U3"}
+        self.run_job()
+
+        body = self.get(self.URL)
+
+        self.assertNotIn("U3", body["tickers"])
+        self.assertEqual(len(body["weights"]), len(body["tickers"]))
+        self.assertEqual(list(body["excluded"]), ["U3"])
+        self.assertIn("no price history", body["excluded"]["U3"])
+
+    def test_a_fund_never_deep_filled_is_a_404(self):
+        response = client.get(self.URL)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("not deep-filled", response.json()["detail"])
+
+    def test_a_fund_with_a_job_still_running_is_a_404_not_a_partial_picture(self):
+        entered, release = threading.Event(), threading.Event()
+        self.yahoo.hook = lambda symbols: (entered.set(), release.wait(5))
+        self.addCleanup(release.set)
+        deep_fill.start("FAKE")
+        entered.wait(5)
+
+        self.assertEqual(client.get(self.URL).status_code, 404)
+        release.set()
+
+    def test_after_the_ttl_it_is_a_404_again(self):
+        self.run_job()
+        self.assertEqual(client.get(self.URL).status_code, 200)
+
+        self.clock.advance(3601)
+
+        self.assertEqual(client.get(self.URL).status_code, 404)
+
+    def test_the_fund_is_upper_cased_like_every_other_route(self):
+        self.run_job()
+
+        self.assertEqual(client.get("/api/deep-fill/fake/full-view").status_code, 200)
+
+    def test_a_server_with_deep_fill_off_has_nothing_to_show(self):
+        with patch.dict(os.environ, {"ALLOW_DEEP_FILL": "false"}):
+            response = client.get(self.URL)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_deep_fill_whose_matrix_could_not_be_derived_has_no_full_view(self):
+        """If the tracked half could not be read when the job finished, nothing
+        was held (see `_derive`) and each read computes for itself - but a Full
+        view is only ever read back, so there is none to open."""
+        with patch("services.market_data.compute_correlation_matrix", side_effect=DataUnavailable("down")):
+            self.run_job()
+
+        self.assertEqual(deep_fill.status("FAKE")["state"], "ready")
+        self.assertEqual(client.get(self.URL).status_code, 404)
+
+    def test_a_payload_that_cannot_be_built_leaves_the_fund_deep_filled_without_a_full_view(self):
+        """The result is already held when the payload is built, so a failure there
+        must not turn a finished Deep-fill into a `failed` job."""
+        with patch("services.full_view.build", side_effect=KeyError("boom")):
+            self.run_job()
+
+        self.assertEqual(deep_fill.status("FAKE")["state"], "ready")
+        self.assertEqual(client.get(self.URL).status_code, 404)
+        self.assertEqual(self.get("/api/correlation/FAKE")["tickers"], self.ALL)
+
+    def test_a_second_fund_has_its_own_result(self):
+        self.run_job()
+
+        self.assertEqual(client.get("/api/deep-fill/OTHER/full-view").status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

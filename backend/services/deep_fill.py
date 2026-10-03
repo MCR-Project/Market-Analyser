@@ -60,7 +60,7 @@ from config import (
     deep_fill_enabled,
     deep_fill_ttl_seconds,
 )
-from services import deep_fill_store
+from services import deep_fill_store, full_view
 from services import market_data
 from services.deep_fill_store import FundResult, TickerData
 
@@ -380,6 +380,20 @@ class DeepFill:
                 etf_id, "correlation",
                 {"tickers": tickers, "period": CORRELATION_PERIOD, "value": matrix},
             )
+            # What the Full view (issue #173) is drawn from, built here so opening
+            # it reads and computes nothing.
+            result = deep_fill_store.store.fund(etf_id)
+            try:
+                payload = full_view.build(
+                    holdings, matrix, result.failures if result is not None else {}, CORRELATION_PERIOD
+                )
+            except Exception:
+                # The fund is already deep-filled and every read has its matrix; only
+                # the Full view is lost. Letting this escape would end a finished job as
+                # "crashed" over a page nobody has opened yet.
+                log.exception("Deep-fill of %s finished but its Full view could not be built", etf_id)
+                return
+            deep_fill_store.store.attach_derived(etf_id, "fullView", payload)
 
     # ── Fetching ──────────────────────────────────────────────────────────────
 
