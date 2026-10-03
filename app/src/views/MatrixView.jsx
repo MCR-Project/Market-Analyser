@@ -40,7 +40,7 @@ import { useLiveSectors } from '../hooks/useLiveSectors';
 import { useMatrixOrder } from '../hooks/useMatrixOrder';
 import { cellColor } from '../utils/correlation';
 import { fmtCorr } from '../utils/format';
-import { orderMatrix } from '../utils/matrixOrder';
+import { orderMatrix, ORDER_OPTIONS, WITHIN_OPTIONS } from '../utils/matrixOrder';
 import { useElementSize } from '../hooks/useElementSize';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
@@ -66,16 +66,6 @@ const CELL_MIN_H = 30, CELL_MAX_H = 60;
  *  — otherwise a grid sized to fit exactly would overflow (see above). */
 const SECTION_LABEL_H = 20;
 const SECTION_GAP = 8;
-
-const ORDER_OPTIONS = [
-  { value: 'cluster', label: 'Cluster' },
-  { value: 'alpha', label: 'A–Z' },
-  { value: 'weight', label: 'Weight' },
-];
-const WITHIN_OPTIONS = [
-  { value: 'weight', label: 'Weight' },
-  { value: 'alpha', label: 'A–Z' },
-];
 
 const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value));
 

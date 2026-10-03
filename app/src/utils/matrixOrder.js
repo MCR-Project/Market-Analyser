@@ -50,6 +50,18 @@ export const MATRIX_WITHIN = ['weight', 'alpha'];
 export const DEFAULT_ORDER = 'cluster';
 export const DEFAULT_WITHIN = 'weight';
 
+/** The segmented controls' options, for the tab and the Full view alike (issue #173),
+ *  so the two cannot word the same choice differently. */
+export const ORDER_OPTIONS = [
+  { value: 'cluster', label: 'Cluster' },
+  { value: 'alpha', label: 'A–Z' },
+  { value: 'weight', label: 'Weight' },
+];
+export const WITHIN_OPTIONS = [
+  { value: 'weight', label: 'Weight' },
+  { value: 'alpha', label: 'A–Z' },
+];
+
 const byAlpha = (a, b) => a.localeCompare(b);
 
 /**
