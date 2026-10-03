@@ -1600,9 +1600,12 @@ whose ρ is at or above the **Link Threshold**, which starts at 0.7 and is kept 
 URL (`?threshold=`, 0.2–0.95). Changing it changes which links are drawn and nothing
 else: no node moves and no request is made. The layout is worked out once when the page
 opens, in a web worker so the tab stays responsive (about a second for 500 holdings),
-by the same force simulation as the normal network; its pull is floored for light
-holdings, because over 500 holdings the tail's pull would otherwise be lost and the
-graph would settle into a ring with no groups. A node's ticker is written once the node
+by the same force simulation as the normal network, with two changes to how nodes
+attract. A link's pull is **exponential in ρ** (nothing at 0.28, steeply more above),
+so strong links are extremely strong and weak ones count for little; the normal
+network's pull is linear. And the pull is floored for light holdings, because over 500
+holdings the tail's pull would otherwise be lost and the graph would settle into a
+ring with no groups. Repulsion, which keeps nodes apart, is the normal network's. A node's ticker is written once the node
 is big enough on screen to carry it; hovering shows its weight, cluster and how many
 links it has at the threshold, and clicking isolates its links and dims the rest.
 

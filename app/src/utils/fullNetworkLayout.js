@@ -23,8 +23,21 @@
  * reads every ρ the matrix has, so moving the slider moves no node.
  */
 
-import { forceLayout } from './forceLayout';
+import { forceLayout, exponentialPull } from './forceLayout';
 import { NETWORK_WORLD, NETWORK_MARGIN } from './fullNetwork';
+
+/**
+ * **Attraction is exponential in ρ.** The normal network pulls in proportion to the
+ * amount of ρ over 0.28; over ~500 holdings that lets thousands of middling links
+ * add up to as much as a few strong ones, and the strong ones are what a reader wants
+ * to see grouped. So a link's pull bends upward: `PULL_STEEPNESS` says how fast, and
+ * `PULL_AT_ONE` how hard a perfect correlation pulls (the linear pull's own top is
+ * 0.72). Only attraction changes — repulsion, the one that keeps nodes apart, is the
+ * simulation's own and untouched.
+ */
+export const PULL_STEEPNESS = 6;
+export const PULL_AT_ONE = 3;
+const pull = exponentialPull({ steepness: PULL_STEEPNESS, atOne: PULL_AT_ONE });
 
 /** Share of the heaviest holding's weight every holding is given for the layout. */
 export const LAYOUT_WEIGHT_FLOOR = 0.35;
@@ -42,6 +55,7 @@ export function layoutFullNetwork({ corr, n, weights }) {
       return Number.isNaN(v) ? null : v;
     },
     aspect: NETWORK_WORLD.w / NETWORK_WORLD.h,
+    pull,
   });
   const xs = new Float32Array(n);
   const ys = new Float32Array(n);

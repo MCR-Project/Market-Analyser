@@ -197,6 +197,30 @@ describe('layoutFullNetwork', () => {
     expect(within / w).toBeLessThan((across / c) * 0.6);
   }, 30000);
 
+  it('lets strong links dominate: a tight core is much tighter than a loosely correlated group', () => {
+    // Attraction is exponential in ρ, so a 0.92 pulls far harder than a 0.45 rather than
+    // twice as hard. With the linear pull this ratio is 0.76; the exponential gives 0.64.
+    const m = 30;
+    const rho = (i, j) => {
+      const a = Math.min(i, j), b = Math.max(i, j);
+      if (b < 6) return 0.92;
+      if (a >= 6 && b < 16) return 0.45;
+      if (a < 6 && b >= 6 && b < 16) return 0.32;
+      return 0.05;
+    };
+    const mixed = new Float32Array(m * m);
+    for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) mixed[i * m + j] = i === j ? 1 : rho(i, j);
+
+    const { xs, ys } = layoutFullNetwork({ corr: mixed, n: m, weights: Array(m).fill(1) });
+
+    const mean = (from, to) => {
+      let sum = 0, count = 0;
+      for (let i = from; i < to; i++) for (let j = i + 1; j < to; j++) { sum += Math.hypot(xs[i] - xs[j], ys[i] - ys[j]); count++; }
+      return sum / count;
+    };
+    expect(mean(0, 6) / mean(6, 16)).toBeLessThan(0.7);
+  });
+
   it('is the same every time it is asked, so a reload does not rearrange the graph', () => {
     const first = layoutFullNetwork({ corr, n, weights });
     const second = layoutFullNetwork({ corr, n, weights });

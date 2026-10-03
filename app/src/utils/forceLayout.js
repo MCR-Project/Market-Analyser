@@ -26,15 +26,42 @@
 
 export const DEFAULT_ITERATIONS = 400;
 
+/** ρ at or under this pulls nothing, in every pull below. */
+export const PULL_FLOOR = 0.28;
+
+/**
+ * How hard a pair of ρ pulls, before it is scaled by weight and distance. The default
+ * and the normal network's: the amount of ρ over the floor, so doubling the excess
+ * doubles the pull.
+ */
+export function linearPull(rho) {
+  return Math.max(0, rho - PULL_FLOOR);
+}
+
+/**
+ * An exponential pull, for a graph where strong links should dominate: nothing at the
+ * floor, `atOne` at a perfect correlation, and between them a curve that bends upward
+ * with `steepness`, so a ρ of 0.4 pulls a small fraction of what a 0.9 does rather
+ * than the 0.12-to-0.62 the linear pull gives. Normalised so `atOne` is exactly what
+ * ρ = 1 pulls, whatever the steepness: it sets the strength at the top, `steepness`
+ * says how little is left below it.
+ */
+export function exponentialPull({ steepness, atOne }) {
+  const span = 1 - PULL_FLOOR;
+  const scale = atOne / Math.expm1(steepness * span);
+  return (rho) => (rho <= PULL_FLOOR ? 0 : scale * Math.expm1(steepness * (rho - PULL_FLOOR)));
+}
+
 /**
  * @param {object} args
  * @param {number[]} args.weights                          fund weight of each node
  * @param {(i: number, j: number) => number | null} args.correlation
  * @param {number} args.aspect                             box width ÷ height
  * @param {number} [args.iterations]
+ * @param {(rho: number) => number} [args.pull]       attraction for a ρ; `linearPull` by default
  * @returns {Array<{x: number, y: number}>}               unit positions, in node order
  */
-export function forceLayout({ weights, correlation, aspect, iterations = DEFAULT_ITERATIONS }) {
+export function forceLayout({ weights, correlation, aspect, iterations = DEFAULT_ITERATIONS, pull = linearPull }) {
   const n = weights.length;
   const maxWeight = Math.max(...weights, 1e-6);
 
@@ -73,10 +100,11 @@ export function forceLayout({ weights, correlation, aspect, iterations = DEFAULT
         disp[jj].x -= ux * rep; disp[jj].y -= uy * rep;
 
         // Attraction: proportional to distance, scaled by how correlated
-        // the pair is (only correlations above 0.28 contribute, and the
-        // amount over 0.28 is the strength). Uncorrelated/unknown pairs
-        // (weight 0) get no extra pull, so they settle purely on repulsion.
-        const w = Math.max(0, (correlation(i, jj) ?? 0) - 0.28);
+        // the pair is (`pull` says how: by default only correlations above
+        // 0.28 contribute, and the amount over 0.28 is the strength).
+        // Uncorrelated/unknown pairs (weight 0) get no extra pull, so they
+        // settle purely on repulsion - which nothing here changes.
+        const w = pull(correlation(i, jj) ?? 0);
         // Value factor: average of each holding's weight relative to the
         // fund's largest position (0..1). A pair involving a big holding
         // pulls harder even if its partner is small — mirroring how a

@@ -474,7 +474,11 @@ come with it:
   `fullNetworkLayout` in `workers/` and falls back to the page's thread if a worker
   cannot be made. The Link Threshold only chooses which links are drawn: the links worth
   drawing are ranked once and a threshold is a binary search of that list, so the slider
-  moves no node and asks for nothing. The weight that scales a pull is **floored**
+  moves no node and asks for nothing. **Attraction is exponential in ρ**
+  (`exponentialPull` in `forceLayout.js`, `PULL_STEEPNESS` / `PULL_AT_ONE` in
+  `fullNetworkLayout.js`): the simulation takes the pull as an option and defaults to
+  the linear one, so the normal network does not move; repulsion is untouched. The
+  weight that scales a pull is **floored**
   (`LAYOUT_WEIGHT_FLOOR`): unfloored, the tail's pull is lost to repulsion over ~500
   holdings and the graph is a ring with no groups in it. `utils/layout.test.js` pins that
   the normal graph, which shares `forceLayout.js`, still lands where it always did.
