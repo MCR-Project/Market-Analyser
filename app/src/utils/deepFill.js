@@ -81,6 +81,25 @@ export function chipLabel(status) {
   return `Deep-filling ${done}/${total}`;
 }
 
+/**
+ * The line beside the button, or null for a state with no button (hidden, running
+ * - the chip says it - and ready). Each branch reads only the fields its own
+ * state has: `other` exists only for `busy`, `done`/`total` only for `resume`.
+ */
+export function controlCaption(status) {
+  const control = deepFillControl(status);
+  switch (control.kind) {
+    case 'start': {
+      const { count } = status.untracked;
+      return `${count} untracked ${count === 1 ? 'holding' : 'holdings'}`;
+    }
+    case 'resume': return `${control.done} of ${control.total} fetched`;
+    case 'disabled': return 'disabled on this version';
+    case 'busy': return `${control.other.etfId} is being filled`;
+    default: return null;
+  }
+}
+
 /** The note that replaces the button while the fund is deep-filled. */
 export function readyNote(status, format) {
   const moment = formatMoment(status.asOf, format);

@@ -10,7 +10,7 @@
  * the note are how to get back to it after closing it.
  */
 import { memo } from 'react';
-import { deepFillControl, chipLabel, readyNote } from '../../utils/deepFill';
+import { deepFillControl, chipLabel, readyNote, controlCaption } from '../../utils/deepFill';
 
 const BASE = 'flex-none flex items-center gap-1.5 font-[var(--font-mono)] text-[11px] rounded-full px-2.5 py-1 cursor-pointer border transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
 
@@ -36,20 +36,12 @@ export const DeepFillControl = memo(function DeepFillControl({ status, onOpen })
     );
   }
 
-  const { count } = status.untracked;
-  const caption = {
-    start: `${count} untracked ${count === 1 ? 'holding' : 'holdings'}`,
-    resume: `${control.done} of ${control.total} fetched`,
-    disabled: 'disabled on this version',
-    busy: `${control.other.etfId} is being filled`,
-  }[control.kind];
-
   return (
     <div className="flex items-center gap-2.5 flex-wrap">
       <button onClick={onOpen} className={`${BASE} bg-transparent border-[var(--accent-ring)] text-[var(--accent)] hover:bg-[var(--accent-soft)]`}>
         {control.kind === 'resume' ? 'Resume Deep-fill' : 'Deep-fill'}
       </button>
-      <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)]">{caption}</span>
+      <span className="font-[var(--font-mono)] text-[11px] text-[var(--fg-3)]">{controlCaption(status)}</span>
     </div>
   );
 });

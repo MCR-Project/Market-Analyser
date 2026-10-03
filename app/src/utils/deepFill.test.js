@@ -3,6 +3,7 @@ import {
   deepFillControl,
   deepFillPhase,
   chipLabel,
+  controlCaption,
   readyNote,
   deepFillDialog,
   describeActionError,
@@ -113,6 +114,40 @@ test('a pending cancel is stopping, whatever else is true', () => {
 
 test('the chip names the progress', () => {
   expect(chipLabel(running(212, 457))).toBe('Deep-filling 212/457');
+});
+
+// ── The caption beside the button ────────────────────────────────────────────
+//
+// Every state that has a button gets a caption, and each is computed from only
+// the fields its own state has: a lookup table built from all of them at once
+// read `other` on an idle fund and took the page down.
+
+test('every state that offers a button has a caption, and none throws for lacking fields of another state', () => {
+  const states = {
+    start: status(),
+    resume: status({ state: 'cancelled', progress: { done: 150, total: 457, failed: [] } }),
+    disabled: status({ enabled: false }),
+    busy: status({ running: { etfId: 'QQQ', done: 10, total: 90 } }),
+  };
+  for (const [kind, s] of Object.entries(states)) {
+    expect(deepFillControl(s).kind).toBe(kind);
+    expect(() => controlCaption(s)).not.toThrow();
+    expect(typeof controlCaption(s)).toBe('string');
+  }
+});
+
+test('the captions say what is true of that state', () => {
+  expect(controlCaption(status())).toBe('457 untracked holdings');
+  expect(controlCaption(status({ untracked: { count: 1, weight: 0.5, weightShare: 0.1 } }))).toBe('1 untracked holding');
+  expect(controlCaption(status({ state: 'cancelled', progress: { done: 150, total: 457, failed: [] } }))).toBe('150 of 457 fetched');
+  expect(controlCaption(status({ enabled: false }))).toBe('disabled on this version');
+  expect(controlCaption(status({ running: { etfId: 'QQQ', done: 10, total: 90 } }))).toBe('QQQ is being filled');
+});
+
+test('a state with no button has no caption', () => {
+  expect(controlCaption(running(1, 457))).toBeNull();
+  expect(controlCaption(ready())).toBeNull();
+  expect(controlCaption(null)).toBeNull();
 });
 
 // ── The ready note ───────────────────────────────────────────────────────────
