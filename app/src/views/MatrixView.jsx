@@ -46,6 +46,7 @@ import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { FullViewLink } from '../components/etf/FullViewLink';
 
 /** Row-label column width and header-row height, both fixed — only the
  *  cells grow. The header row is given exactly HEADER_H (style below), not
@@ -138,6 +139,9 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
         {order === 'cluster' && (
           <SegmentedControl label="within" options={WITHIN_OPTIONS} value={within} onChange={setWithin} />
         )}
+        {/* Only while the fund is deep-filled (the backend adds `deepFill` then): the
+            whole-fund picture is drawn from that result (issue #173). */}
+        {etf?.deepFill && <FullViewLink etfId={etfId} kind="matrix" />}
       </div>
 
       {/* This view fetches its own copy of the ETF (see useLiveEtf), so it

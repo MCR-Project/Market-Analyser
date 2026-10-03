@@ -4,6 +4,8 @@
 //   /                        → redirect to the default ETF
 //   /etf/:etfId              → dashboard, Table view
 //   /etf/:etfId/:view        → dashboard, named view (table|matrix|network)
+//   /etf/:etfId/full/:kind   → the Full view of a deep-filled fund's matrix or
+//                              network, a page of its own (issue #173)
 //   /docs                    → measurement documentation index
 //   /docs/:measurementId     → one measurement's documentation
 //   /portfolio               → the portfolio library
@@ -22,6 +24,7 @@ import App from './App';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortfolioPage } from './views/PortfolioPage';
 import { StockPage } from './views/StockPage';
+import { FullViewPage } from './views/FullViewPage';
 import { DEFAULT_ETF_ID } from './store/useEtfStore';
 
 // Split out so the dashboard doesn't carry the docs page's weight —
@@ -47,6 +50,11 @@ createRoot(document.getElementById('root')).render(
           <Route path="/" element={<Navigate to={`/etf/${DEFAULT_ETF_ID}`} replace />} />
           <Route path="/etf/:etfId" element={<App />} />
           <Route path="/etf/:etfId/:view" element={<App />} />
+          {/* Three segments, so it cannot collide with `:view` above. Not lazy:
+              it is opened from a tab of its own and would otherwise cost a
+              round-trip there for nothing. */}
+          <Route path="/etf/:etfId/full/matrix" element={<FullViewPage kind="matrix" />} />
+          <Route path="/etf/:etfId/full/network" element={<FullViewPage kind="network" />} />
           <Route path="/docs" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
           <Route path="/docs/:measurementId" element={<Suspense fallback={docsFallback}><DocsPage /></Suspense>} />
           {/* Not split out like the docs page: the library has no heavy

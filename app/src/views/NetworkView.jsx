@@ -59,6 +59,7 @@ import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { FullViewLink } from '../components/etf/FullViewLink';
 
 // Node radius bounds and reference weight (weightPct at/above which a
 // node hits MAX_R). The curve is a genuine exponential (not sqrt/linear),
@@ -163,6 +164,8 @@ export const NetworkView = memo(function NetworkView({ selected, onSelect }) {
         <span className="font-[var(--font-mono)] text-[13px] font-semibold text-[var(--fg)] w-9 tabular-nums">{fmtCorr(threshold)}</span>
         <span className="font-[var(--font-mono)] text-xs text-[var(--fg-2)]">· {corrData.loading ? '…' : edges.length} links</span>
         <SegmentedControl label="clusters" options={CLUSTER_OPTIONS} value={showClusters ? 'on' : 'off'} onChange={value => setShowClusters(value === 'on')} />
+        {/* Only while the fund is deep-filled: every holding, zoomable (issue #173). */}
+        {etf?.deepFill && <FullViewLink etfId={etfId} kind="network" />}
       </div>
 
       {/* This view fetches its own copy of the ETF (see useLiveEtf), so it
