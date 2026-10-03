@@ -26,6 +26,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useFreshness } from '../../hooks/useFreshness';
 import { LiveStatusContext } from '../../hooks/useLiveStatus';
 import { DEFAULT_ETF_ID } from '../../store/useEtfStore';
+import { dashboardPathOf } from '../../utils/fullViewRoute';
 import { BackendGate } from './BackendGate';
 import { Header } from './Header';
 
@@ -60,7 +61,9 @@ function Shell({ theme, onToggleTheme }) {
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   // — so the header never renders a tab pointing at the previous page.
   const [dashboardPath, setDashboardPath] = useState(`/etf/${DEFAULT_ETF_ID}`);
-  const currentDashboardPath = pathname.startsWith('/etf/') ? pathname + search : null;
+  // A Full view (issue #173) is remembered as the normal view it came from: this
+  // tab is the way back, so it must not lead to another Full view.
+  const currentDashboardPath = dashboardPathOf(pathname, search);
   if (currentDashboardPath && currentDashboardPath !== dashboardPath) {
     setDashboardPath(currentDashboardPath);
   }

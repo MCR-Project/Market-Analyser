@@ -219,6 +219,13 @@ export const api = {
     fetchJson(`/deep-fill/${encodeURIComponent(etfId)}`, { signal, method: 'POST', fresh: true }),
   cancelDeepFill: (etfId, { signal } = {}) =>
     fetchJson(`/deep-fill/${encodeURIComponent(etfId)}/cancel`, { signal, method: 'POST', fresh: true }),
+  // What a Full view (issue #173) is drawn from: the stored whole-basket matrix
+  // and clusters, never computed on request. A 404 - never retried - means there
+  // is nothing to draw (not deep-filled, expired, or still running), which the
+  // page says in words. Not `fresh`: it is read back, and a result that expired
+  // inside the 2s dedup window is gone by the next page open anyway.
+  getFullView: (etfId, { signal } = {}) =>
+    fetchJson(`/deep-fill/${encodeURIComponent(etfId)}/full-view`, { signal }),
 
   // Ticker lookup. Search is the as-you-type path and never leaves the
   // tracked universe; resolve is asked once, for a symbol somebody chose,
