@@ -33,17 +33,25 @@ src/utils/tableFloor.js      how tall the holdings table must be to show five ho
 src/utils/networkBox.js      the network graph's minimum height for its width: close to a square, capped (pure, tested; issue #176)
 src/utils/launchScreen.js    which phase the launch screen is in for a given wait: quiet, waking, slow (pure, tested)
 src/utils/deepFill.js        which state a fund's Deep-fill control is in, the dialog's wording, when to poll next (pure, tested; issue #172)
+src/utils/fullView.js        the Full view's payload decoded: the triangle back into one Float32Array square, NaN for "no correlation", `fmtWeight` (pure, tested; issue #173)
+src/utils/fullMatrix.js      the Full matrix's order (matrixOrder.js over every holding), its one-pixel-a-cell bitmap, hit-testing and when labels appear (pure, tested)
+src/utils/fullNetwork.js     the Full network's ranked links, strength bands, neighbours, hit-testing and label rule; fullNetworkLayout.js places the nodes (pure, tested)
+src/utils/forceLayout.js     the force simulation both network graphs share, extracted from layout.js with a characterization test (pure, tested)
+src/utils/viewport.js        zoom and pan arithmetic for the canvases: fit, zoom about a point, clamp (pure, tested)
+src/utils/fullViewRoute.js   the Full view's URLs and which dashboard path the Analyser tab remembers (pure, tested)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
 src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
-src/hooks/                   data fetching and view state
+src/hooks/                   data fetching and view state (useViewport, useFullNetworkLayout, useFullViewThreshold for the Full view)
+src/workers/                 fullNetworkLayout.worker.js: the network layout off the page's thread (issue #173)
 src/store/                   useEtfStore (URL-backed), portfolioStorage, portfolioLink, portfolioBackup, candlePreference, deepFillEpoch (+ their tests)
 src/views/                   one file per route or tab panel
 src/components/
   layout/    AppLayout, Header, FreshnessBadge
   ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, SegmentedControl, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
   charts/    PriceChart (line or candles), AreaChart, CandleChart, CandleToggle, BrushOverlay, ChartTooltip
-  etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard, DeepFillControl, DeepFillDialog
+  etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard, DeepFillControl, DeepFillDialog, FullViewLink
+  fullview/  ViewportCanvas, FullMatrix, FullNetwork, FullViewHeader, canvasColors (issue #173)
   stock/     StockPopup, StocksSidebar, StockMetricsCard (issue #159)
   docs/      DocsSidebar, MeasurementDoc, DocMdx, WorkedExample
   portfolio/ the portfolio simulator UI — see its own CLAUDE.md
@@ -59,6 +67,8 @@ the data nor worth a link: see "Price charts and candles"):
 | In the URL | Read by |
 | --- | --- |
 | `/etf/:etfId/:view` | `useEtfStore`, `App` |
+| `/etf/:etfId/full/matrix`, `/etf/:etfId/full/network` | `FullViewPage` (issue #173) — a page of its own, opened in a new tab from the Matrix and Network tabs |
+| `?threshold=` (on `/etf/:etfId/full/network`) | `useFullViewThreshold` — the Full network's Link Threshold, `0.2`–`0.95`, omitted at its default `0.7`, a number past either end held to it, anything that is not a number read as the default (`readNumber`); written with `replace`, since a slider drag is not history. Not shared with the normal network's edge slider, which is plain state |
 | `/docs/:measurementId` | `DocsPage` |
 | `/portfolio/:portfolioId` | `PortfolioPage` |
 | `/portfolio/shared?p=…` | `portfolioLink.decodePortfolio` |
@@ -73,7 +83,7 @@ the data nor worth a link: see "Price charts and candles"):
 | `?window=` (on `/etf/...`) | `useMeasurementWindow` — a different param of the same name, scoped to its own route; see below |
 | `?fundMetrics=` (on `/etf/...`) | `useFundMetrics` — which fund metrics card tiles are on (issue #105); its own key so it cannot collide with `/portfolio/...`'s `?metrics=` |
 | `?networkClusters=` (on `/etf/...`) | `useNetworkClusters` — whether the network view outlines its clusters (issue #144): `on`, absent when off (the default); anything other than `on` reads as off |
-| `?matrixOrder=` / `?matrixWithin=` (on `/etf/...`) | `useMatrixOrder` — the Matrix tab's order (`cluster` default, `alpha`, `weight`) and, inside a cluster, `weight` (default) or `alpha` (issue #143); each omitted at its default, an unrecognised value read as the default via `readChoice` |
+| `?matrixOrder=` / `?matrixWithin=` (on `/etf/...`, the Full matrix included) | `useMatrixOrder` — the Matrix tab's order (`cluster` default, `alpha`, `weight`) and, inside a cluster, `weight` (default) or `alpha` (issue #143); each omitted at its default, an unrecognised value read as the default via `readChoice` |
 
 `useEtfStore` used to be a zustand store; moving it into the route param removed
 the sync problem entirely — any component, however deep, calls `useEtfStore()`
@@ -426,6 +436,48 @@ it, and `hooks/useDeepFill` keeps the status current. Rules that come with it:
   (`utils/pairInsights.js`, the backend's own rules, used only while the response says
   `deepFill`). Its sector mix is not: it describes the fund.
 
+## The Full view (issue #173)
+
+A page of its own (`views/FullViewPage.jsx`, routes `/etf/:etfId/full/matrix` and
+`/full/network`) that draws every holding of a deep-filled fund on a canvas, from the
+result the Deep-fill finished with. The Matrix and Network tabs carry a **Full view**
+link (`FullViewLink`, `target="_blank"`) only while `etf.deepFill` is there. Rules that
+come with it:
+
+- **It reads a snapshot and nothing else.** `GET /api/deep-fill/{id}/full-view` is the
+  only request; the page never merges in the normal views' data and never recomputes
+  from it beyond arrangement, so the time it shows is the Deep-fill's own. A **404**
+  (never deep-filled, expired, or the job still running) is not an error: the page says
+  so in words and links back, and draws nothing — never a partial picture. Other
+  failures go through `describeFetchError` as everywhere (its 404 wording is for a
+  mistyped ticker, which is why this page handles 404 itself). A payload whose parts
+  disagree is refused by `decodeFullView` rather than drawn at the wrong stride.
+- **Canvas, not DOM or SVG, and the matrix is a bitmap.** 250,000 cells froze the page
+  as DOM. `fullMatrix.cellPixels` builds an N × N image once per order and the canvas
+  scales it with smoothing off, so a zoom is one `drawImage`. `ViewportCanvas` owns what
+  both drawings share (box measurement, pixel ratio, repaint, the zoom buttons) and a
+  drawing supplies a `draw` that is a `useCallback` over everything the picture depends
+  on: a repaint is exactly "its identity changed". Gestures are `useViewport`'s; view
+  state lives in the view, never in the drawing's layout, so zooming moves nothing.
+- **A canvas cannot read CSS variables.** `canvasColors.js` asks the browser (a hidden
+  probe element, resolved value read back through a 1 × 1 canvas) and builds the matrix's
+  ramp from `cellColor` itself, so the colours cannot drift from the normal matrix's. It
+  re-resolves on a theme change by watching `data-theme`.
+- **The network layout is computed once, in a worker, and never from the threshold.**
+  ~125,000 pairs × 400 iterations is most of a second. `useFullNetworkLayout` runs
+  `fullNetworkLayout` in `workers/` and falls back to the page's thread if a worker
+  cannot be made. The Link Threshold only chooses which links are drawn: the links worth
+  drawing are ranked once and a threshold is a binary search of that list, so the slider
+  moves no node and asks for nothing. The weight that scales a pull is **floored**
+  (`LAYOUT_WEIGHT_FLOOR`): unfloored, the tail's pull is lost to repulsion over ~500
+  holdings and the graph is a ring with no groups in it. `utils/layout.test.js` pins that
+  the normal graph, which shares `forceLayout.js`, still lands where it always did.
+- **Correlations are float32, so comparisons carry an epsilon** (`fullNetwork.EPS`): a
+  stored 0.9 reads back as 0.89999998 and a link on the threshold would drop out.
+- **Colour keeps meaning ρ.** Cluster blocks and names are neutral outlines; a pair with
+  no correlation is a flat neutral, never a point on the ramp (invariant 7).
+- **Not here:** the `DetailAside` panel and exporting the picture (issue #173).
+
 ## MDX: two vocabularies, deliberately separate
 
 Both compile backend-authored source into real React components at runtime, which
@@ -543,7 +595,14 @@ or busy fund has no Start, the poll schedule and the action errors) and
 changed, and that the first look does not). Issue #177 added `utils/tooltipPlacement.test.js`
 (`tooltipPlacement`: which side of the hover line the tooltip sits on, the gap, and
 a candle's clearance) and a `clearPct` check in
-`utils/chartTooltip.test.js`.
+`utils/chartTooltip.test.js`. Issue #173 added `utils/fullView.test.js` (the triangle
+decoded back into a square, null pairs staying null, a malformed payload refused),
+`utils/fullMatrix.test.js` (order over every holding, the bitmap's pixels in drawing
+order, which cell is under a point, when labels appear), `utils/fullNetwork.test.js`
+(ranked links, the threshold as a prefix, strength bands, hit-testing, and that the
+layout clusters a tail-heavy fund), `utils/viewport.test.js`, `utils/fullViewRoute.test.js`,
+`utils/searchParams.test.js` (`readNumber`) and `utils/layout.test.js` (the extraction of
+the force simulation moved nothing).
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that

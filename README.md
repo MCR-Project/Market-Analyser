@@ -262,6 +262,14 @@ a background job, one at a time, with progress:
   start again fetches only what is missing, which is also how a `failed` job
   resumes, and how a second fund that shares tickers with the first costs only
   the difference.
+- `GET /api/deep-fill/{etf_id}/full-view` is what the [Full view](#the-full-view)
+  is drawn from: the whole basket's correlation matrix, its clusters, each holding's
+  weight and average ρ, the holdings left out and why (`excluded`), and the
+  Deep-fill's own `asOf` and `expiresAt`. It is **read back, never computed and never
+  read from the database**, so opening it costs a lookup. The matrix is sent as a
+  rounded (2 decimals) lower triangle without the diagonal, `[[], [ρ10], [ρ20, ρ21], …]`
+  with `null` for a pair that has no correlation: about 0.75 MB for 500 holdings against
+  about 4 MB for the nested matrix `/api/correlation` serves.
 - Tickers are fetched `DEEP_FILL_BATCH_SIZE` at a time with
   `auto_adjust=True` — adjusted on every path for the reason `prices` is
   ([How prices are stored](#how-prices-are-stored)) — one year of daily history,
@@ -289,13 +297,15 @@ a background job, one at a time, with progress:
 | 400 | the fund has nothing untracked to fill, or more than 1000 | never |
 | 403 | `ALLOW_DEEP_FILL` is off | never |
 | 409 | a different fund's job is running (body: `running`) | never |
+| 404 | `full-view` only: the fund was never deep-filled, its result expired, or its job is still running (a partial picture is never served) | never |
 | 503 | the database cannot say what the fund's untracked holdings are | on a backoff |
 
 **What is held.** Two things, kept apart: each ticker's data, which expires
 `DEEP_FILL_TTL_SECONDS` after *it* was fetched whichever fund asked for it, and
 one result per fund — its untracked holdings and weights as they were when the
 job started, which of them have data and which failed, and the correlation matrix
-and clusters over the whole basket, computed once when the job finished. A fund
+and clusters over the whole basket, computed once when the job finished, together with
+the compact copy the Full view serves. A fund
 is deep-filled exactly while its result exists, and the result expires when the
 oldest ticker it was built from does. Expiry is checked on every read rather than
 by a timer, so nothing can be served past it.
@@ -1551,12 +1561,56 @@ The Table tab then lists every holding, the untracked ones after the tracked,
 heaviest first, marked **Untracked**; a column with nothing for one shows a dash
 whose tooltip gives the reason (a window longer than the fetched year, a ticker
 that could not be fetched). The Matrix still shows its top *N* and the Network
-its tracked holdings, exactly as before the Deep-fill — the whole-basket views are
-a later issue. The side panel beside them follows the drawing: its strongest pair,
+its tracked holdings, exactly as before the Deep-fill; the whole-basket pictures are
+the [Full view](#the-full-view), one click away. The side panel beside them follows the drawing: its strongest pair,
 loosest pair and most-connected holding are worked out over the holdings drawn, not
 the whole basket's matrix, so they never name a pair that is not on the screen. Its
 sector mix, like the fund card's, describes the fund and counts the untracked
 holdings.
+
+### The Full view
+
+For a deep-filled fund the Matrix and Network tabs carry a **Full view** link (and only
+while the fund is deep-filled) that opens a page of its own in a new tab, drawing every
+holding on a canvas you can zoom and pan (issue #173): `/etf/SPY/full/matrix` and
+`/etf/SPY/full/network`. The 20-stock matrix and the ~46-node network stay as they
+are; this is the 500-stock one.
+
+**It is the picture the Deep-fill finished with, not a new calculation.** The page
+reads `GET /api/deep-fill/{etf_id}/full-view` and nothing else, so the *as of* time in
+its header is the Deep-fill's own, it says until when the server keeps the result, and
+it never mixes in the normal views' data. If there is no result — never run, expired,
+or still running — the page says so and links back; it draws nothing rather than a
+partial picture. The header also names, with the reason, each holding left out
+because it has no usable history, and says if the server's copy has expired since the
+page opened (the picture on screen is still the one that was drawn).
+
+**The matrix** shows the colours alone while it is zoomed out, as ρ and nothing else —
+the normal matrix's own ramp, with a pair that has no correlation a flat grey, never a
+point on it. Ticker labels appear in the margins once a cell is about 12px, each ρ
+inside its cell once it is about 34px. Order is the normal matrix's (`?matrixOrder=`
+`cluster` by default, `alpha`, `weight`; `?matrixWithin=`), over every holding rather
+than a top *N*; in cluster order each cluster is an outlined block on the diagonal,
+named after its heaviest holding once the block is big enough to hold the name.
+Hovering a cell names the pair and its ρ; clicking a stock (a cell, or a ticker in the
+margin) outlines its whole row and column and dims the rest; clicking it again clears it.
+
+**The network** sizes each node by fund weight and draws a link between every pair
+whose ρ is at or above the **Link Threshold**, which starts at 0.7 and is kept in the
+URL (`?threshold=`, 0.2–0.95). Changing it changes which links are drawn and nothing
+else: no node moves and no request is made. The layout is worked out once when the page
+opens, in a web worker so the tab stays responsive (about a second for 500 holdings),
+by the same force simulation as the normal network; its pull is floored for light
+holdings, because over 500 holdings the tail's pull would otherwise be lost and the
+graph would settle into a ring with no groups. A node's ticker is written once the node
+is big enough on screen to carry it; hovering shows its weight, cluster and how many
+links it has at the threshold, and clicking isolates its links and dims the rest.
+
+Both zoom with the wheel or a pinch, pan by dragging, and take the keyboard when
+focused (`+`, `−`, `0` to fit, the arrow keys) and have buttons for the same. Clusters
+are groups of stocks whose returns moved together over the past year, not sectors, as
+on the normal matrix. Not part of it: the side panel the tabs have, and exporting the
+picture.
 
 ### The correlation matrix and its clusters
 

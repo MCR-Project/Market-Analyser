@@ -168,6 +168,15 @@ changing anything near it:
 - **The status carries `ttlSeconds`** (what `DEEP_FILL_TTL_SECONDS` is now) so the
   frontend's warning can say how long a result is kept before there is one to read an
   expiry off. The frontend learns `enabled` from the same answer; keep both there.
+- **The Full view's payload is built once, when the job finishes** (`_derive` calls
+  `services/full_view.build`; the store holds it beside the fund's matrix) and
+  `GET /api/deep-fill/{id}/full-view` only reads it back: no computation, no database
+  read, and `asOf`/`expiresAt` are the Deep-fill's own. Its **404** (never deep-filled,
+  expired, a job still running, or a job that could not derive a matrix) is the plain
+  "the thing asked for does not exist" of the table above — never retried — so it adds no
+  new code to that table or to invariant 1. The matrix is a rounded lower triangle
+  (`null` for a pair with no correlation, never 0) because the nested one is ~4 MB for 500
+  holdings; keep it bounded if the shape changes.
 - The manager's lock guards job state only. Anything that can wait on the database or
   yfinance (the untracked-holdings read, the weight-share read in a status) happens
   outside it, because the job thread takes the same lock for every progress update.
