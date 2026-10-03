@@ -417,7 +417,14 @@ it, and `hooks/useDeepFill` keeps the status current. Rules that come with it:
   then the tail heaviest first). A holding with no stored description arrives with a
   null name and sector, and the table substitutes the ticker and "Unknown" so search and
   the sector filter never meet a null. The Matrix and Network are unchanged: top *N*
-  and tracked-only.
+  and tracked-only. They read `useLiveEtf`'s `trackedHoldings` / `trackedTickers`
+  (`utils/trackedHoldings.js`: `holdings` minus the response's `untracked`), never
+  `tickers`, which is the whole basket - a new view of "the fund's holdings" has to
+  choose, and the default is the tracked ones. The correlation data they read is the
+  backend's whole-basket matrix, so what is derived *from the matrix as a whole* is
+  recomputed for the drawn tickers: `DetailAside`'s strongest/loosest pair and hub
+  (`utils/pairInsights.js`, the backend's own rules, used only while the response says
+  `deepFill`). Its sector mix is not: it describes the fund.
 
 ## MDX: two vocabularies, deliberately separate
 

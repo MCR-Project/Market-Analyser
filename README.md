@@ -1551,7 +1551,12 @@ The Table tab then lists every holding, the untracked ones after the tracked,
 heaviest first, marked **Untracked**; a column with nothing for one shows a dash
 whose tooltip gives the reason (a window longer than the fetched year, a ticker
 that could not be fetched). The Matrix still shows its top *N* and the Network
-its tracked holdings — the whole-basket views are a later issue.
+its tracked holdings, exactly as before the Deep-fill — the whole-basket views are
+a later issue. The side panel beside them follows the drawing: its strongest pair,
+loosest pair and most-connected holding are worked out over the holdings drawn, not
+the whole basket's matrix, so they never name a pair that is not on the screen. Its
+sector mix, like the fund card's, describes the fund and counts the untracked
+holdings.
 
 ### The correlation matrix and its clusters
 
