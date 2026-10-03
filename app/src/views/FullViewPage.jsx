@@ -17,7 +17,7 @@
  *   │ order Cluster|A–Z|Weight  within …    selection    │  the drawing's own controls
  *   ├────────────────────────────────────────────────────┤
  *   │                                                    │
- *   │                 canvas, fills the rest             │
+ *   │      canvas: a square, as wide as the page         │
  *   │                                                    │
  *   ├────────────────────────────────────────────────────┤
  *   │ legend and gestures                                │
@@ -47,6 +47,7 @@ import { useCanvasColors } from '../components/fullview/canvasColors';
 import { FullMatrix } from '../components/fullview/FullMatrix';
 import { FullNetwork } from '../components/fullview/FullNetwork';
 import { FullViewHeader } from '../components/fullview/FullViewHeader';
+import { Panel } from '../components/fullview/Panel';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Loading } from '../components/ui/Loading';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
@@ -235,14 +236,11 @@ function NetworkBody({ fund, selected, onSelect, colors, hostRef, clusterOf }) {
 
 // ── Shared pieces ─────────────────────────────────────────────────────────────
 
-/** The panel a drawing fills. Its minimum height matches the dashboard's own panels, so
- *  on a short window the page scrolls rather than squeezing the picture to a strip. */
+/** What a drawing sits in: the square panel, full width, and the legend under it. Not
+ *  allowed to shrink: the page scrolls to reach it rather than squeezing the picture. */
 function Stage({ hostRef, children }) {
   return (
-    <section
-      ref={hostRef}
-      className="flex-1 min-h-[480px] flex flex-col bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] overflow-hidden"
-    >
+    <section ref={hostRef} className="flex-none flex flex-col gap-3">
       {children}
     </section>
   );
@@ -250,20 +248,21 @@ function Stage({ hostRef, children }) {
 
 function Legend({ children }) {
   return (
-    <div className="flex-none flex items-center gap-x-6 gap-y-2 flex-wrap px-4 py-3 border-t border-[var(--divider)]">
+    <div className="flex items-center gap-x-6 gap-y-2 flex-wrap px-1">
       {children}
     </div>
   );
 }
 
+/** A message in the same square a drawing would fill, so the page does not jump when it arrives. */
 function Notice({ busy = false, children }) {
   return (
-    <div className="flex-1 grid place-items-center text-sm text-[var(--fg-2)]" role="status">
-      <span className="flex items-center gap-3">
+    <Panel className="grid place-items-center text-sm text-[var(--fg-2)]">
+      <span className="flex items-center gap-3" role="status">
         {busy && <span className="w-5 h-5 rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)] animate-spin" aria-hidden="true" />}
         {children}
       </span>
-    </div>
+    </Panel>
   );
 }
 

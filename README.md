@@ -1606,7 +1606,8 @@ graph would settle into a ring with no groups. A node's ticker is written once t
 is big enough on screen to carry it; hovering shows its weight, cluster and how many
 links it has at the threshold, and clicking isolates its links and dims the rest.
 
-Both zoom with the wheel or a pinch, pan by dragging, and take the keyboard when
+The picture is a square as wide as the page, so the page scrolls to reach the rest of
+it; the legend sits under it and the controls above. Both zoom with the wheel or a pinch, pan by dragging, and take the keyboard when
 focused (`+`, `−`, `0` to fit, the arrow keys) and have buttons for the same. Clusters
 are groups of stocks whose returns moved together over the past year, not sectors, as
 on the normal matrix. Not part of it: the side panel the tabs have, and exporting the
