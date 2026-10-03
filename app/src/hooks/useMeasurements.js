@@ -42,6 +42,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useFetch } from './useFetch';
 import { api, isTransientError } from '../utils/api';
 import { MAX_AUTO_RETRIES, retryDelayMs } from '../utils/retrySchedule';
+import { useDeepFillEpoch } from './useDeepFillEpoch';
 
 export function useMeasurements(etfId, window) {
   const [activeIds, setActiveIds] = useState(null); // null = not yet initialized; column ids
@@ -61,6 +62,12 @@ export function useMeasurements(etfId, window) {
   // toggle.
   const prevActiveMeasurementIdsRef = useRef([]);
   const prevEtfIdRef = useRef(etfId);
+  // A fund becoming deep-filled, or expiring back (issue #172), changes what
+  // every column says about it - the tail's rows appear and disappear - so the
+  // results effect treats it as it does a change of fund: every active plugin
+  // refetches.
+  const deepFillEpoch = useDeepFillEpoch(etfId);
+  const prevDeepFillEpochRef = useRef(deepFillEpoch);
   const prevWindowRef = useRef(window);
 
   // Fetch the manifest via useFetch so a failed attempt (e.g. the page
@@ -128,7 +135,8 @@ export function useMeasurements(etfId, window) {
   useEffect(() => {
     const ids = activeMeasurementIds;
     const prevIds = prevActiveMeasurementIdsRef.current;
-    const etfChanged = prevEtfIdRef.current !== etfId;
+    const etfChanged = prevEtfIdRef.current !== etfId
+      || prevDeepFillEpochRef.current !== deepFillEpoch;
     const windowChanged = prevWindowRef.current !== window;
 
     const columnIdsFor = (measurementId) =>
@@ -252,12 +260,13 @@ export function useMeasurements(etfId, window) {
 
     prevActiveMeasurementIdsRef.current = ids;
     prevEtfIdRef.current = etfId;
+    prevDeepFillEpochRef.current = deepFillEpoch;
     prevWindowRef.current = window;
     // columnsByMeasurement is derived from manifest on every render but
     // only actually changes when manifest does, so it is intentionally
     // left out here - including it would refetch on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMeasurementIds, etfId, window]);
+  }, [activeMeasurementIds, etfId, window, deepFillEpoch]);
 
   // Abort any still in-flight measurement requests on unmount, and drop
   // any retry that hasn't fired yet.

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useFetch } from './useFetch';
 import { api } from '../utils/api';
+import { useDeepFillEpoch } from './useDeepFillEpoch';
 
 /** Shape returned before live data has arrived, or if the fetch never resolves. */
 const EMPTY = { sectorWeights: {}, topSector: null, ranking: [], sectorLabel: 'TOP SECTOR', sectorCounts: {} };
@@ -14,9 +15,11 @@ const EMPTY = { sectorWeights: {}, topSector: null, ranking: [], sectorLabel: 'T
  * particular `topSector`, which is `null` until live) are populated.
  */
 export function useLiveSectors(etfId) {
+  // The breakdown counts the tail while the fund is deep-filled (issue #172).
+  const deepFillEpoch = useDeepFillEpoch(etfId);
   const { data, loading, error } = useFetch(
     (signal) => api.getSectors(etfId, { signal }),
-    [etfId],
+    [etfId, deepFillEpoch],
     { fallback: null }
   );
 

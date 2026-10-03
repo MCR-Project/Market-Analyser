@@ -2,6 +2,7 @@ import { useMemo, useCallback } from 'react';
 import { useFetch } from './useFetch';
 import { api } from '../utils/api';
 import { useEtfStore } from '../store/useEtfStore';
+import { useDeepFillEpoch } from './useDeepFillEpoch';
 
 /**
  * Fetches the currently selected ETF (per useEtfStore, i.e. the URL) plus
@@ -15,10 +16,13 @@ import { useEtfStore } from '../store/useEtfStore';
  */
 export function useLiveEtf() {
   const { etfId, switchEtf } = useEtfStore();
+  // The holdings list grows while the fund is deep-filled and shrinks back when
+  // it expires (issue #172), so a change of that state is a reason to ask again.
+  const deepFillEpoch = useDeepFillEpoch(etfId);
 
   const { data: etf, loading, error, retry } = useFetch(
     (signal, force) => api.getEtf(etfId, { refresh: force, signal }),
-    [etfId],
+    [etfId, deepFillEpoch],
     { fallback: null }
   );
 
