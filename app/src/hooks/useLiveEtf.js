@@ -3,6 +3,7 @@ import { useFetch } from './useFetch';
 import { api } from '../utils/api';
 import { useEtfStore } from '../store/useEtfStore';
 import { useDeepFillEpoch } from './useDeepFillEpoch';
+import { trackedHoldings } from '../utils/trackedHoldings';
 
 /**
  * Fetches the currently selected ETF (per useEtfStore, i.e. the URL) plus
@@ -33,6 +34,12 @@ export function useLiveEtf() {
 
   const tickers = useMemo(() => etf?.holdings?.map(h => h[0]) ?? [], [etf]);
 
+  // The same fund without the Untracked holdings a Deep-fill adds. The Matrix and
+  // the Network draw these, never the whole basket (issue #172); everything else
+  // reads `tickers` above.
+  const trackedList = useMemo(() => trackedHoldings(etf?.holdings, etf?.untracked), [etf]);
+  const trackedTickers = useMemo(() => trackedList.map(h => h[0]), [trackedList]);
+
   const weightOf = useCallback((ticker) => {
     const h = etf?.holdings?.find(x => x[0] === ticker);
     return h ? h[1] : 0;
@@ -45,7 +52,7 @@ export function useLiveEtf() {
   );
 
   return {
-    etf, etfId, tickers, weightOf, switchEtf,
+    etf, etfId, tickers, trackedHoldings: trackedList, trackedTickers, weightOf, switchEtf,
     allEtfs: allEtfs || [], loading, error, retry, forceRefresh,
     isLive: !!etf?.holdings?.length,
   };

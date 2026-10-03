@@ -91,7 +91,8 @@ function ClusterDot({ shared }) {
 }
 
 export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
-  const { etf, etfId, tickers, loading: etfLoading, retry: etfRetry } = useLiveEtf();
+  // The tracked holdings only: a Deep-fill does not change the Matrix (issue #172).
+  const { etf, etfId, trackedTickers: tickers, trackedHoldings: holdings, loading: etfLoading, retry: etfRetry } = useLiveEtf();
   // The matrix always shows the full correlation range, it doesn't
   // filter by an edge threshold like the network view does.
   const corrData = useLiveCorrelation(etfId);
@@ -108,7 +109,6 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
   // null and renders as "n/a", not a fake value.
   const corrFn = useCallback((a, b) => corrMatrix?.[a]?.[b] ?? null, [corrMatrix]);
 
-  const holdings = useMemo(() => etf?.holdings ?? [], [etf]);
   const { tickers: matrixTickers, sections, clusterOf } = useMemo(
     () => orderMatrix({ holdings, clusters: corrData.clusters, averages: corrData.averages, n: matrixN, order, within }),
     [holdings, corrData.clusters, corrData.averages, matrixN, order, within]
