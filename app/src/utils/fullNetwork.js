@@ -23,9 +23,8 @@
  * does not need to.
  */
 
-/** The fixed world the graph is laid out in; the viewport fits it to the canvas. Square,
- *  like the canvas it is drawn in, so the layout has no wide or tall box to stretch into. */
-export const NETWORK_WORLD = { w: 2000, h: 2000 };
+/** The fixed world the graph is laid out in; the viewport fits it to the canvas. */
+export const NETWORK_WORLD = { w: 2400, h: 1600 };
 /** Room at the world's edge for the heaviest node and its label. */
 export const NETWORK_MARGIN = 60;
 

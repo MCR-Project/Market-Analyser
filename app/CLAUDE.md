@@ -51,7 +51,7 @@ src/components/
   ui/        Loading, ErrorState, Overlay, ViewTabs, TimeframeTabs, SegmentedControl, MdxCell, MeasurementPicker, MetricsPicker, AttributionCard, DocLink, Logo
   charts/    PriceChart (line or candles), AreaChart, CandleChart, CandleToggle, BrushOverlay, ChartTooltip
   etf/       EtfDashboard, EtfPicker, SectorZone, FundMetricsCard, DeepFillControl, DeepFillDialog, FullViewLink
-  fullview/  Panel, ViewportCanvas, FullMatrix, FullNetwork, FullViewHeader, canvasColors (issue #173)
+  fullview/  ViewportCanvas, FullMatrix, FullNetwork, FullViewHeader, canvasColors (issue #173)
   stock/     StockPopup, StocksSidebar, StockMetricsCard (issue #159)
   docs/      DocsSidebar, MeasurementDoc, DocMdx, WorkedExample
   portfolio/ the portfolio simulator UI — see its own CLAUDE.md
@@ -452,12 +452,6 @@ come with it:
   failures go through `describeFetchError` as everywhere (its 404 wording is for a
   mistyped ticker, which is why this page handles 404 itself). A payload whose parts
   disagree is refused by `decodeFullView` rather than drawn at the wrong stride.
-- **The drawing is a square, as wide as the page, and nothing else is in its box.**
-  `Panel` is `w-full aspect-square`; the page scrolls to reach the rest of it (it was
-  once sized to the height left under the header, which made a strip). The legend and
-  controls are outside it. It is sized by the page's width alone, never by what is
-  drawn, so a canvas drawn at its measured size cannot grow the box it was measured from.
-  The network's world (`NETWORK_WORLD`) is square for the same reason.
 - **Canvas, not DOM or SVG, and the matrix is a bitmap.** 250,000 cells froze the page
   as DOM. `fullMatrix.cellPixels` builds an N × N image once per order and the canvas
   scales it with smoothing off, so a zoom is one `drawImage`. `ViewportCanvas` owns what

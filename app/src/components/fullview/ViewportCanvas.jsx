@@ -10,9 +10,6 @@
  * drawn in; because `draw` is a `useCallback` over everything the picture depends on
  * (selection, hover, threshold), a repaint is exactly "its identity changed".
  *
- * Always a square, as wide as the page (`Panel`), so the page scrolls to reach it rather
- * than the square shrinking to the height that is left.
- *
  * Sized by its container, never by what is drawn (the canvas is absolutely
  * positioned), for the reason `useElementSize` gives: drawing at the measured size
  * must not be able to grow the box it was measured from.
@@ -26,7 +23,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useElementSize } from '../../hooks/useElementSize';
 import { useViewport, ZOOM_STEP } from '../../hooks/useViewport';
-import { Panel } from './Panel';
 
 export function ViewportCanvas({
   content, areaFor, limitsFor, pad = 0, resetKey, colors, draw, onHover, onTap,
@@ -66,7 +62,7 @@ export function ViewportCanvas({
   const zoomOut = useCallback(() => zoomBy(1 / ZOOM_STEP), [zoomBy]);
 
   return (
-    <Panel ref={boxRef}>
+    <div ref={boxRef} className="relative flex-1 min-h-0 overflow-hidden">
       <canvas
         ref={attachCanvas}
         tabIndex={0}
@@ -75,13 +71,13 @@ export function ViewportCanvas({
         className="absolute inset-0 block w-full h-full touch-none outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
         style={{ cursor: dragging ? 'grabbing' : (cursor ?? 'grab') }}
       />
-      <div className="absolute top-2 right-2 flex gap-1">
+      <div className="absolute bottom-2 right-2 flex gap-1">
         <ZoomButton onClick={zoomIn} title="Zoom in (+)">+</ZoomButton>
         <ZoomButton onClick={zoomOut} title="Zoom out (−)">−</ZoomButton>
         <ZoomButton onClick={reset} disabled={atFit} title="Show everything (0)">Fit</ZoomButton>
       </div>
       {children}
-    </Panel>
+    </div>
   );
 }
 
