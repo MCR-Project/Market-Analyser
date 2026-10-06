@@ -11,7 +11,10 @@ cannot support the question being asked of it. The one exception is
 `cluster_correlation` (issue #143), which takes a finished ticker-by-ticker
 correlation matrix rather than a series and returns groups of tickers: it
 sits under its own banner at the bottom because it groups what the
-series-level functions above measure. This module imports
+series-level functions above measure. `weighted_peer_correlation` (issue
+#185) is the other function that takes that finished matrix, under "Basket
+statistics": the plugin, the correlation route and any later view all call it,
+so the weighting formula exists once. This module imports
 nothing from `services.market_data`, `services.supabase_client` or
 `yfinance`, and never will: that is what lets `measurements/*` call it
 directly, the way `backend/CLAUDE.md`'s layering table forbids it from
@@ -1103,6 +1106,58 @@ def average_correlation(values_by_ticker: dict[str, list[float]], dates: list[st
     if not correlations:
         return None
     return round(sum(correlations) / len(correlations), PERCENT_DP)
+
+
+def weighted_peer_correlation(
+    matrix: dict[str, dict[str, float | None]],
+    weights: dict[str, float],
+) -> dict[str, float | None]:
+    """Each holding's average ρ to its peers, every peer counting in proportion
+    to its fund weight (issue #185): for holding i,
+
+        sum_j(w_j * rho_ij) / sum_j(w_j)        over peers j != i
+
+    so ρ to a heavy holding such as NVDA moves the figure far more than ρ to
+    one weighing a fraction of a percent, where the plain average
+    `_correlation_summary` reports counts them the same.
+
+    `matrix` is the shape `/api/correlation` returns (ticker -> ticker -> ρ, or
+    `None` for a pair with too little shared history, issue #97); `weights` is
+    ticker -> fund weight, in whatever unit the caller holds them in - only
+    their ratios matter. The weight is the **peer's**, linear. A holding never
+    counts toward its own figure, so its own weight changes its peers' scores
+    and never its own.
+
+    **A pair with no computed ρ is skipped and its weight leaves the
+    denominator** (CLAUDE.md invariant 7): counting it as 0 would claim the two
+    holdings are unrelated when nothing is known, and would pull the figure
+    toward 0 by exactly the weight of the peer we know least about. A peer with
+    no weight, or one that is not a positive finite number, carries nothing into
+    either sum - a NaN would otherwise turn every figure that touches it into one.
+    A holding left with no weighted pair at all - alone in the matrix, no
+    computed pair, or only pairs to peers that carry no weight - is `None`,
+    never 0.
+
+    Answers every ticker in `matrix`, in its order. Row i of the matrix is read
+    for holding i, the same as the plain average, so the two are always figures
+    over the same pairs. No floor on how little peer weight a figure may rest
+    on: a holding whose only computed pair is to a 0.2% peer scores that one
+    ρ, whole - the caller may want to say so.
+    """
+    result: dict[str, float | None] = {}
+    for ticker, row in matrix.items():
+        weighted_sum = 0.0
+        weight_sum = 0.0
+        for peer, rho in row.items():
+            if peer == ticker or rho is None:
+                continue
+            weight = weights.get(peer)
+            if weight is None or not math.isfinite(weight) or weight <= 0:
+                continue
+            weighted_sum += weight * rho
+            weight_sum += weight
+        result[ticker] = round(weighted_sum / weight_sum, PERCENT_DP) if weight_sum > 0 else None
+    return result
 
 
 def weighted_index(

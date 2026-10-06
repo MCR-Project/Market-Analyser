@@ -1032,5 +1032,99 @@ class IdiosyncraticVolatilityReuseTests(unittest.TestCase):
         self.assertIsNone(result["value"])
 
 
+# ── Weighted correlation (issue #185) ──────────────────────────────────────
+
+def _symmetric(pairs: dict, tickers: list[str]) -> dict:
+    """A ticker -> ticker -> ρ matrix shaped like `/api/correlation`'s: the
+    diagonal is 1.0, a listed pair is symmetric, anything unlisted is None."""
+    out = {a: {} for a in tickers}
+    for a in tickers:
+        for b in tickers:
+            if a == b:
+                out[a][b] = 1.0
+            else:
+                out[a][b] = pairs.get((a, b), pairs.get((b, a)))
+    return out
+
+
+class WeightedPeerCorrelationTests(unittest.TestCase):
+    TICKERS = ["A", "B", "C"]
+    PAIRS = {("A", "C"): 0.8, ("B", "C"): 0.2, ("A", "B"): 0.5}
+    WEIGHTS = {"A": 50.0, "B": 10.0, "C": 5.0}
+
+    def test_each_peer_counts_in_proportion_to_its_fund_weight(self):
+        """C: (50*0.8 + 10*0.2) / 60 = 0.70. A plain average of the same two
+        pairs would be 0.50 - the heavy peer A is what moves it."""
+        result = stats.weighted_peer_correlation(
+            _symmetric(self.PAIRS, self.TICKERS), self.WEIGHTS
+        )
+
+        self.assertEqual(result["C"], 0.7)
+
+    def test_a_holdings_own_weight_never_enters_its_own_figure(self):
+        """A: (10*0.5 + 5*0.8) / 15 = 0.6, whatever A itself weighs."""
+        matrix = _symmetric(self.PAIRS, self.TICKERS)
+
+        light = stats.weighted_peer_correlation(matrix, {**self.WEIGHTS, "A": 1.0})
+        heavy = stats.weighted_peer_correlation(matrix, {**self.WEIGHTS, "A": 90.0})
+
+        self.assertEqual(light["A"], 0.6)
+        self.assertEqual(heavy["A"], 0.6)
+        # ...but it does move its peers' figures.
+        self.assertNotEqual(light["C"], heavy["C"])
+
+    def test_a_peer_with_no_computed_pair_leaves_the_denominator(self):
+        """Without the pair to B, C rests on A alone: exactly ρ(C, A), not a
+        figure pulled toward zero by B's weight sitting in the denominator."""
+        pairs = {("A", "C"): 0.8, ("A", "B"): 0.5}  # B-C unknown
+        result = stats.weighted_peer_correlation(_symmetric(pairs, self.TICKERS), self.WEIGHTS)
+
+        self.assertEqual(result["C"], 0.8)
+
+    def test_a_holding_with_no_computed_pair_at_all_is_none_not_zero(self):
+        pairs = {("A", "B"): 0.5}  # C correlates with nobody
+        result = stats.weighted_peer_correlation(_symmetric(pairs, self.TICKERS), self.WEIGHTS)
+
+        self.assertIsNone(result["C"])
+        self.assertEqual(result["A"], 0.5)
+
+    def test_a_lone_holding_has_no_peer_and_so_no_figure(self):
+        result = stats.weighted_peer_correlation({"A": {"A": 1.0}}, {"A": 100.0})
+
+        self.assertEqual(result, {"A": None})
+
+    def test_peers_that_carry_no_weight_leave_nothing_to_average(self):
+        """Every computed pair is to a zero-weight (or unweighted) peer: the
+        denominator is zero, so no figure rather than a division error."""
+        matrix = _symmetric({("A", "B"): 0.5, ("A", "C"): 0.9}, self.TICKERS)
+        result = stats.weighted_peer_correlation(matrix, {"A": 50.0, "B": 0.0})
+
+        self.assertIsNone(result["A"])
+
+    def test_every_ticker_in_the_matrix_gets_an_entry_in_matrix_order(self):
+        result = stats.weighted_peer_correlation(
+            _symmetric(self.PAIRS, self.TICKERS), self.WEIGHTS
+        )
+
+        self.assertEqual(list(result), self.TICKERS)
+
+    def test_an_empty_matrix_gives_an_empty_answer(self):
+        self.assertEqual(stats.weighted_peer_correlation({}, {"A": 1.0}), {})
+
+    def test_a_nan_or_infinite_weight_is_ignored_not_spread_to_every_figure(self):
+        matrix = _symmetric(self.PAIRS, self.TICKERS)
+
+        for bad in (float("nan"), float("inf")):
+            result = stats.weighted_peer_correlation(matrix, {**self.WEIGHTS, "A": bad})
+            # C now rests on B alone: ρ(C, B).
+            self.assertEqual(result["C"], 0.2)
+
+    def test_equal_weights_reduce_to_the_plain_average(self):
+        matrix = _symmetric(self.PAIRS, self.TICKERS)
+        result = stats.weighted_peer_correlation(matrix, {"A": 7.0, "B": 7.0, "C": 7.0})
+
+        self.assertEqual(result["C"], 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()
