@@ -68,7 +68,7 @@ the data nor worth a link: see "Price charts and candles"):
 | --- | --- |
 | `/etf/:etfId/:view` | `useEtfStore`, `App` |
 | `/etf/:etfId/full/matrix`, `/etf/:etfId/full/network` | `FullViewPage` (issue #173) — a page of its own, opened in a new tab from the Matrix and Network tabs |
-| `?threshold=` (on `/etf/:etfId/full/network`) | `useFullViewThreshold` — the Full network's Link Threshold, `0.2`–`0.95`, omitted at its default `0.7`, a number past either end held to it, anything that is not a number read as the default (`readNumber`); written with `replace`, since a slider drag is not history. Not shared with the normal network's edge slider, which is plain state |
+| `?threshold=` (on `/etf/:etfId/full/network`) | `useFullViewThreshold` — the Full network's Link Threshold, `0.2`–`0.95`, omitted at its default `0.5`, a number past either end held to it, anything that is not a number read as the default (`readNumber`); written with `replace`, since a slider drag is not history. Not shared with the normal network's edge slider, which is plain state |
 | `/docs/:measurementId` | `DocsPage` |
 | `/portfolio/:portfolioId` | `PortfolioPage` |
 | `/portfolio/shared?p=…` | `portfolioLink.decodePortfolio` |

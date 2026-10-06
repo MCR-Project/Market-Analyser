@@ -28,7 +28,7 @@ export const NETWORK_WORLD = { w: 2400, h: 1600 };
 /** Room at the world's edge for the heaviest node and its label. */
 export const NETWORK_MARGIN = 60;
 
-export const DEFAULT_THRESHOLD = 0.7;
+export const DEFAULT_THRESHOLD = 0.5;
 export const THRESHOLD_MIN = 0.2;
 export const THRESHOLD_MAX = 0.95;
 export const THRESHOLD_STEP = 0.01;

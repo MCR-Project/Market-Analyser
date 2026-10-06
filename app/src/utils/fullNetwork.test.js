@@ -26,8 +26,8 @@ const fund = decodeFullView({
 });
 
 describe('constants', () => {
-  it('starts the Link Threshold at 0.7, inside the slider\'s own range', () => {
-    expect(DEFAULT_THRESHOLD).toBe(0.7);
+  it('starts the Link Threshold at 0.5, inside the slider\'s own range', () => {
+    expect(DEFAULT_THRESHOLD).toBe(0.5);
     expect(THRESHOLD_MIN).toBeLessThan(DEFAULT_THRESHOLD);
     expect(THRESHOLD_MAX).toBeGreaterThan(DEFAULT_THRESHOLD);
   });

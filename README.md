@@ -1596,7 +1596,7 @@ Hovering a cell names the pair and its ρ; clicking a stock (a cell, or a ticker
 margin) outlines its whole row and column and dims the rest; clicking it again clears it.
 
 **The network** sizes each node by fund weight and draws a link between every pair
-whose ρ is at or above the **Link Threshold**, which starts at 0.7 and is kept in the
+whose ρ is at or above the **Link Threshold**, which starts at 0.5 and is kept in the
 URL (`?threshold=`, 0.2–0.95). Changing it changes which links are drawn and nothing
 else: no node moves and no request is made. The layout is worked out once when the page
 opens, in a web worker so the tab stays responsive (about a second for 500 holdings),
