@@ -19,7 +19,7 @@ one plugin" below.
 base.py                       MeasurementBase — the contract
 registry.py                   auto-registers routes, serves the manifest and the docs
 __init__.py                   ALL_MEASUREMENTS = official + addon, each tagged with its origin
-official_measurements/        first-party plugins (correlation, etf_weight, value_held) + their .mdx
+official_measurements/        first-party plugins (correlation, weighted_correlation, etf_weight, value_held, …) + their .mdx
 addon_measurements/           plugged-in plugins; currently empty
 inputs/                       one getter per distinct piece of fetched data, each self-describing
 cost.py                       derives a Short/Medium/Long/Extremely long rating from what a plugin declares (issue #115)

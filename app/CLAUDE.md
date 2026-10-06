@@ -255,7 +255,7 @@ argument to say what it actually needs the backend for — `DocsPage` does
     max-h-[720px]` — with the search box pinned and the list and preview each
     scrolling inside it. Its top offset is 14dvh only where the window has room
     for all 720px under it, and shrinks toward 1.25rem otherwise.
-  - *`DetailAside`* is `self-stretch` with a 480px floor, so beside the Matrix or
+  - *`DetailAside`* (whose selected-holding state is two rows of tiles above the peer list) is `self-stretch` with a 480px floor, so beside the Matrix or
     Network panel it is exactly as tall as that panel, and where the row wraps and
     it sits below, it is the floor — which both panels share as their own minimum. Its content is in an absolutely
     positioned box on purpose: the panel's own height then comes only from the
@@ -424,7 +424,10 @@ it, and `hooks/useDeepFill` keeps the status current. Rules that come with it:
   backend's whole-basket matrix, so what is derived *from the matrix as a whole* is
   recomputed for the drawn tickers: `DetailAside`'s strongest/loosest pair and hub
   (`utils/pairInsights.js`, the backend's own rules, used only while the response says
-  `deepFill`). Its sector mix is not: it describes the fund.
+  `deepFill`). Its sector mix is not: it describes the fund. Nor are its CORRELATION and
+  WEIGHTED ρ cards (issue #185): they read the backend's `averages` and
+  `weightedAverages`, which are the whole-fund figures the table columns show, and
+  the panel says so while the fund is deep-filled.
 
 ## MDX: two vocabularies, deliberately separate
 

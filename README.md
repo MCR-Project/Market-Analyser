@@ -308,7 +308,8 @@ after the tracked, and everything built on that list follows:
   exactly as before: none of these fields is there.
 - The correlation matrix and clusters cover the whole basket, and are the result
   the job finished with — read back, not computed again, so they say as of when
-  they were drawn. `deepFill.excluded` names each untracked holding left out,
+  they were drawn. `weightedAverages` (see "Weighted Correlation") covers the same
+  basket. `deepFill.excluded` names each untracked holding left out,
   with why.
 - `GET /api/stocks` describes a tail ticker from the same stored record, never a
   live lookup: the Table tab asks it about every holding the fund lists, ~450 of
@@ -411,6 +412,40 @@ version: "1.0"            # optional — quote it, or YAML reads it as a number
 ## What it measures
 ...
 ```
+
+### Weighted Correlation
+
+The CORRELATION column is the plain mean of a holding's ρ to every peer, so its
+ρ to a 0.5% holding counts exactly as much as its ρ to NVDA (about 20% of SMH).
+**Weighted Correlation** (issue #185) is a second column, off by default, where
+each peer counts in proportion to its fund weight:
+
+```
+weighted ρᵢ  =  Σⱼ≠ᵢ wⱼ·ρᵢⱼ  /  Σⱼ≠ᵢ wⱼ
+```
+
+The weight is the **peer's**, linear, and the holding never counts toward its own
+figure — so a holding's own weight moves its peers' scores and never its own.
+Holding C with ρ = 0.8 to A (weight 50) and ρ = 0.2 to B (weight 10) scores
+(50·0.8 + 10·0.2) / 60 = 0.70, where the plain average of the same pairs is 0.50.
+A pair with no computed ρ is skipped and its weight leaves the denominator — it is
+never counted as 0 — and a holding with no computed pair at all is a dash with a
+reason in the table and `null` in the API. There is no floor on how little peer
+weight a score may rest on.
+
+It is a standalone plugin (`weighted_correlation`, column `weighted_corr`, label
+`WEIGHTED ρ`), not a second column on `correlation`, so that column's id, route and
+values do not move. It reads the same cached one-year matrix, so it adds no price
+read, takes no window (fixed at one year like `correlation`), and uses the same bar
+cell and the same 0–0.9 filter range. The arithmetic is one function,
+`services.stats.weighted_peer_correlation`, shared by the plugin and
+`GET /api/correlation/{etf}`, which answers `weightedAverages` beside `averages`.
+For a deep-filled fund both cover the whole basket.
+
+The Matrix and Network tabs' side panel shows it too: select a holding and a
+WEIGHTED ρ card sits beside its plain CORRELATION figure, a dash where there is no figure. It
+is the same number as the table column for the same fund (the tab always asks for
+the past year, as the column does; the endpoint's own `period` would move it).
 
 ### How a holding relates to its fund
 
