@@ -3,12 +3,14 @@ import { api } from '../utils/api';
 import { useDeepFillEpoch } from './useDeepFillEpoch';
 
 /** Shape returned before live data has arrived, or if the fetch never resolves. */
-const EMPTY = { matrix: {}, tickers: [], averages: {}, strongest: null, weakest: null, hub: null, edgeCount: 0, clusters: [] };
+const EMPTY = { matrix: {}, tickers: [], averages: {}, weightedAverages: {}, strongest: null, weakest: null, hub: null, edgeCount: 0, clusters: [] };
 
 /**
  * Fetches the pairwise correlation matrix (and derived stats: averages,
- * strongest/weakest pair, hub, and `clusters` — the groups of holdings that
- * moved together, issue #143) for an ETF's holdings.
+ * `weightedAverages` — the same average with each peer counting in
+ * proportion to its fund weight, issue #185 — strongest/weakest pair, hub, and
+ * `clusters` — the groups of holdings that moved together, issue #143) for an
+ * ETF's holdings.
  *
  * Returns EMPTY placeholders while the request is in flight or if it
  * settles without live data — consumers should check `loading`/`isLive`
@@ -27,9 +29,10 @@ export function useLiveCorrelation(etfId) {
   const isLive = !!data?.matrix && Object.keys(data.matrix).length > 0;
 
   return {
-    // `clusters: []` first, so a backend that predates the field (a frontend
-    // deployed ahead of it) reads as "no groups" rather than as undefined.
-    ...(isLive ? { clusters: [], ...data } : EMPTY),
+    // `clusters: []` and `weightedAverages: {}` first, so a backend that predates
+    // either field (a frontend deployed ahead of it) reads as "no groups" and "no
+    // figure" rather than as undefined.
+    ...(isLive ? { clusters: [], weightedAverages: {}, ...data } : EMPTY),
     loading,
     error,
     isLive,

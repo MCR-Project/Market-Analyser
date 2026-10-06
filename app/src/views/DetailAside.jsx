@@ -9,6 +9,8 @@
  *  B. Stock selected → stock detail:
  *     • Ticker, name, sector
  *     • Value and weight stat cards
+ *     • CORRELATION and WEIGHTED ρ cards (issue #185), side by side - the two
+ *       table columns of those names, once the matrix has loaded
  *     • Ranked peer correlation list (clickable to switch selection)
  *
  * Height (issue #176): the panel is exactly as tall as the plot beside it —
@@ -20,8 +22,18 @@
  * panel, and through it the matrix or graph, any taller: the list scrolls
  * instead. It used to be as tall as its content but capped at the view's
  * visible height, which on a short window left the list a few pixels high.
- * (`min-h-[480px]` below is MIN_H: about 260px of fixed header and tiles,
- * and 200px or so of list.)
+ * (`min-h-[480px]` below is MIN_H: about 320px of fixed header and tiles,
+ * and 150px or so of list; a deep-filled fund's one-line note takes a little more.)
+ *
+ * The two ρ cards read the backend's own `averages` and `weightedAverages`,
+ * which cover its whole matrix - for a deep-filled fund, every holding, not
+ * only the ones drawn (issue #172) - so they match the table's CORRELATION and
+ * WEIGHTED ρ columns, and the panel says so rather than leave a reader to
+ * wonder why they differ from the peers listed below. A holding with no figure
+ * is a dash, never a 0 (CLAUDE.md invariant 7). The cards are labelled by the table
+ * columns they match, not "AVG ρ", which is the whole fund's figure on the identity
+ * card; and they are not drawn until the matrix has loaded, so a dash never means
+ * "not here yet" - it would read as "this holding has no figure".
  */
 import { memo, useMemo, useCallback } from 'react';
 import { useLiveStocks } from '../hooks/useLiveStocks';
@@ -37,6 +49,9 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
     const w = etf.holdings.find(x => x[0] === selected)?.[1] || 0;
     return { ticker: selected, name: s.name, sector: s.sector, weight: w.toFixed(1), value: fmtMoney(etf.aum * w / 100) };
   }, [selected, tickers, etf, stockMap]);
+
+  const avgCorr = selected ? correlationData?.averages?.[selected] : null;
+  const weightedCorr = selected ? correlationData?.weightedAverages?.[selected] : null;
 
   const corrMatrix = correlationData?.matrix;
   // No mock fallback — a peer missing from the live matrix (e.g. a ticker
@@ -93,6 +108,24 @@ export const DetailAside = memo(function DetailAside({ etf, tickers, selected, o
                 <div className="text-lg font-bold text-[var(--fg)] tabular-nums">{selData.weight}%</div>
               </div>
             </div>
+
+            {correlationData?.isLive && (
+              <div className="flex-none flex gap-2.5 mb-1">
+                <div className="flex-1 bg-[var(--bg-3)] rounded-[var(--radius-sm)] p-[10px_12px]" title="Average ρ to every other holding, each counting the same">
+                  <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] mb-[3px]">CORRELATION</div>
+                  <div className="text-lg font-bold text-[var(--fg)] tabular-nums">{avgCorr == null ? '—' : fmtCorr(avgCorr)}</div>
+                </div>
+                <div className="flex-1 bg-[var(--bg-3)] rounded-[var(--radius-sm)] p-[10px_12px]" title="Average ρ to every other holding, each counting in proportion to its fund weight">
+                  <div className="font-[var(--font-mono)] text-[10px] text-[var(--fg-2)] mb-[3px]">WEIGHTED ρ</div>
+                  <div className="text-lg font-bold text-[var(--fg)] tabular-nums">{weightedCorr == null ? '—' : fmtCorr(weightedCorr)}</div>
+                </div>
+              </div>
+            )}
+            {correlationData?.isLive && correlationData?.deepFill && (
+              <div className="flex-none text-[11px] text-[var(--fg-3)] leading-snug mt-1">
+                Both figures cover the whole fund, not only the holdings drawn.
+              </div>
+            )}
 
             <div className="flex-none font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] mt-4 mb-2.5">CORRELATION TO PEERS</div>
             <div className="corr-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 pr-1 -mr-1">
