@@ -101,7 +101,8 @@ decide which candles a price chart draws and what hovering one says
 hover line (`tooltipPlacement.js`, issue #177), and the one that decides what the header says
 about how recent the daily fetch was (`freshness.js`, issue #154), and the ones that decide what a typed or clicked date does to
 the portfolio window and what its preset buttons mean (`windowCalendar.js`, `windowPresets.js`,
-issue #156). Logic that is worth
+issue #156), and the ones behind the Full view's canvases (`fullView.js`, `fullMatrix.js`,
+`fullNetwork.js`, `forceLayout.js`, `viewport.js`, `fullViewRoute.js`, issue #173). Logic that is worth
 testing goes in a pure module and is tested through its public function, the
 way `planImport` is; components, hooks and dialogs are checked by using the
 running app.

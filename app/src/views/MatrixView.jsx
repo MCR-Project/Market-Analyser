@@ -40,12 +40,13 @@ import { useLiveSectors } from '../hooks/useLiveSectors';
 import { useMatrixOrder } from '../hooks/useMatrixOrder';
 import { cellColor } from '../utils/correlation';
 import { fmtCorr } from '../utils/format';
-import { orderMatrix } from '../utils/matrixOrder';
+import { orderMatrix, ORDER_OPTIONS, WITHIN_OPTIONS } from '../utils/matrixOrder';
 import { useElementSize } from '../hooks/useElementSize';
 import { DetailAside } from './DetailAside';
 import { Loading } from '../components/ui/Loading';
 import { ErrorState } from '../components/ui/ErrorState';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { FullViewLink } from '../components/etf/FullViewLink';
 
 /** Row-label column width and header-row height, both fixed — only the
  *  cells grow. The header row is given exactly HEADER_H (style below), not
@@ -66,16 +67,6 @@ const CELL_MIN_H = 30, CELL_MAX_H = 60;
  *  — otherwise a grid sized to fit exactly would overflow (see above). */
 const SECTION_LABEL_H = 20;
 const SECTION_GAP = 8;
-
-const ORDER_OPTIONS = [
-  { value: 'cluster', label: 'Cluster' },
-  { value: 'alpha', label: 'A–Z' },
-  { value: 'weight', label: 'Weight' },
-];
-const WITHIN_OPTIONS = [
-  { value: 'weight', label: 'Weight' },
-  { value: 'alpha', label: 'A–Z' },
-];
 
 const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value));
 
@@ -148,6 +139,9 @@ export const MatrixView = memo(function MatrixView({ selected, onSelect }) {
         {order === 'cluster' && (
           <SegmentedControl label="within" options={WITHIN_OPTIONS} value={within} onChange={setWithin} />
         )}
+        {/* Only while the fund is deep-filled (the backend adds `deepFill` then): the
+            whole-fund picture is drawn from that result (issue #173). */}
+        {etf?.deepFill && <FullViewLink etfId={etfId} kind="matrix" />}
       </div>
 
       {/* This view fetches its own copy of the ETF (see useLiveEtf), so it

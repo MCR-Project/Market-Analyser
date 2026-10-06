@@ -39,3 +39,17 @@ export function readChoice(params, key, allowed, fallback) {
   const raw = params.get(key);
   return allowed.includes(raw) ? raw : fallback;
 }
+
+/**
+ * A numeric parameter: the number if it is a plain decimal, clamped into
+ * [min, max], else `fallback`. Clamped rather than dropped for the same reason
+ * `readChoice` canonicalises: a hand-edited `?threshold=3` should open at the
+ * nearest value the control can hold, not at an unrelated default. Anything that
+ * is not a plain decimal (`abc`, `0.5x`, `Infinity`, `1e999`, empty) is not a
+ * number the page wrote and reads as the fallback.
+ */
+export function readNumber(params, key, fallback, min, max) {
+  const raw = params.get(key);
+  if (raw === null || !/^-?(\d+\.?\d*|\.\d+)$/.test(raw)) return fallback;
+  return Math.min(max, Math.max(min, Number(raw)));
+}

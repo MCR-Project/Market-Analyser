@@ -31,6 +31,10 @@ Endpoints:
   POST /api/deep-fill/{etf_id}/cancel
                                  — stop it after the current batch, keeping
                                    what was fetched
+  GET /api/deep-fill/{etf_id}/full-view
+                                 — the stored whole-basket matrix and clusters
+                                   a Full view is drawn from; 404 when the fund
+                                   is not deep-filled (issue #173)
   POST /api/portfolio/simulate   — value a basket of tickers over a window,
                                    with optional rebalancing and recurring
                                    contributions
@@ -435,6 +439,28 @@ def start_deep_fill(etf_id: str):
         return _deep_fill_response(deep_fill.start(etf_id.upper()))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/deep-fill/{etf_id}/full-view")
+def get_deep_fill_full_view(etf_id: str):
+    """What the Full view (issue #173) draws a deep-filled fund from: the whole
+    basket's correlation matrix, rounded and as a lower triangle to keep it bounded
+    for ~500 holdings, its `clusters`, each holding's `weights` and `averages`, the
+    holdings left out with why (`excluded`), and the Deep-fill's own `asOf` and
+    `expiresAt`. Read back from the result the job finished with, never computed
+    here and never read from the database - opening a Full view is a lookup.
+
+    **404** - never retried - when there is nothing to draw: the fund was never
+    deep-filled, its result has expired, or its job is still running (a partial
+    picture is never served). The frontend says which in words and links back to
+    the normal view."""
+    etf_id = etf_id.upper()
+    result = deep_fill_store.store.full_view(etf_id)
+    if result is None:
+        raise HTTPException(
+            404, f"'{etf_id}' is not deep-filled right now (never run, finished and expired, or still running)"
+        )
+    return result
 
 
 @router.post("/deep-fill/{etf_id}/cancel")

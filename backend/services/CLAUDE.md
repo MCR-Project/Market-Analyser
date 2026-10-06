@@ -10,6 +10,7 @@ decisions.
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached (`get_dividends`, `get_risk_free_rate` and `get_untracked_info` have none) |
 | `deep_fill.py` | The Deep-fill job (issue #171): fetches a fund's Untracked holdings from yfinance on request, one background job at a time, with progress, cancel and resume — writes nothing to the database |
 | `deep_fill_store.py` | What a Deep-fill holds in memory: per-ticker data and one result per fund, with TTL expiry and oldest-first eviction. Imported by `market_data`, so it imports nothing from it |
+| `full_view.py` | The compact, rounded payload a Full view (issue #173) is drawn from, built once from a deep-filled fund's matrix: pure, no I/O. `deep_fill._derive` calls it and the store holds the answer |
 | `freshness.py` | When the daily fetch job last finished and by when the next run is due (issue #154) — reads the job's own `fetch_run` record, no live fallback |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
 | `stats.py` | Return and risk arithmetic over a plain series, and the correlation matrix's clustering (`cluster_correlation`, issue #143) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
@@ -217,7 +218,8 @@ tail like prices they have, without a request ever fetching it:
 
 `compute_correlation_matrix` first asks the store for the matrix the Deep-fill finished
 with (`derived_correlation`, exact ticker order and period), so a Full view reads back
-what was drawn. The Fund Index has no stored copy: its inputs are the per-ticker series
+what was drawn; `deep_fill_store.full_view(etf_id)` is the stored payload itself (None
+when the fund is not deep-filled, so the route's 404 and a never-run fund are one case). The Fund Index has no stored copy: its inputs are the per-ticker series
 the store already holds.
 
 ## The risk-free rate (issue #103)
