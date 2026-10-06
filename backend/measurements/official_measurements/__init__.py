@@ -4,7 +4,8 @@ shipped with the app (correlation, % of ETF, value held, the
 fund-relation family added by issue #107, the holding's-own-price-
 history family added by issue #108, the metadata/income family added by
 issue #109, the rolling correlation column added by issue #110, and the
-days-to-liquidate column added by issue #111).
+days-to-liquidate column added by issue #111, and the weighted correlation
+column added by issue #185).
 
 measurements/__init__.py combines OFFICIAL_MEASUREMENTS with
 addon_measurements.ADDON_MEASUREMENTS to build the full ALL_MEASUREMENTS
@@ -26,9 +27,14 @@ from measurements.official_measurements.rolling_correlation import RollingCorrel
 from measurements.official_measurements.tail_correlation import TailCorrelationMeasurement
 from measurements.official_measurements.value_held import ValueHeldMeasurement
 from measurements.official_measurements.volatility import VolatilityMeasurement
+from measurements.official_measurements.weighted_correlation import WeightedCorrelationMeasurement
 
 OFFICIAL_MEASUREMENTS = [
     CorrelationMeasurement(),
+    # The same matrix, with each peer counting in proportion to its fund
+    # weight (issue #185) - a second figure beside the plain average, not a
+    # change to it.
+    WeightedCorrelationMeasurement(),
     EtfWeightMeasurement(),
     ValueHeldMeasurement(),
     # How a holding relates to its fund (issue #107) - beyond ρ alone.
