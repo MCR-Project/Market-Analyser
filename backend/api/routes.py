@@ -21,7 +21,7 @@ Endpoints:
   GET /api/freshness             — when the daily fetch job last finished,
                                    and the deadline for the next run
                                    (issue #154)
-  GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings, plus clusters
+  GET /api/correlation/{etf_id}  — Pearson correlation matrix for holdings, plus clusters and weighted averages
   GET /api/sectors/{etf_id}      — sector weight breakdown
   GET /api/deep-fill/{etf_id}    — whether a fund can be, is being, or has been
                                    deep-filled, with progress and expiry
@@ -56,6 +56,7 @@ from services.market_data import (
 )
 from services.freshness import get_freshness
 from services.portfolio import compute_portfolio_risk, simulate_portfolio
+from services.stats import weighted_peer_correlation
 from services.tickers import DEFAULT_SEARCH_LIMIT, resolve_ticker, search_tickers
 from config import SECTOR_TAG
 
@@ -298,6 +299,15 @@ def get_correlation(
     `excluded` names, with why, each Untracked holding left out: one the job could
     not fetch, or all of them for a `period` reaching back further than the
     one year a Deep-fill fetches. It is absent for a fund that is not deep-filled.
+
+    `weightedAverages` (issue #185) is each holding's average ρ to its peers with
+    every peer counting in proportion to its fund weight - the figure the
+    Weighted Correlation column shows, beside the plain `averages`. It covers the
+    same holdings the matrix does, so while the fund is deep-filled it is the
+    whole-fund figure, not the tracked holdings drawn. A holding with no computed
+    pair to any weighted peer is `null`, as in `averages`; an empty matrix answers
+    `{}`. Only the one-year default is matched by the column - a different
+    `period` weights the same peers over that window.
     """
     etf_id = etf_id.upper()
     holdings, _ = get_etf_holdings(etf_id)
@@ -308,6 +318,12 @@ def get_correlation(
     # A copy: the matrix may be the very object a Deep-fill holds (and the cache
     # holds), and the fields added below must not outlive this request in it.
     result = dict(compute_correlation_matrix(tickers, period=period))
+    # Beside `averages`, never instead of it (issue #185): the same pairs, each peer
+    # weighted by its fund weight. Over exactly the holdings read above, so a
+    # deep-filled fund's figure covers its whole basket, like the table column.
+    result["weightedAverages"] = weighted_peer_correlation(
+        result.get("matrix") or {}, {t: w for t, w in holdings}
+    )
 
     # Count edges above threshold for the network view. A null pair (not
     # enough overlapping history to correlate at all - issue #97) is
