@@ -264,7 +264,7 @@ a background job, one at a time, with progress:
   the difference.
 - `GET /api/deep-fill/{etf_id}/full-view` is what the [Full view](#the-full-view)
   is drawn from: the whole basket's correlation matrix, its clusters, each holding's
-  weight and average ρ, the holdings left out and why (`excluded`), and the
+  weight, average ρ and weighted ρ, the holdings left out and why (`excluded`), and the
   Deep-fill's own `asOf` and `expiresAt`. It is **read back, never computed and never
   read from the database**, so opening it costs a lookup. The matrix is sent as a
   rounded (2 decimals) lower triangle without the diagonal, `[[], [ρ10], [ρ20, ρ21], …]`
@@ -1641,8 +1641,11 @@ so strong links are extremely strong and weak ones count for little; the normal
 network's pull is linear. And the pull is floored for light holdings, because over 500
 holdings the tail's pull would otherwise be lost and the graph would settle into a
 ring with no groups. Repulsion, which keeps nodes apart, is the normal network's. A node's ticker is written once the node
-is big enough on screen to carry it; hovering shows its weight, cluster and how many
-links it has at the threshold, and clicking isolates its links and dims the rest.
+is big enough on screen to carry it; hovering shows its weight, cluster, its **weighted ρ** with
+its plain average ρ beside it (a dash for a holding with no figure, never 0), and how many links
+it has at the threshold, and clicking isolates its links and dims the rest. The two figures are
+worked out once, with the rest of the picture, when the Deep-fill finishes, and the weighted one
+is the number the holdings table's WEIGHTED ρ column shows for the same fund (issue #186).
 
 Both zoom with the wheel or a pinch, pan by dragging, and take the keyboard when
 focused (`+`, `−`, `0` to fit, the arrow keys) and have buttons for the same. Clusters
