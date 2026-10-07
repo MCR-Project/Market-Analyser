@@ -10,7 +10,7 @@ decisions.
 | `market_data.py` | Every read of ETF/stock/price/dividend data: DB first, live yfinance fallback, cached (`get_dividends`, `get_risk_free_rate` and `get_untracked_info` have none) |
 | `deep_fill.py` | The Deep-fill job (issue #171): fetches a fund's Untracked holdings from yfinance on request, one background job at a time, with progress, cancel and resume — writes nothing to the database |
 | `deep_fill_store.py` | What a Deep-fill holds in memory: per-ticker data and one result per fund, with TTL expiry and oldest-first eviction. Imported by `market_data`, so it imports nothing from it |
-| `full_view.py` | The compact, rounded payload a Full view (issue #173) is drawn from, built once from a deep-filled fund's matrix: pure, no I/O. `deep_fill._derive` calls it and the store holds the answer |
+| `full_view.py` | The compact, rounded payload a Full view (issue #173) is drawn from, built once from a deep-filled fund's matrix (the weighted averages of issue #186 included, via `stats.weighted_peer_correlation`): pure, no I/O. `deep_fill._derive` calls it and the store holds the answer |
 | `freshness.py` | When the daily fetch job last finished and by when the next run is due (issue #154) — reads the job's own `fetch_run` record, no live fallback |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
 | `stats.py` | Return and risk arithmetic over a plain series, the correlation matrix's clustering (`cluster_correlation`, issue #143) and its fund-weighted peer average (`weighted_peer_correlation`, issue #185) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
