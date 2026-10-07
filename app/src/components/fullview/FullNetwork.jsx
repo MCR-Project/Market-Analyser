@@ -14,6 +14,11 @@
  * screen to carry it, so a graph zoomed out is dots and lines and one zoomed in is
  * readable; the selected stock, its neighbours and the hovered node are always named.
  *
+ * Hovering a node names its weight and cluster and, beside them, its weighted ρ and
+ * plain average ρ (issue #186) — the backend's own figures, built into the payload, so
+ * the weighted one is the number the table's column shows for the fund. A holding with
+ * none is a dash, never a 0 (CLAUDE.md invariant 7).
+ *
  * Clicking a node isolates it: everything not linked to it at the threshold dims and
  * its own links are drawn bold. Clicking the background clears it. Neutral colours
  * throughout, with the accent for links and for the selection — colour keeps meaning
@@ -171,13 +176,19 @@ export function FullNetwork({ fund, positions, ranked, threshold, selected, onSe
     const t = fund.tickers[hover.i];
     const linked = neighboursOf(fund.corr, n, hover.i, threshold).size;
     const rho = selectedIdx >= 0 && selectedIdx !== hover.i ? fund.at(hover.i, selectedIdx) : undefined;
+    const weightedRho = fund.weightedAverages[t];
+    const averageRho = fund.averages[t];
     tooltip = (
       <div
         className="absolute z-10 pointer-events-none px-3 py-2 rounded-[var(--radius-md)] bg-[var(--bg-1)] border border-[var(--border-strong)] shadow-[var(--shadow-md)] font-[var(--font-mono)] text-xs text-[var(--fg-1)] whitespace-nowrap"
-        style={{ top: Math.max(8, Math.min(hover.y + 14, hover.height - 100)), ...tooltipPlacement({ pctX: (hover.x / hover.width) * 100 }) }}
+        style={{ top: Math.max(8, Math.min(hover.y + 14, hover.height - 120)), ...tooltipPlacement({ pctX: (hover.x / hover.width) * 100 }) }}
       >
         <div className="font-semibold text-[var(--fg)]">{t}</div>
         <div>{fmtWeight(fund.weights[hover.i])} of the fund{clusterOf[t] ? ` · ${clusterOf[t].name}` : ''}</div>
+        <div>
+          Weighted ρ {weightedRho == null ? '—' : fmtCorr(weightedRho)}
+          <span className="text-[var(--fg-3)]"> · average {averageRho == null ? '—' : fmtCorr(averageRho)}</span>
+        </div>
         <div className="text-[var(--fg-3)]">{linked} {linked === 1 ? 'link' : 'links'} at ρ ≥ {fmtCorr(threshold)}</div>
         {rho !== undefined && (
           <div>ρ with {selected}: {rho === null ? 'n/a' : fmtCorr(rho)}</div>
