@@ -11,6 +11,7 @@ const fund = decodeFullView({
   tickers: ['A', 'B', 'C', 'D', 'E'],
   weights: [30, 20, 10, 5, 1],
   averages: [0, 0, 0, 0, 0],
+  weightedAverages: [0, 0, 0, 0, 0],
   clusters: [],
   correlation: {
     decimals: 2,

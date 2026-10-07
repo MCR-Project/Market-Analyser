@@ -9,6 +9,7 @@ const payload = (over = {}) => ({
   tickers: ['AAA', 'BBB', 'CCC'],
   weights: [30, 20, 0.5],
   averages: [0.5, 0.4, null],
+  weightedAverages: [0.7, 0.3, null],
   clusters: [['AAA', 'BBB']],
   correlation: { decimals: 2, triangle: [[], [0.62], [null, 0.1]] },
   excluded: { ZZZ: 'it could not be fetched' },
@@ -47,6 +48,13 @@ describe('decodeFullView', () => {
     expect(decodeFullView(payload()).averages).toEqual({ AAA: 0.5, BBB: 0.4, CCC: null });
   });
 
+  it('keeps weighted averages by ticker, with null (never 0) where a ticker has no figure', () => {
+    const { weightedAverages } = decodeFullView(payload());
+
+    expect(weightedAverages).toEqual({ AAA: 0.7, BBB: 0.3, CCC: null });
+    expect(weightedAverages.CCC).not.toBe(0);
+  });
+
   it('carries the clusters, the left-out holdings and the Deep-fill\'s own times through unchanged', () => {
     const view = decodeFullView(payload());
 
@@ -59,7 +67,7 @@ describe('decodeFullView', () => {
 
   it('decodes a fund of one holding', () => {
     const view = decodeFullView(payload({
-      tickers: ['AAA'], weights: [100], averages: [null], clusters: [],
+      tickers: ['AAA'], weights: [100], averages: [null], weightedAverages: [null], clusters: [],
       correlation: { decimals: 2, triangle: [[]] },
     }));
     expect(view.n).toBe(1);
@@ -71,6 +79,12 @@ describe('decodeFullView', () => {
     expect(() => decodeFullView(payload({ correlation: { decimals: 2, triangle: [[], [0.6]] } }))).toThrow(/malformed/i);
     expect(() => decodeFullView(payload({ correlation: { decimals: 2, triangle: [[], [0.6, 0.1], [null, 0.1]] } }))).toThrow(/malformed/i);
     expect(() => decodeFullView(null)).toThrow(/malformed/i);
+  });
+
+  it('refuses weighted averages that do not line up with the tickers, rather than read them at the wrong stride', () => {
+    expect(() => decodeFullView(payload({ weightedAverages: [0.7, 0.3] }))).toThrow(/malformed/i);
+    expect(() => decodeFullView(payload({ weightedAverages: [0.7, 0.3, null, 0.1] }))).toThrow(/malformed/i);
+    expect(() => decodeFullView(payload({ weightedAverages: undefined }))).toThrow(/malformed/i);
   });
 });
 

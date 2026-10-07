@@ -10,6 +10,7 @@ const decode = (over = {}) => decodeFullView({
   tickers: ['AAA', 'BBB', 'CCC', 'DDD'],
   weights: [30, 20, 10, 5],
   averages: [0.5, 0.4, 0.3, 0.2],
+  weightedAverages: [0.5, 0.4, 0.3, 0.2],
   clusters: [['AAA', 'CCC']],
   correlation: { decimals: 2, triangle: [[], [0.62], [0.9, 0.1], [0.2, 0.3, 0.4]] },
   excluded: {},

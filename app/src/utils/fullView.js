@@ -14,10 +14,15 @@
  * and nothing is recomputed from it beyond arrangement. What it says (`asOf`,
  * `expiresAt`) is the Deep-fill's own.
  *
- * A payload whose parts disagree (weights not as long as tickers, a triangle row of
- * the wrong length) throws instead of decoding: a matrix read at the wrong stride
- * draws plausible-looking correlations between the wrong pairs, which is worse than
- * drawing nothing.
+ * `averages` and `weightedAverages` (issue #186) are read by ticker, `null` where a
+ * holding has no figure; both come from the backend's own matrix, never from this
+ * one, so the tooltip's figures equal the table's.
+ *
+ * A payload whose parts disagree (weights not as long as tickers, weighted averages
+ * not as long as tickers, a triangle row of the wrong length) throws instead of
+ * decoding: a matrix read at the wrong stride draws plausible-looking correlations
+ * between the wrong pairs, which is worse than drawing nothing. `weightedAverages`
+ * is also required to be present; `averages` is the older, lenient field.
  */
 
 /**
@@ -26,7 +31,8 @@
  *   etfId: string, asOf: string, expiresAt: string, period: string,
  *   n: number, tickers: string[], weights: number[],
  *   holdings: Array<[string, number]>, indexOf: Map<string, number>,
- *   averages: Record<string, number|null>, clusters: string[][],
+ *   averages: Record<string, number|null>, weightedAverages: Record<string, number|null>,
+ *   clusters: string[][],
  *   excluded: Record<string, string>,
  *   corr: Float32Array, at: (i: number, j: number) => number | null,
  * }}
@@ -38,6 +44,10 @@ export function decodeFullView(payload) {
   const { tickers, weights } = payload;
   const n = tickers.length;
   if (weights.length !== n) throw bad('weights and tickers differ in length');
+  // Required, unlike `averages`: a dash means "this holding has no figure", and a
+  // payload that never carried the field cannot say that.
+  const weightedList = payload.weightedAverages;
+  if (!Array.isArray(weightedList) || weightedList.length !== n) throw bad('weighted averages and tickers differ in length');
   const triangle = payload.correlation?.triangle;
   if (!Array.isArray(triangle) || triangle.length !== n) throw bad('triangle has the wrong number of rows');
 
@@ -65,6 +75,7 @@ export function decodeFullView(payload) {
     holdings: tickers.map((t, i) => [t, weights[i]]),
     indexOf: new Map(tickers.map((t, i) => [t, i])),
     averages: Object.fromEntries(tickers.map((t, i) => [t, averageList[i] ?? null])),
+    weightedAverages: Object.fromEntries(tickers.map((t, i) => [t, weightedList[i] ?? null])),
     clusters: payload.clusters ?? [],
     excluded: payload.excluded ?? {},
     corr,
