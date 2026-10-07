@@ -13,7 +13,7 @@ decisions.
 | `full_view.py` | The compact, rounded payload a Full view (issue #173) is drawn from, built once from a deep-filled fund's matrix: pure, no I/O. `deep_fill._derive` calls it and the store holds the answer |
 | `freshness.py` | When the daily fetch job last finished and by when the next run is due (issue #154) — reads the job's own `fetch_run` record, no live fallback |
 | `tickers.py` | The tracked universe (search) and resolving one symbol outside it |
-| `stats.py` | Return and risk arithmetic over a plain series, and the correlation matrix's clustering (`cluster_correlation`, issue #143) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
+| `stats.py` | Return and risk arithmetic over a plain series, the correlation matrix's clustering (`cluster_correlation`, issue #143) and its fund-weighted peer average (`weighted_peer_correlation`, issue #185) — no I/O, shared by `portfolio.py`, `fund_metrics.py` and every future single-holding metric |
 | `portfolio.py` | The simulation, plus its sibling risk decomposition (issue #113) — decides what series to hand `stats.py` and assembles its answers into a portfolio's or a basket's shape, no I/O of its own beyond the reads it calls |
 | `fund_metrics.py` | The fund-level metrics card's arithmetic assembly (issue #105) — `portfolio.py`'s counterpart for a fund's own basket rather than a simulated run: decides what to hand `stats.py`, assembles the answer, no arithmetic of its own |
 

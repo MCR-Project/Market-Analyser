@@ -120,6 +120,18 @@ weighted-return index (a holdings-table measurement). Same underlying
 statistic, different inputs — not split into separate terms.
 _Avoid_: Basket Correlation, Fund Correlation (as separate terms)
 
+**Weighted Correlation**:
+A Holding's average ρ to the other Holdings of its ETF, with each peer counting
+in proportion to its fund weight — so ρ to a heavy Holding such as NVDA moves the
+figure far more than ρ to one weighing a fraction of a percent. The Holding never
+counts toward its own figure. A peer it has no computed ρ with is left out along
+with its weight, never counted as zero, and a Holding with no computed pair at all
+has no figure. Read over the same fixed one-year lookback as Correlation, not a
+Window the user picks. It weights the *peers*; it does not say how much the
+Holding itself matters to the fund (that is its Weight).
+_Avoid_: Correlation to Fund (the Fund Index entry's statistic, ρ against the
+fund's own return series — a different calculation), Weighted average ρ
+
 **Fund Index**:
 An ETF's own weighted-return series, built once from whichever tracked
 holdings have a complete price history over the window (weights renormalised

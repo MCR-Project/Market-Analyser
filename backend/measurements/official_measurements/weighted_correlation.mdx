@@ -1,0 +1,104 @@
+---
+title: Weighted Correlation
+summary: How closely a holding has moved with the rest of its fund, counting the heavy positions for more.
+example_etf: SMH
+example_stock: NVDA
+---
+
+## What it measures
+
+Each holding gets a single number: its average correlation to the other
+holdings of its fund over the past year — but with each peer counting in
+proportion to **its own weight in the fund**. Correlation to a position that
+makes up a fifth of the fund moves the figure far more than correlation to one
+that makes up a fraction of a percent.
+
+The plain CORRELATION column gives every peer one vote. In a fund with one
+giant and fifty small positions, that makes a holding's score mostly a
+statement about the small ones. This column asks the other question: how
+closely does the holding move with the positions that actually drive the fund?
+
+A high value means it has been moving with the heavy positions. A low value
+means it has been drifting away from them, whatever it did against the long
+tail.
+
+## Where the numbers come from
+
+Two inputs, both fetched by the measurement itself — the same two the plain
+column reads, so enabling this one costs no extra price history:
+
+- `holdings` gives the fund's constituents and their weights. Only the tickers
+  tracked in the database appear, unless the fund has been deep-filled — see the
+  caveats.
+- `correlation_matrix` turns those tickers into a matrix of pairwise
+  correlations over **one year** of **daily** returns. Nothing in the UI
+  mentions that window and this column cannot change it.
+
+## How it is computed
+
+For holding <Formula inline tex={String.raw`i`} />, the weighted mean of its
+correlations to every peer <Formula inline tex={String.raw`j`} />, using the
+**peer's** fund weight <Formula inline tex={String.raw`w_j`} />:
+
+<Formula tex={String.raw`\tilde\rho_i = \frac{\sum_{j \neq i} w_j \, \rho_{ij}}{\sum_{j \neq i} w_j}`} />
+
+- The holding itself is never counted: the sums skip
+  <Formula inline tex={String.raw`j = i`} />. So a holding's own weight changes
+  its peers' scores and never its own.
+- A pair with no computed correlation is left out **together with its weight**.
+  It does not count as zero, which would pull the score down by exactly the
+  weight of the peer the data says least about.
+- A holding with no computed pair at all has no figure — a dash, with a reason.
+
+A small case, worth checking by hand. Holding C has ρ = 0.8 to A and ρ = 0.2
+to B, and A weighs 50 and B weighs 10 in the fund:
+
+<Formula tex={String.raw`\tilde\rho_C = \frac{50 \cdot 0.8 + 10 \cdot 0.2}{50 + 10} = \frac{42}{60} = 0.70`} />
+
+The plain average of the same two pairs is 0.50. The difference is the whole
+point: C moves closely with the position that matters and loosely with the one
+that barely does, and only the weighted figure says so.
+
+<WorkedExample />
+
+## How it reads
+
+| Weighted ρ | What it usually indicates |
+| --- | --- |
+| Above 0.5 | Moves closely with the fund's heaviest positions |
+| 0.2 – 0.5 | Typical for a sector fund, where one theme drives everything |
+| 0.0 – 0.2 | Largely independent of the positions that drive the fund |
+| Below 0 | Has tended to move against them |
+
+Read it beside CORRELATION, not instead of it. A weighted figure well above the
+plain one says the holding tracks the big names more tightly than it tracks the
+tail; a weighted figure well below says it has been moving with the tail and
+away from the big names.
+
+<Note>
+It weights the *peers*; it does not say how much the holding itself matters to
+the fund. That is its weight, shown in the % OF ETF column.
+</Note>
+
+## Caveats
+
+<Warning>
+This describes the past year. It is not a prediction, and correlations
+notoriously rise in a sell-off — precisely when the diversification a low
+number seems to promise would matter most.
+</Warning>
+
+- **The fund is its tracked holdings only**, not its full constituent list —
+  unless the fund has been deep-filled, in which case the figure covers the
+  whole fund for as long as that lasts. Outside a deep-fill, the peers are the
+  larger positions the app tracks, and the tail that carries the rest of the
+  weight is not in the sum.
+- **There is no floor on how little peer weight a score may rest on.** A holding
+  whose only computed pair is to a position weighing 0.2% scores that one
+  correlation, in full. A pair with fewer than 30 overlapping daily returns is
+  unknown, not zero, so a holding that is new can end up with a score resting on
+  very little.
+- **A holding with no computed pair to any weighted peer shows a dash** rather
+  than a value, with the reason beside it.
+- **Holdings with no price history at all are dropped** before the matrix is
+  built, so they get no value rather than a wrong one.
