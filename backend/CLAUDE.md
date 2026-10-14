@@ -359,7 +359,7 @@ the rules touch the ones above.
 5. Cover it in `tests/`.
 
 Route ordering matters: FastAPI matches in registration order, which is why
-`/tickers/search` is declared before `/tickers/{symbol}`. Measurement doc routes
+`/tickers/search` and `/tickers/isin/{isin}` are declared before `/tickers/{symbol}`. Measurement doc routes
 live under `/measurement-docs/...` rather than `/measurements/{id}/doc` for the
 same reason — a plugin route `/measurements/correlation/{etf_id}` would happily
 match `etf_id="doc"`.

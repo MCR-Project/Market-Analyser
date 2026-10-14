@@ -270,7 +270,7 @@ one from being created, and caching either would pin the header on unknown for
 It says nothing about how old the latest price is: a market holiday adds no rows
 and the job still ran.
 
-## `tickers.py` — two questions, two paths
+## `tickers.py` — three questions, three paths
 
 - **"What can I pick?"** → `search_tickers`, answered entirely from a cached
   snapshot of `ticker` + `etfs`. This is the as-you-type path: it never calls
@@ -282,6 +282,22 @@ and the job still ran.
   yfinance answers a made-up ticker's info request with a shell dict, so a name
   proves nothing. Returns `firstDate`, which is what lets the UI warn that a
   holding will sit in cash for part of a window.
+- **"What does this code point to?"** → `resolve_isin` (issue #190), asked once per
+  pasted ISIN and the only function here that searches upstream. `normalise_isin`
+  settles the code first — shape, then the Luhn check digit — and says which of the
+  two failed, so a typo costs no call and is not told as "not found". Yahoo's search
+  does the resolving (`market_data.search_listings`, through `_live`: 404/503/the 429
+  cooldown are mapped there). What survives is Yahoo's order, minus any hit whose
+  symbol is the ISIN itself or fails `SYMBOL_PATTERN`, at most `MAX_ISIN_LISTINGS` (3),
+  each a search result's shape plus `exchange` and `currency`. **Currency comes from
+  `get_listing_currency`, never `get_stock_info`**: that one defaults a missing
+  currency to `"USD"`, and here the whole point of the field is to say a listing may
+  not be in dollars. A genuine ISIN with no usable hit is `SymbolNotFound`, worded
+  without "invalid", and cached for `CACHE_TTL_ISIN_MISS` only; so is an answer with
+  a listing whose currency could not be read (a thin `.info` is not a fact); a full answer for an hour;
+  a `DataUnavailable` from the search *or* a currency read fails the whole answer and
+  caches nothing, since a currency left blank by a hiccup would otherwise be kept as
+  the fact. The ISIN is never stored — not in `ticker`, not in `etfs`.
 
 ETFs are written into the universe map *after* stocks, so a symbol somehow in
 both tables reads as the fund it is. A tracked ETF has no `prices` rows of its
