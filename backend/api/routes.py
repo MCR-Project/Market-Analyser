@@ -15,6 +15,8 @@ Endpoints:
                                    live call (issue #158)
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
   GET /api/tickers/search?q=     — search the tracked universe
+  GET /api/tickers/isin/{isin}   — the listings an ISIN leads to, each with
+                                   its exchange and currency (issue #190)
   GET /api/tickers/{symbol}      — resolve one symbol, tracked or not
   GET /api/series/{ticker}       — historical price series, by period or
                                    by explicit start/end window
@@ -61,7 +63,7 @@ from services.market_data import (
 from services.freshness import get_freshness
 from services.portfolio import compute_portfolio_risk, simulate_portfolio
 from services.stats import weighted_peer_correlation
-from services.tickers import DEFAULT_SEARCH_LIMIT, resolve_ticker, search_tickers
+from services.tickers import DEFAULT_SEARCH_LIMIT, resolve_isin, resolve_ticker, search_tickers
 from config import SECTOR_TAG
 
 router = APIRouter(prefix="/api")
@@ -187,6 +189,33 @@ def search_universe(
     is what confirms one of those, once somebody has chosen it.
     """
     return search_tickers(q, limit=limit)
+
+
+@router.get("/tickers/isin/{isin}")
+def resolve_isin_listings(isin: str):
+    """The listings an ISIN leads to: `{isin, listings: [...]}`.
+
+    An ISIN identifies a security wherever it trades, so one code can lead to
+    several tickers (each with its own exchange and currency) or, though
+    genuine, to none. Each listing is a search result's shape plus
+    `exchange` and `currency`; `currency` is `null` when it could not be
+    read, never a guessed "USD". Up to three are described, in the price
+    source's own order.
+
+    Answered live and cached - a separate endpoint from /tickers/search
+    precisely because that one never leaves the process.
+
+    400 when the code is not an ISIN or its check digit does not match (a
+    fact about the request, never retried - the message says which), 404 when
+    a well-formed code has no listing upstream (a fact about the index, and
+    deliberately not worded as "invalid"; never retried), 503 when the price
+    source could not be reached (a fact about right now, which the frontend
+    retries).
+    """
+    try:
+        return resolve_isin(isin)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/tickers/{symbol}")
