@@ -1369,6 +1369,39 @@ there is a price for, which is what lets the UI warn that a holding will
 sit in cash for part of the window. **404** when upstream has no history
 for the symbol — a fact about the symbol, and not one to retry.
 
+**`GET /api/tickers/isin/{isin}`** — what an ISIN leads to (issue #190). An
+ISIN identifies a security wherever it trades, so one code can lead to
+several tickers — the same fund is one ticker per exchange that lists it,
+each in that exchange's currency — or, though genuine, to none. The lookup
+is Yahoo's own search, answered live and cached, which is why it is its own
+endpoint: `/api/tickers/search` never leaves the process, and this one
+necessarily does. Nothing is stored: the code is a way to *find* a ticker,
+and a holding stays a ticker.
+
+```jsonc
+{ "isin": "IE00B4L5Y983",
+  "listings": [{ "symbol": "IWDA.L", "name": "iShares Core MSCI World UCITS ETF",
+                 "kind": null, "tracked": false, "sector": "", "sectorTag": "",
+                 "category": "", "logo": "",
+                 "exchange": "London", "currency": "USD" }] }
+```
+
+Each listing is a search result's shape plus `exchange` and `currency`. An
+untracked hit has `kind: null` — nothing in a search hit is a promise about
+what an instrument is. `currency` is `null` when it could not be read, never
+a guessed `USD`. Up to three listings are returned, in Yahoo's order, after
+dropping any hit whose "symbol" is the ISIN itself (Yahoo lists some
+Stuttgart lines that way) or that is not a symbol at all.
+
+**400** for a code that is not twelve characters of the right shape, or whose
+check digit does not add up — the message says which, and nothing is asked
+upstream. **404** for a well-formed code with no listing upstream: Yahoo does
+not index every real ISIN, so the message does not call the code invalid.
+Neither is retried. **503** when the price source could not be reached,
+retried like every other live read and never cached; an answer is cached for
+an hour, and one that is empty or has a listing whose currency could not be
+read for a minute.
+
 ### Portfolio metrics
 
 Every tile in the portfolio summary — Final Value, Total Return, CAGR,
