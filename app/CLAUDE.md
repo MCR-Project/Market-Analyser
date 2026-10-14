@@ -33,7 +33,7 @@ src/utils/tableFloor.js      how tall the holdings table must be to show five ho
 src/utils/networkBox.js      the network graph's minimum height for its width: close to a square, capped (pure, tested; issue #176)
 src/utils/launchScreen.js    which phase the launch screen is in for a given wait: quiet, waking, slow (pure, tested)
 src/utils/deepFill.js        which state a fund's Deep-fill control is in, the dialog's wording, when to poll next (pure, tested; issue #172)
-src/utils/fullView.js        the Full view's payload decoded: the triangle back into one Float32Array square, NaN for "no correlation", `fmtWeight` (pure, tested; issue #173)
+src/utils/fullView.js        the Full view's payload decoded: the triangle back into one Float32Array square, NaN for "no correlation", the per-holding `averages` and `weightedAverages`, `fmtWeight` (pure, tested; issue #173)
 src/utils/fullMatrix.js      the Full matrix's order (matrixOrder.js over every holding), its one-pixel-a-cell bitmap, hit-testing and when labels appear (pure, tested)
 src/utils/fullNetwork.js     the Full network's ranked links, strength bands, neighbours, hit-testing and label rule; fullNetworkLayout.js places the nodes (pure, tested)
 src/utils/forceLayout.js     the force simulation both network graphs share, extracted from layout.js with a characterization test (pure, tested)
@@ -483,6 +483,12 @@ come with it:
   stored 0.9 reads back as 0.89999998 and a link on the threshold would drop out.
 - **Colour keeps meaning ρ.** Cluster blocks and names are neutral outlines; a pair with
   no correlation is a flat neutral, never a point on the ramp (invariant 7).
+- **The network's tooltip carries the weighted ρ** (issue #186), with the plain average
+  beside it, both read from `fund.weightedAverages` / `fund.averages` — the backend's own
+  figures from the payload, never recomputed here from the triangle (which is rounded and
+  would drift from the table's column). `null` is a dash. `weightedAverages` is required by
+  `decodeFullView` and refused if it is not as long as `tickers`: a stride error would
+  hang a holding's figure on the wrong node.
 - **Not here:** the `DetailAside` panel and exporting the picture (issue #173).
 
 ## MDX: two vocabularies, deliberately separate

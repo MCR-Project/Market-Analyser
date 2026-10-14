@@ -23,11 +23,20 @@ megabytes of JSON for a page that only wants to colour squares. The Full view's 
   is no finer than.
 - `averages` (parallel to `tickers`) and `clusters`, as the correlation endpoint
   gives them, because the matrix's cluster order is built from them (matrixOrder.js).
+- `weightedAverages` (issue #186), parallel to `tickers` and `averages`: each
+  holding's average ρ to its peers with every peer counting in proportion to its fund
+  weight, from `stats.weighted_peer_correlation` - the one formula behind the table's
+  Weighted Correlation column and `/api/correlation`'s field of the same name, so a
+  fund's figure is the same number in all three. It is built here, with the payload,
+  because the page computes nothing on open. `null` for a holding with no weighted
+  pair, never 0 (invariant 7).
 - `excluded`: every holding the fund lists that is *not* in `tickers`, with why.
 
 A pair with too little shared history has no correlation (issue #97) and is `null`
 here, as in the matrix it came from - never 0 (invariant 7).
 """
+
+from services.stats import weighted_peer_correlation
 
 DECIMALS = 2
 
@@ -53,12 +62,16 @@ def build(holdings: list[list], matrix_result: dict, failures: dict[str, str], p
     matrix = matrix_result["matrix"]
     weight_of = {ticker: weight for ticker, weight in holdings}
     drawn = set(available)
+    # Every weight the fund lists, as `/api/correlation` passes them: a peer outside
+    # the matrix has no row to be read from, so it carries nothing either way.
+    weighted = weighted_peer_correlation(matrix, weight_of)
 
     return {
         "period": period,
         "tickers": available,
         "weights": [weight_of[t] for t in available],
         "averages": [matrix_result["averages"].get(t) for t in available],
+        "weightedAverages": [weighted.get(t) for t in available],
         "clusters": [list(group) for group in matrix_result["clusters"]],
         "correlation": {
             "decimals": DECIMALS,

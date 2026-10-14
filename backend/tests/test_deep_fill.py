@@ -1220,6 +1220,56 @@ class FullViewTests(ReadCase):
         self.assertEqual(str(built["correlation"]["triangle"][2][0]), "0.0")   # not "-0.0"
         self.assertEqual(built["excluded"], {"D": "it could not be fetched"})
 
+    def test_the_weighted_averages_are_the_figure_the_correlation_endpoint_and_the_table_column_show(self):
+        """Issue #186: built once with the payload, parallel to `tickers`, and the
+        same number `/api/correlation` answers for the same fund - one formula."""
+        self.run_job()
+        full = self.get(self.URL)
+        matrix = self.get("/api/correlation/FAKE")
+
+        self.assertEqual(full["tickers"], self.ALL)
+        self.assertEqual(len(full["weightedAverages"]), len(full["tickers"]))
+        self.assertEqual(
+            full["weightedAverages"], [matrix["weightedAverages"][t] for t in full["tickers"]]
+        )
+
+    def test_a_holding_with_no_computed_pair_has_a_null_weighted_average_never_zero(self):
+        from services import full_view
+
+        matrix = {
+            "A": {"A": 1.0, "B": 0.5, "C": None},
+            "B": {"A": 0.5, "B": 1.0, "C": None},
+            "C": {"A": None, "B": None, "C": 1.0},
+        }
+        built = full_view.build(
+            [["A", 3.0], ["B", 1.0], ["C", 1.0]],
+            {"matrix": matrix, "tickers": ["A", "B", "C"],
+             "averages": {"A": 0.5, "B": 0.5, "C": None}, "clusters": []},
+            {}, "1y",
+        )
+
+        # A's only computed peer is B; B's is A; C has none at all.
+        self.assertEqual(built["weightedAverages"], [0.5, 0.5, None])
+
+    def test_the_weighting_uses_the_funds_weights_of_every_holding_it_lists(self):
+        from services import full_view
+
+        matrix = {
+            "A": {"A": 1.0, "B": 0.8, "C": 0.2},
+            "B": {"A": 0.8, "B": 1.0, "C": 0.4},
+            "C": {"A": 0.2, "B": 0.4, "C": 1.0},
+        }
+        built = full_view.build(
+            [["A", 60.0], ["B", 30.0], ["C", 10.0]],
+            {"matrix": matrix, "tickers": ["A", "B", "C"],
+             "averages": {"A": 0.5, "B": 0.6, "C": 0.3}, "clusters": []},
+            {}, "1y",
+        )
+
+        # A: (30*0.8 + 10*0.2) / 40 = 0.65; B: (60*0.8 + 10*0.4) / 70 = 0.7429 (4 places, as stats rounds).
+        self.assertEqual(built["weightedAverages"][0], 0.65)
+        self.assertEqual(built["weightedAverages"][1], 0.7429)
+
     def test_it_is_read_back_never_computed_and_never_touches_the_database(self):
         self.run_job()
         expected = self.get(self.URL)

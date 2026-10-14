@@ -176,7 +176,11 @@ changing anything near it:
   "the thing asked for does not exist" of the table above — never retried — so it adds no
   new code to that table or to invariant 1. The matrix is a rounded lower triangle
   (`null` for a pair with no correlation, never 0) because the nested one is ~4 MB for 500
-  holdings; keep it bounded if the shape changes.
+  holdings; keep it bounded if the shape changes. It also carries `weightedAverages`
+  (issue #186), parallel to `tickers` and `averages`, from
+  `stats.weighted_peer_correlation` over the fund's own weights — the same call, and so
+  the same number, as `/api/correlation` and the Weighted Correlation column; `null`
+  for a holding with no weighted pair.
 - The manager's lock guards job state only. Anything that can wait on the database or
   yfinance (the untracked-holdings read, the weight-share read in a status) happens
   outside it, because the job thread takes the same lock for every progress update.
