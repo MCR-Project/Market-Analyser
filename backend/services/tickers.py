@@ -1,7 +1,7 @@
 """
 The tracked universe, and resolving a symbol that is not in it.
 
-Two questions, deliberately answered by two different paths:
+Three questions, deliberately answered by three different paths:
 
   - **"What can I pick?"** is answered from Supabase alone. The tracked
     universe is small - a few dozen ETFs and the constituents weighing at
@@ -16,6 +16,14 @@ Two questions, deliberately answered by two different paths:
     check that stands between a typo and a holding silently simulated as
     a pile of cash.
 
+  - **"What does this code point to?"** is answered per ISIN, once, by
+    Yahoo's own search (issue #190). An ISIN identifies a security wherever
+    it trades, so it can lead to several tickers - each with its own
+    exchange and currency - or to none even when it is genuine. It is a way
+    to *find* a ticker and nothing else: it is not stored, and a holding
+    stays a ticker. It lives apart from the as-you-type search because it
+    necessarily leaves the process, and that search never does.
+
 Resolution reports `firstDate`, the earliest close *this app* can price
 the symbol from. That is the operationally useful date: it is what
 decides how far back a portfolio holding it can be simulated, and the
@@ -28,9 +36,15 @@ from live history.
 
 import re
 
-from config import CACHE_TTL_HOLDINGS, SECTOR_TAG
+from config import CACHE_TTL_HOLDINGS, CACHE_TTL_ISIN_MISS, SECTOR_TAG
 from services.cache import cache
-from services.market_data import SymbolNotFound, get_price_series, get_stock_info
+from services.market_data import (
+    SymbolNotFound,
+    get_listing_currency,
+    get_price_series,
+    get_stock_info,
+    search_listings,
+)
 from services.supabase_client import get_client_optional, paginated_select
 
 # The whole tracked universe under one key: it is read as a unit, and a
@@ -48,6 +62,58 @@ SYMBOL_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,11}$")
 # Where one word of a company name ends and the next begins, for
 # matching a query against the start of any of them.
 WORD_SPLIT = re.compile(r"[^A-Z0-9]+")
+
+# What an ISIN looks like before its check digit is worth computing: a
+# two-letter country prefix, nine letters or digits, one final digit.
+ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+# How many listings of one ISIN are described. Each one costs a currency
+# read upstream (once, then cached), and a code that survives the filtering
+# with more than a few is a code nobody can choose between at a glance.
+MAX_ISIN_LISTINGS = 3
+
+
+def _isin_check_digit_holds(isin: str) -> bool:
+    """Whether an ISIN's final digit is the one its other characters imply.
+
+    The Luhn check over the code with each letter written as its two-digit
+    value (A=10 … Z=35). It catches every single mistyped digit and most
+    swapped neighbours, which is exactly the mistake a pasted or retyped
+    code carries - and it is what lets a typo be named as one rather than
+    answered with "no listing found".
+    """
+    digits = "".join(str(int(char, 36)) for char in isin)
+    total = 0
+    for position, char in enumerate(reversed(digits)):
+        value = int(char)
+        if position % 2 == 1:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
+def normalise_isin(text: str) -> str:
+    """The canonical (upper-case, trimmed) form of an ISIN, or ValueError.
+
+    The message says which way it failed - the wrong shape, or a check digit
+    that does not add up - because the reader's next move differs: one is
+    "that is not an ISIN at all", the other is "you are one character off".
+    Raised before anything is asked upstream, so a typo costs no call.
+    """
+    isin = (text or "").strip().upper()
+    if not ISIN_PATTERN.match(isin):
+        raise ValueError(
+            f"`{(text or '').strip()}` is not an ISIN: expected 12 characters - a "
+            "two-letter country code, nine letters or digits and a final digit"
+        )
+    if not _isin_check_digit_holds(isin):
+        raise ValueError(
+            f"`{isin}` is not a valid ISIN: its check digit does not match, "
+            "so a character was probably mistyped"
+        )
+    return isin
 
 
 def _universe() -> dict[str, dict]:
@@ -177,6 +243,88 @@ def _first_price_date_db(symbol: str) -> str | None:
     except Exception:
         return None
     return resp.data[0]["date"] if resp.data else None
+
+
+def resolve_isin(isin: str) -> dict:
+    """The listings an ISIN leads to: `{"isin", "listings": [...]}`.
+
+    Each listing is a search result's shape (a tracked symbol is described
+    from the tracked universe, anything else from Yahoo's own hit, with
+    `kind: None` - nothing in a hit is a promise about what an instrument
+    is, ADR 0004) plus `exchange` and `currency`.
+
+    What is kept of Yahoo's answer: a hit whose symbol is the ISIN itself,
+    with or without an exchange suffix (it lists IE00BK5BQT80.SG for a
+    Stuttgart line), or that SYMBOL_PATTERN would refuse is dropped, Yahoo's order stands, a symbol
+    seen twice counts once, and at most MAX_ISIN_LISTINGS are described.
+
+    Raises ValueError for something that is not an ISIN (400), SymbolNotFound
+    when nothing usable is left (404 - worded so as not to call a genuine
+    code invalid: Yahoo not indexing it is a fact about Yahoo), and
+    DataUnavailable when Yahoo could not be asked, for the search or for a
+    currency read (503). Neither failure is cached. An answer with a listing
+    whose currency is unknown is cached only for CACHE_TTL_ISIN_MISS: Yahoo
+    can hand back a thin `.info` without raising, and a blank that is a
+    hiccup must not be kept for the hour as though it were the fact.
+    """
+    normalised = normalise_isin(isin)
+
+    key = f"isin:{normalised}"
+    cached = cache.get(key)
+    if cached is not None:
+        if not cached["listings"]:
+            raise SymbolNotFound(_no_listing_message(normalised))
+        return cached
+
+    universe = _universe()
+    listings: list[dict] = []
+    seen: set[str] = set()
+    for hit in search_listings(normalised):
+        symbol = (hit.get("symbol") or "").strip().upper()
+        if (
+            not symbol
+            or symbol in seen
+            or symbol.startswith(normalised)
+            or not SYMBOL_PATTERN.match(symbol)
+        ):
+            continue
+        seen.add(symbol)
+
+        entry = universe.get(symbol) or {
+            "symbol": symbol,
+            "name": hit.get("name") or symbol,
+            "kind": None,
+            "tracked": False,
+            "sector": "",
+            "sectorTag": "",
+            "category": "",
+            "logo": "",
+        }
+        try:
+            currency = get_listing_currency(symbol)
+        except SymbolNotFound:
+            # Upstream answered, and has nothing on this symbol: the
+            # currency is genuinely unknown, which is a null, not a 503.
+            currency = None
+        listings.append({**entry, "exchange": hit.get("exchange"), "currency": currency})
+        if len(listings) == MAX_ISIN_LISTINGS:
+            break
+
+    result = {"isin": normalised, "listings": listings}
+    if not listings:
+        cache.set(key, result, CACHE_TTL_ISIN_MISS)
+        raise SymbolNotFound(_no_listing_message(normalised))
+    complete = all(listing["currency"] is not None for listing in listings)
+    cache.set(key, result, CACHE_TTL_HOLDINGS if complete else CACHE_TTL_ISIN_MISS)
+    return result
+
+
+def _no_listing_message(isin: str) -> str:
+    return (
+        f"no usable listing found for ISIN {isin} - the price source has none "
+        "indexed under that code that this app can price, which does not mean "
+        "the code is wrong; try the ticker symbol"
+    )
 
 
 def resolve_ticker(symbol: str) -> dict:

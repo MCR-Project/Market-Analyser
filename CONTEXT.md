@@ -67,6 +67,16 @@ moment it is opened, just not one with a full price history stored in
 `ticker`.
 _Avoid_: none
 
+**ISIN**:
+A twelve-character code that identifies a security wherever it trades: one fund
+has one ISIN and a different ticker on each exchange that lists it, each in that
+exchange's currency. The app takes one only as a way to *find* a ticker — a
+Holding, a Benchmark or a visited Stock is always a ticker, and the ISIN is not
+kept beside it. One ISIN can lead to several tickers, and a genuine one can lead
+to none: not finding a ticker says nothing about whether the code is real.
+_Avoid_: Listing as a term of its own (a Holding "not yet listed" already means it
+has not started trading, and Tracked avoids "Listed"); Security ID
+
 **Holding**:
 A ticker and a weight inside a basket. Two unrelated baskets use the word: an
 ETF's real-world constituent (tracked in Supabase, has an `etf_holdings`

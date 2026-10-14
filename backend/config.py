@@ -24,6 +24,13 @@ CACHE_TTL_HOLDINGS = 3600    # 1 hour — ETF holdings, stock metadata
 # 10s means the next request naturally retries the DB almost immediately.
 CACHE_TTL_HOLDINGS_FALLBACK = 10
 
+# How long "Yahoo has no listing for this ISIN" is remembered (issue #190). A
+# genuine ISIN can come back empty because Yahoo's index has not caught up,
+# so the full hour above would pin a gap that may close within minutes - but
+# a person pasting the same code twice in a row should not cost two
+# upstream searches either.
+CACHE_TTL_ISIN_MISS = 60
+
 # How long market_data._live() stops calling yfinance at all once Yahoo has
 # answered a live call with a 429 (issue #92). Not a cache TTL - it is not
 # keyed to any one request, and it never serves a cached answer, only a

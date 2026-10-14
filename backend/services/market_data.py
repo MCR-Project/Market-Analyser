@@ -15,7 +15,9 @@ get_untracked_info and get_untracked_holdings have no live fallback at all (a
 number that sometimes comes from a record and sometimes from a network call is a
 number nobody can reconcile), and
 get_stock_description has no DB path at all (prose nobody reconciles
-against a second source, and not worth a pipeline sync). Each states its
+against a second source, and not worth a pipeline sync), and neither do
+search_listings and get_listing_currency (issue #190: an ISIN lookup has
+nothing to read from a table, and a currency must not be defaulted). Each states its
 own deviation in its own docstring rather than this one trying to stay in
 sync with every exception.
 
@@ -54,6 +56,7 @@ from config import (
     CACHE_TTL_SECONDS,
     CACHE_TTL_HOLDINGS,
     CACHE_TTL_HOLDINGS_FALLBACK,
+    CACHE_TTL_ISIN_MISS,
     CLUSTER_MIN_AVG_CORRELATION,
     CORRELATION_PERIOD,
     CORRELATION_INTERVAL,
@@ -701,6 +704,68 @@ def get_stock_info(ticker_symbol: str) -> dict:
 
     cache.set(key, result, CACHE_TTL_HOLDINGS)
     return result
+
+
+def _search_listings_live(query: str) -> list[dict]:
+    """Yahoo's own search, reduced to what a caller can use of a hit.
+
+    The search is what turns an ISIN into tickers (issue #190): Yahoo
+    resolves the code itself. `exchDisp` ("London") is preferred over the
+    bare `exchange` code ("LSE"), which for some venues is not something a
+    reader could place. Order is Yahoo's, and a hit's symbol is passed
+    through unfiltered - what is worth keeping is the caller's call.
+    """
+    hits = yf.Search(query, max_results=10).quotes or []
+    return [
+        {
+            "symbol": hit.get("symbol") or "",
+            "name": hit.get("longname") or hit.get("shortname"),
+            "exchange": hit.get("exchDisp") or hit.get("exchange") or None,
+        }
+        for hit in hits
+    ]
+
+
+def search_listings(query: str) -> list[dict]:
+    """`[{symbol, name, exchange}]` for whatever Yahoo's search finds.
+
+    Live only, and **not cached here**: no DB path exists for a search, and
+    the caller that knows what the answer means (tickers.resolve_isin) is
+    the one that knows how long to keep it - an empty answer for an ISIN
+    is remembered for seconds, a found one for an hour. Goes through
+    `_live`, so a 429 starts the cooldown and an outage is DataUnavailable.
+    """
+    return _live(f"listings for '{query}'", _search_listings_live, query)
+
+
+def _get_listing_currency_live(ticker_symbol: str) -> str | None:
+    return (yf.Ticker(ticker_symbol).info or {}).get("currency") or None
+
+
+def get_listing_currency(ticker_symbol: str) -> str | None:
+    """The currency a listing is quoted in, or None when Yahoo states none.
+
+    Deliberately not `get_stock_info`'s: that answer defaults a missing
+    currency to "USD", which is a convenience for a page that must render
+    something. The ISIN lookup exists partly to say "this one may not be in
+    dollars", and a guessed "USD" would say the opposite exactly where the
+    currency could not be read (invariant 7).
+
+    Live only. A currency is cached at CACHE_TTL_HOLDINGS like the other
+    per-symbol reads; "Yahoo stated none" only at CACHE_TTL_ISIN_MISS and as an
+    empty string (`cache.get` reads None as "not cached"). Yahoo can answer a
+    thin `.info` without raising, so a blank is not yet a fact worth an hour.
+    """
+    key = f"listing_currency:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached or None
+
+    currency = _live(
+        f"currency for '{ticker_symbol}'", _get_listing_currency_live, ticker_symbol
+    )
+    cache.set(key, currency or "", CACHE_TTL_HOLDINGS if currency else CACHE_TTL_ISIN_MISS)
+    return currency
 
 
 def get_untracked_info(tickers: list[str]) -> dict[str, dict]:
