@@ -39,6 +39,7 @@ src/utils/fullNetwork.js     the Full network's ranked links, strength bands, ne
 src/utils/forceLayout.js     the force simulation both network graphs share, extracted from layout.js with a characterization test (pure, tested)
 src/utils/viewport.js        zoom and pan arithmetic for the canvases: fit, zoom about a point, clamp (pure, tested)
 src/utils/fullViewRoute.js   the Full view's URLs and which dashboard path the Analyser tab remembers (pure, tested)
+src/utils/isin.js            whether a typed value is shaped like an ISIN (shape only - the check digit is the backend's), and what a failed ISIN lookup says (pure, tested; issue #191)
 src/utils/freshness.js       what the header says about the daily fetch job: the four states and their words (pure, tested)
 src/utils/windowCalendar.js  what a typed or clicked date does to the portfolio window, the calendar's month grid and keyboard (pure, tested; issue #156)
 src/utils/windowPresets.js   what each window preset button means in dates, and their order (pure, tested; issue #156)
@@ -615,7 +616,8 @@ order, which cell is under a point, when labels appear), `utils/fullNetwork.test
 (ranked links, the threshold as a prefix, strength bands, hit-testing, and that the
 layout clusters a tail-heavy fund), `utils/viewport.test.js`, `utils/fullViewRoute.test.js`,
 `utils/searchParams.test.js` (`readNumber`) and `utils/layout.test.js` (the extraction of
-the force simulation moved nothing).
+the force simulation moved nothing). Issue #191 added `utils/isin.test.js` (`looksLikeIsin`:
+the shape, case and spaces forgiven, no check digit; `describeIsinError`: the three wordings).
 
 The pattern to follow: put the rules in a module that touches no storage, no
 network and no DOM, give it one public function, and test behaviour through that
