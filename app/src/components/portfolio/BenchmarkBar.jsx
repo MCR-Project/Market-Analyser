@@ -18,6 +18,8 @@ export function BenchmarkBar({ benchmarks, disabled, onAdd, onRemove }) {
           placeholder={disabled ? 'Chart is full' : 'Compare against — SPY, QQQ…'}
           ariaLabel="Add a benchmark"
           exclude={benchmarks}
+          warnNonUsd
+          excludedNote="is already a benchmark"
           disabled={disabled}
           onResolved={resolved => onAdd(resolved.symbol)}
         />
