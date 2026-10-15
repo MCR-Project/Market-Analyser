@@ -234,6 +234,16 @@ export const api = {
     fetchJson(`/tickers/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ''}`, { signal }),
   resolveTicker: (symbol, opts = {}) =>
     fetchJson(`/tickers/${encodeURIComponent(symbol)}`, opts),
+  // What an ISIN leads to (issue #191): `{ isin, listings: [...] }`, each
+  // listing a search result's shape plus `exchange` and `currency`. It is the
+  // ISIN twin of searchTickers, asked instead of it for an ISIN-shaped value
+  // (utils/isin.js), and it goes through the same dedup, cache and retry as
+  // everything else here: 400 (not an ISIN) and 404 (no listing upstream)
+  // are stable answers and never retried; 429 and 5xx are, by
+  // isTransientError. The code is only a way to find a ticker - nothing
+  // about it is kept past the pick.
+  resolveIsin: (isin, { signal } = {}) =>
+    fetchJson(`/tickers/isin/${encodeURIComponent(isin)}`, { signal }),
 
   // Portfolio simulation. A POST because the whole portfolio travels in
   // the body - it is stored in this browser, not on the server, so there
