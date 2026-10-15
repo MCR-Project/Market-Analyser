@@ -56,6 +56,27 @@ candles; that button is a display choice and so, like the popup itself, stays on
 a read-only portfolio. The portfolio's own charts below are a different kind
 of chart — simulated value, no open/high/low — and have no such switch.
 
+**`TickerSearchField`** (issues #58, #191) is the one search box behind the Stock
+page, Add holding and the Benchmark bar. Rules that come with it:
+
+- **An ISIN-shaped settled query calls `api.resolveIsin` instead of
+  `searchTickers`, and only then.** `utils/isin.js`'s `looksLikeIsin` is shape
+  only; the check digit is the backend's, so a wrong digit comes back as its 400,
+  worded by `describeIsinError`. An ISIN also fits `SYMBOL_SHAPE`, so the "add it
+  anyway" row is never offered for one.
+- **The ISIN is a way to find a ticker, nothing more.** Picking goes through
+  `api.resolveTicker` like any symbol and `onResolved` gets a symbol; the code is
+  never stored, so a portfolio, a Share Link (`LINK_VERSION` unchanged) and a
+  Backup contain no ISIN.
+- **A held listing is greyed, not removed**, and is not a button at all: a pasted
+  ISIN that found nothing would read as a failed lookup. Enter takes the first
+  row that can be picked. Its wording is the `excludedNote` prop, since "already in
+  this portfolio" is wrong on the Benchmark bar and the Stock page's compare box.
+- **`warnNonUsd` (default off) is set by `AddHolding` and `BenchmarkBar` only** -
+  the two places a pick enters a dollar total. A listing whose currency is not USD,
+  or is `null`, says "not converted to dollars" there; the Stock page shows the
+  currency without the sentence. Never a guessed USD, and there is no conversion.
+
 ## Three principles
 
 **1. A portfolio is a simulation, not an account.** Nothing is bought, nothing is

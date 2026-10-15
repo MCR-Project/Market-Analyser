@@ -378,6 +378,7 @@ const StockDetail = memo(function StockDetail({ resolved }) {
               placeholder="Compare against…"
               ariaLabel="Compare against another stock"
               exclude={[ticker]}
+              excludedNote="is the stock already open"
               onResolved={(result) => comparison.setCompare(result.symbol)}
               className="w-full max-w-[260px]"
             />

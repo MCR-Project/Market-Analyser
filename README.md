@@ -818,8 +818,14 @@ simulated, and no number here accounts for any of it:
 - **Shorting and leverage** — weights are non-negative and the portfolio is
   never geared. A negative weight is refused rather than interpreted.
 - **Currency** — everything is USD. Every tracked ticker is US-listed and
-  no conversion is applied, so a foreign listing would be valued in its own
-  currency and silently added to dollars.
+  no conversion is applied, so a foreign listing is valued in its own
+  currency and added to dollars as though it were dollars. Finding a ticker by
+  ISIN (see "Finding a ticker", under the simulator) makes that easy to do by
+  accident — `IWDA.L` is quoted in USD, `TTE.PA` in EUR — so where an
+  ISIN's listing would enter a dollar total (Add holding, the Benchmark bar)
+  its row says "not converted to dollars" when its currency is not USD or could
+  not be read. That is a warning, not a conversion: nothing is converted, and a
+  foreign ticker typed by hand is still added without one.
 - **Cash yield** — an allocation waiting for a holding to list earns
   nothing at all, where real cash would earn something.
 - **Real index constituents** — there is no index option. An index is
@@ -1070,6 +1076,36 @@ given the open portfolio's own amount and schedule — a contribution or a
 withdrawal, whichever it has — so the comparison is like with like. Portfolio ids only mean something in the
 browser that minted them, so a shared comparison link shows the ids it can
 find and drops the rest rather than erroring.
+
+### Finding a ticker
+
+One search box (`TickerSearchField`) does the choosing in three places: the
+Stock page's search, a portfolio's **Add holding**, and the **Benchmark bar**.
+Typing a symbol or the start of a name lists what is tracked, from a cached
+snapshot, and a symbol that is not tracked can be checked and added anyway;
+whichever is picked is resolved (`GET /api/tickers/{symbol}`) before anything
+is done with it, which is what confirms it has price history.
+
+**Pasting an ISIN** works in all three. A value shaped like one — two letters,
+nine letters or digits, a final digit, in any case and with spaces around it —
+is sent to `GET /api/tickers/isin/{isin}` *instead of* the search, and only
+then: a typed ticker or a name never calls it. The box lists the listings the
+code leads to, each as symbol, name, exchange and currency, with the note "not
+tracked here" on an untracked one; Enter takes the first one that can be
+picked. Picking goes through the same resolver as any ticker. The ISIN is only
+a way to *find* a ticker: a holding is still a ticker, and nothing about the
+code is kept in a portfolio, a Share Link or a Backup.
+
+- A listing already in the portfolio (or already a benchmark, or the stock
+  already open) stays in the list, greyed and unclickable, saying so.
+- In Add holding and the Benchmark bar, a listing whose currency is not USD —
+  or could not be read — says "not converted to dollars" (see "Currency",
+  under what the simulation leaves out). The Stock page shows the currency
+  alone.
+- A **404** reads "No listing found for this ISIN — some real instruments are
+  not indexed; try its ticker symbol"; a **400** says the code is not a valid
+  ISIN, so check how it was typed. Neither is retried. A 503 is retried like any
+  other read. The check digit is judged by the backend alone.
 
 ### Sharing a portfolio
 

@@ -31,6 +31,7 @@ export function AddHolding({ existing, windowStart, onAdd }) {
         placeholder="Add a holding — ticker or name"
         ariaLabel="Add a holding"
         exclude={existing.map(holding => holding.ticker)}
+        warnNonUsd
         onResolved={add}
       />
       {note && (
