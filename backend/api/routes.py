@@ -13,6 +13,13 @@ Endpoints:
   GET /api/stock/{ticker}/description — a stock's business description,
                                    its own endpoint since it is always a
                                    live call (issue #158)
+  GET /api/stock/{ticker}/fundamentals — trailing/forward P/E, profit
+                                   margin, held % insiders/institutions,
+                                   earnings quarterly growth, total debt
+                                   and revenue per share, for one ticker
+                                   outside any fund's holdings table (issue
+                                   #194); its own endpoint for the same
+                                   reason the description above has one
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
   GET /api/tickers/search?q=     — search the tracked universe
   GET /api/tickers/isin/{isin}   — the listings an ISIN leads to, each with
@@ -55,6 +62,7 @@ from services.market_data import (
     get_stock_info,
     get_stock_infos,
     get_stock_description,
+    get_stock_fundamentals,
     get_price_series,
     compute_correlation_matrix,
     deep_fill_exclusions,
@@ -150,6 +158,27 @@ def get_stock_description_route(ticker: str):
     """
     ticker = ticker.upper()
     return {"description": get_stock_description(ticker)}
+
+
+@router.get("/stock/{ticker}/fundamentals")
+def get_stock_fundamentals_route(ticker: str):
+    """Trailing/forward P/E, profit margin, held % insiders/institutions,
+    earnings quarterly growth, total debt and revenue per share for one
+    ticker (issue #194's Stock page Fundamentals card).
+
+    Its own endpoint, not folded into GET /api/stock/{ticker} above, for
+    the same reason the description route is its own: these eight are
+    always a live yfinance call with no database path
+    (get_stock_fundamentals' own docstring), and a Yahoo outage or
+    rate-limit cooldown on this call must not break the two popups that
+    read the shared endpoint for name/sector/exchange alone. Separate from
+    the measurement system's own /measurements/* routes too: those are
+    scoped to a fund's `etf_id` and its holdings table, and this page has
+    neither — it reads one ticker directly, the same way the shared
+    endpoint already does.
+    """
+    ticker = ticker.upper()
+    return get_stock_fundamentals(ticker)
 
 
 @router.get("/stocks")
