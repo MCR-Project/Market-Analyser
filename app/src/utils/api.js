@@ -194,6 +194,10 @@ export const api = {
   // no DB path, unlike the rest of a stock's metadata — merging it in
   // would make an unrelated Yahoo outage break two popups that never read it.
   getStockDescription: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/description`, opts),
+  // Also its own request, for the same reason: always a live call with no
+  // DB path, so a Yahoo hiccup on these eight fields must not break the
+  // shared getStock endpoint's own two popup readers (issue #194).
+  getStockFundamentals: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/fundamentals`, opts),
   getSeries: (ticker, period = '1y', interval = '1d', opts = {}) =>
     fetchJson(`/series/${ticker}?period=${period}&interval=${interval}`, opts),
   getCorrelation: (etfId, period = '1y', opts = {}) =>

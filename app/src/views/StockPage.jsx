@@ -15,7 +15,8 @@
  *  │                │  │      price chart        │  │  ← ComparisonChart
  *  │                │  └────────────────────────┘  │    while comparing
  *  │                │  Metrics …                   │  ← ComparisonSummary
- *  │                │  About                       │    while comparing
+ *  │                │  Fundamentals                │    while comparing
+ *  │                │  About                       │
  *  │                │  <business description>      │
  *  └────────────────┴─────────────────────────────┘
  *
@@ -77,6 +78,7 @@ import { describeFetchError } from '../utils/errorCopy';
 import { Logo } from '../components/ui/Logo';
 import { StocksSidebar } from '../components/stock/StocksSidebar';
 import { StockMetricsCard } from '../components/stock/StockMetricsCard';
+import { StockFundamentalsCard } from '../components/stock/StockFundamentalsCard';
 import { TickerSearchField } from '../components/portfolio/TickerSearchField';
 
 const VALID_TIMEFRAMES = ['1W', '1M', '1Y', '5Y'];
@@ -428,6 +430,14 @@ const StockDetail = memo(function StockDetail({ resolved }) {
           emptyText="No stock metrics available — is the backend running?"
         />
       )}
+
+      {/* Fundamentals (issue #194) — trailing/forward P/E, profit margin,
+          held % insiders/institutions, earnings quarterly growth, total
+          debt and revenue per share. Its own card and its own fetch, for
+          the same reason the About card below is separate from the
+          header: always a live call, never blanked by a cold start on the
+          data that already loaded. */}
+      <StockFundamentalsCard ticker={ticker} />
 
       {/* About — its own loading/error state, independent of the header
           above: a description is always a live call and can fail on its
