@@ -169,11 +169,12 @@ export const StockMetricsCard = memo(function StockMetricsCard({
   return (
     <section className="bg-[var(--bg-1)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="eyebrow">METRICS</div>
-        {!comparison && (
+        {comparison ? (
+          <div className="eyebrow">METRICS</div>
+        ) : (
           <button
             onClick={onOpenPicker}
-            className="font-[var(--font-mono)] text-[11px] text-[var(--fg-2)] bg-transparent border border-[var(--border)] rounded-full px-3 py-1 cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-2)] hover:border-[var(--border-strong)]"
+            className="font-[var(--font-mono)] text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent-ring)] rounded-full px-3 py-1 cursor-pointer transition-colors duration-150 hover:bg-[var(--accent-ring)]"
           >
             Metrics
           </button>
