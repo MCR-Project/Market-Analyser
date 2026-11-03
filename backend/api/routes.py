@@ -20,6 +20,15 @@ Endpoints:
                                    outside any fund's holdings table (issue
                                    #194); its own endpoint for the same
                                    reason the description above has one
+  GET /api/stock/{ticker}/balance-sheet — quarterly balance sheet, four
+                                   most recent quarters, every line item
+                                   yfinance returns (issue #195)
+  GET /api/stock/{ticker}/cash-flow — quarterly cash flow statement, same
+                                   shape as balance-sheet above (issue #195)
+  GET /api/stock/{ticker}/insider-purchases — the six-month insider
+                                   buying/selling summary (issue #195)
+  GET /api/stock/{ticker}/institutional-holders — top-10 institutional
+                                   holders (issue #195)
   GET /api/stocks?tickers=A,B,C  — batch stock metadata
   GET /api/tickers/search?q=     — search the tracked universe
   GET /api/tickers/isin/{isin}   — the listings an ISIN leads to, each with
@@ -63,6 +72,10 @@ from services.market_data import (
     get_stock_infos,
     get_stock_description,
     get_stock_fundamentals,
+    get_stock_balance_sheet,
+    get_stock_cash_flow,
+    get_stock_insider_purchases,
+    get_stock_institutional_holders,
     get_price_series,
     compute_correlation_matrix,
     deep_fill_exclusions,
@@ -179,6 +192,49 @@ def get_stock_fundamentals_route(ticker: str):
     """
     ticker = ticker.upper()
     return get_stock_fundamentals(ticker)
+
+
+@router.get("/stock/{ticker}/balance-sheet")
+def get_stock_balance_sheet_route(ticker: str):
+    """A stock's own quarterly balance sheet, four most recent quarters,
+    every line item yfinance returns, newest quarter first (issue #195).
+
+    Its own endpoint for the same reason /fundamentals above is: always a
+    live call with no database path, so a Yahoo hiccup here cannot affect
+    anything else the Stock page reads. `{"columns": [], "rows": []}` for a
+    security yfinance has no statements for at all (every ETF) - a normal,
+    empty answer, not a 404 or a 503.
+    """
+    ticker = ticker.upper()
+    return get_stock_balance_sheet(ticker)
+
+
+@router.get("/stock/{ticker}/cash-flow")
+def get_stock_cash_flow_route(ticker: str):
+    """A stock's own quarterly cash flow statement - same shape, same
+    reasoning as the balance-sheet route above."""
+    ticker = ticker.upper()
+    return get_stock_cash_flow(ticker)
+
+
+@router.get("/stock/{ticker}/insider-purchases")
+def get_stock_insider_purchases_route(ticker: str):
+    """The six-month insider buying/selling summary yfinance reports for
+    one ticker (issue #195) - a summary table, not a list of individual
+    trades. `{"rows": []}` for a ticker with none to report, not an error.
+    """
+    ticker = ticker.upper()
+    return get_stock_insider_purchases(ticker)
+
+
+@router.get("/stock/{ticker}/institutional-holders")
+def get_stock_institutional_holders_route(ticker: str):
+    """A stock's top-10 institutional holders, exactly as Yahoo ranks and
+    limits them (issue #195). `{"holders": []}` for a ticker with none to
+    report, not an error.
+    """
+    ticker = ticker.upper()
+    return get_stock_institutional_holders(ticker)
 
 
 @router.get("/stocks")
