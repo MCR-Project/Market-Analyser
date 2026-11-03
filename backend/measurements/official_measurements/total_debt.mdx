@@ -1,0 +1,41 @@
+---
+title: Total Debt
+summary: How much this holding owes, across its short- and long-term borrowings.
+---
+
+## What it measures
+
+A company's total debt — its short-term and long-term borrowings added
+together, as of its most recent reported quarter. Says nothing by itself
+about whether that debt is a problem: a capital-intensive business
+carrying debt against real assets is a different story from a company
+borrowing to cover losses, and this column does not tell them apart.
+
+## Where the numbers come from
+
+`holdings` resolves the fund's holding list; `fundamentals` reads each
+holding's `totalDebt` straight from yfinance's own `.info`
+(`measurements/inputs/fundamentals.py`), live, with no database path.
+
+## How it is computed
+
+Read as-is from Yahoo, in US dollars, then divided into billions and
+rounded to two decimal places — the same scaling Market Cap uses, so a
+debt figure and a market cap read the same way side by side.
+
+<WorkedExample />
+
+## How it reads
+
+Debt means little without something to compare it against — a holding's
+own market cap or revenue, or how that debt has changed over recent
+quarters. A large absolute number can be unremarkable for a very large
+company and alarming for a small one.
+
+## Caveats
+
+<Warning>
+A genuinely debt-free company reports $0, not a dash — the two mean
+different things here, and only Yahoo having no figure at all (an ETF
+held inside another ETF) reads as a dash.
+</Warning>

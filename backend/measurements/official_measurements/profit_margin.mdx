@@ -1,0 +1,45 @@
+---
+title: Profit Margin
+summary: How many cents of each dollar of revenue this holding keeps as profit.
+---
+
+## What it measures
+
+Net profit margin — net income divided by revenue, trailing twelve months.
+A company keeping 20 cents of profit on every dollar of sales has a 20%
+margin; a thin-margin business might keep 2 cents. Margin alone says
+nothing about size or growth, only how much of each sale turns into
+profit.
+
+## Where the numbers come from
+
+`holdings` resolves the fund's holding list; `fundamentals` reads each
+holding's `profitMargins` straight from yfinance's own `.info`
+(`measurements/inputs/fundamentals.py`), live, with no database path.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{Profit Margin} = \frac{\text{Net Income}}{\text{Revenue}}`} />
+
+Read as-is from Yahoo and expressed as a percentage, rounded to two decimal
+places.
+
+<WorkedExample />
+
+## How it reads
+
+A healthy margin varies enormously by industry — a grocery chain and a
+software company are not on the same scale — so this is far more useful
+compared against a peer or against the same holding's own history than
+read as an absolute number.
+
+## Caveats
+
+<Warning>
+A negative margin means the company lost money over the trailing twelve
+months, not that the figure is missing — it is shown in red, not as a
+dash.
+</Warning>
+
+Null, not zero, for a holding Yahoo reports nothing for (an ETF held inside
+another ETF) — a zero would claim a company broke exactly even.

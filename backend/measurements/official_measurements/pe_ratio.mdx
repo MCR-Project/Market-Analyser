@@ -1,0 +1,48 @@
+---
+title: P/E Ratio
+summary: What the market pays for a dollar of this holding's earnings, looking back a year and looking forward one.
+---
+
+## What it measures
+
+The price/earnings ratio says how many dollars the market pays for one
+dollar of a company's annual earnings. Trailing P/E uses the last twelve
+months' actual earnings; forward P/E uses analysts' estimate of the next
+twelve. A higher number says the market is paying more per dollar of
+(trailing, or expected) earnings than a lower one — growth expectations,
+scarcity, or simple optimism can all push it up, and none of those are told
+apart here.
+
+## Where the numbers come from
+
+`holdings` resolves the fund's holding list; `fundamentals` reads each
+holding's `trailingPE` and `forwardPE` straight from yfinance's own `.info`
+(`measurements/inputs/fundamentals.py`), live, with no database path at all
+— these move with every price tick (trailing) or every estimate revision
+(forward), too often for a once-a-day sync to be worth adding.
+
+## How it is computed
+
+Both columns are read as-is, rounded to two decimal places:
+
+<Formula tex={String.raw`\text{Trailing P/E} = \frac{\text{Price}}{\text{Trailing 12M EPS}}, \quad \text{Forward P/E} = \frac{\text{Price}}{\text{Estimated next 12M EPS}}`} />
+
+<WorkedExample />
+
+## How it reads
+
+There is no universal "good" P/E — it only means something next to a peer,
+a sector average, or the same company's own history. A forward P/E well
+below the trailing one says the market expects earnings to grow; well above
+says it expects them to shrink.
+
+## Caveats
+
+<Warning>
+A company with negative or near-zero trailing earnings has no meaningful
+trailing P/E and Yahoo reports none — shown as a dash here, never a
+negative or wildly large number standing in for "loss-making."
+</Warning>
+
+Forward P/E rests on analyst estimates, which are opinions, not facts, and
+can be stale or thin for a less-covered company.

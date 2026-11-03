@@ -14,8 +14,9 @@ A few deliberately don't: get_dividends, get_risk_free_rate,
 get_untracked_info and get_untracked_holdings have no live fallback at all (a
 number that sometimes comes from a record and sometimes from a network call is a
 number nobody can reconcile), and
-get_stock_description has no DB path at all (prose nobody reconciles
-against a second source, and not worth a pipeline sync), and neither do
+get_stock_description and get_stock_fundamentals have no DB path at all
+(prose, and a handful of numbers that move too often to sync once a day,
+neither worth carrying through the pipeline - issue #194), and neither do
 search_listings and get_listing_currency (issue #190: an ISIN lookup has
 nothing to read from a table, and a currency must not be defaulted). Each states its
 own deviation in its own docstring rather than this one trying to stay in
@@ -949,6 +950,53 @@ def get_stock_description(ticker_symbol: str) -> str:
 
     result = _live(
         f"description for '{ticker_symbol}'", _get_stock_description_live, ticker_symbol
+    )
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+def _get_stock_fundamentals_live(ticker_symbol: str) -> dict:
+    info = yf.Ticker(ticker_symbol).info or {}
+    return {
+        "trailingPE": info.get("trailingPE"),
+        "forwardPE": info.get("forwardPE"),
+        "profitMargins": info.get("profitMargins"),
+        "heldPercentInsiders": info.get("heldPercentInsiders"),
+        "heldPercentInstitutions": info.get("heldPercentInstitutions"),
+        "earningsQuarterlyGrowth": info.get("earningsQuarterlyGrowth"),
+        "totalDebt": info.get("totalDebt"),
+        "revenuePerShare": info.get("revenuePerShare"),
+    }
+
+
+def get_stock_fundamentals(ticker_symbol: str) -> dict:
+    """Trailing/forward P/E, profit margin, insider/institutional ownership,
+    earnings growth, total debt and revenue per share - straight from
+    yfinance's own `.info` (issue #194), for the P/E Ratio, Ownership,
+    Profit Margin, Earnings Quarterly Growth, Total Debt and Revenue per
+    Share measurement columns, and for the Stock page's own Fundamentals
+    card.
+
+    Deliberately live-only, no DB column and none of get_stock_info's
+    DB-first read, the same reasoning get_stock_description states for
+    itself: the `ticker` table carries market_cap alone among .info-derived
+    figures, and these eight move too often for a once-a-day sync to be
+    worth adding - the P/E pair with every price tick, the rest with every
+    earnings release. Cached under its own key like every other per-ticker
+    live read, at CACHE_TTL_HOLDINGS - the same TTL market cap's own live
+    fallback already uses, so none of these is fetched more than once an
+    hour per ticker. Yahoo answers a field a security genuinely has none of
+    (an ETF's own P/E, a non-dividend-paying small cap's margins) with a
+    missing key rather than a zero, and this passes that through as `None`
+    unchanged - never defaulted to 0 (invariant 7).
+    """
+    key = f"stock_fundamentals:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = _live(
+        f"fundamentals for '{ticker_symbol}'", _get_stock_fundamentals_live, ticker_symbol
     )
     cache.set(key, result, CACHE_TTL_HOLDINGS)
     return result

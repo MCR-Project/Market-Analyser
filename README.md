@@ -647,6 +647,46 @@ that would claim it pays no dividend. A holding with no market cap on
 record is null on both Market Cap and Cap-Weight Tilt, and excluded from
 the tilt denominator entirely rather than treated as zero-weight.
 
+### Valuation, ownership and growth, per holding
+
+Six more official measurements, across eight columns (issue #194), each
+holding's own figure straight from yfinance's own `.info` and, like the
+section above, none of them window-aware:
+
+- **P/E Ratio** — one plugin, two columns, trailing and forward
+  price/earnings: trailing is price over the last twelve months' actual
+  earnings, forward is price over analysts' estimate of the next twelve.
+- **Ownership** — one plugin, two columns, the share held by insiders and
+  the share held by institutions.
+- **Profit Margin** — net income over revenue, trailing twelve months.
+- **Earnings Quarterly Growth** — the most recent reported quarter's
+  earnings against the same quarter a year earlier.
+- **Total Debt** — short- and long-term borrowings combined, most recent
+  quarter, in the same billions-with-$/B/T-thresholds shape Market Cap
+  above uses.
+- **Revenue per Share** — trailing twelve-month revenue divided by shares
+  outstanding.
+
+**Live only, with no database column at all** — unlike Market Cap above,
+which the `ticker` table does carry. These eight move too often for a
+once-a-day pipeline sync to be worth adding (the P/E pair with every price
+tick, the rest with every earnings release), the same reasoning the Stock
+page's business-description field already followed; see
+`docs/adr/0007-per-ticker-fundamentals-are-live-only.md`. Null, not zero,
+for a holding Yahoo reports nothing for at all — an ETF held as a
+constituent of another ETF, most often — **except Total Debt**, where a
+company Yahoo reports as genuinely debt-free is a real `$0`, and only a
+missing figure is a dash: the one column here where the usual "resist the
+tidier-looking zero" rule runs the other way, since zero is itself the
+fact being reported.
+
+All six are off by default in the holdings table's column picker, the
+same opt-in every other measurement here starts from — enabling one costs
+a live call per holding the first time, same as any other metadata column.
+The same six figures, for one ticker outside any fund's holdings table
+entirely, are what the Stock page's own [Fundamentals card](#the-stock-page)
+shows.
+
 ### Whether a position can be sold
 
 Value Held says a fund holds $61.8B of something. It says nothing about
@@ -1839,6 +1879,43 @@ open, the highest high, the lowest low, the last close.
   it, because its high is unknown without that day's.
 
 Not built: volume bars, zoom or pan, intraday candles, and indicators.
+
+### The Stock page
+
+`/stock/:ticker` browses one stock on its own — a company, or any symbol
+resolved outside the tracked universe — rather than a fund (issue #158).
+A typed or clicked symbol is resolved the same way a portfolio holding is
+(`GET /api/tickers/{symbol}`), which is what tells a real but untracked
+symbol apart from a typo, and what sends a tracked ETF typed here to its
+own `/etf/:etfId` page instead of rendering it on this one
+(`docs/adr/0004-untracked-symbols-on-the-stock-page-are-treated-as-stocks.md`).
+A second stock can be opened alongside the first to compare their charts
+and metric tiles side by side (issue #160); at most one at a time.
+
+The page is a stack of cards:
+
+- **Header** — name, sector and exchange, and whether the symbol is
+  tracked here at all.
+- **Performance** — a real price chart (1W/1M/1Y/5Y, with the same
+  candle/line toggle described above), or, while comparing, both stocks'
+  charts together.
+- **Metrics** — risk/return tiles scored by simulating the stock as a
+  $100 basket of one, exactly like a [portfolio Run](#portfolio-simulator) —
+  the standalone-page reading of a Benchmark — over a window this card's
+  own controls pick. Toggleable, the same picker the portfolio page uses.
+- **Fundamentals** (issue #194) — the same eight figures the
+  [Valuation, ownership and growth](#valuation-ownership-and-growth-per-holding)
+  measurements show on a fund's holdings table, read directly for this one
+  ticker rather than through that table: trailing and forward P/E, held %
+  insiders and institutions, profit margin, earnings quarterly growth,
+  total debt and revenue per share. Its own request
+  (`GET /api/stock/{ticker}/fundamentals`), live-only like the About card
+  below, so a Yahoo hiccup on these eight never blanks out the header or
+  the price chart that already loaded.
+- **About** — the company's own business-description text, live-only with
+  no database path of its own (issue #158), kept as its own card and its
+  own request so a slow or failed fetch here cannot affect anything above
+  it.
 
 ## Running both
 

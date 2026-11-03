@@ -1,0 +1,41 @@
+---
+title: Revenue per Share
+summary: How much of this holding's trailing revenue lands on each outstanding share.
+---
+
+## What it measures
+
+Trailing twelve-month revenue divided by shares outstanding — a size-
+independent reading of how much top-line sales each individual share
+represents, useful for comparing companies of very different scale or for
+reading alongside a per-share price.
+
+## Where the numbers come from
+
+`holdings` resolves the fund's holding list; `fundamentals` reads each
+holding's `revenuePerShare` straight from yfinance's own `.info`
+(`measurements/inputs/fundamentals.py`), live, with no database path.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{Revenue per Share} = \frac{\text{Trailing 12M Revenue}}{\text{Shares Outstanding}}`} />
+
+Read as-is from Yahoo, in US dollars per share, rounded to two decimal
+places.
+
+<WorkedExample />
+
+## How it reads
+
+On its own this says nothing about profitability — a company can have high
+revenue per share and still lose money on every one of those dollars. It
+is most useful next to the share price itself (a price/sales-per-share
+reading) or against the same holding's own history.
+
+## Caveats
+
+<Warning>
+Null, not zero, for a holding Yahoo reports nothing for (an ETF held
+inside another ETF) — a zero would claim the holding generates no
+revenue at all.
+</Warning>

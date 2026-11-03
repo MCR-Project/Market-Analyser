@@ -36,6 +36,7 @@ from measurements.inputs import (
     dividend_events,
     etf_info,
     fund_index,
+    fundamentals,
     holdings,
     price_frame,
     stock_info,
@@ -52,4 +53,5 @@ INPUT_REGISTRY = {
     "stock_info": stock_info.INPUT_SPEC,
     "dividend_events": dividend_events.INPUT_SPEC,
     "fund_index": fund_index.INPUT_SPEC,
+    "fundamentals": fundamentals.INPUT_SPEC,
 }

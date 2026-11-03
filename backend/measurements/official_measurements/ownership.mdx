@@ -1,0 +1,44 @@
+---
+title: Ownership
+summary: How much of this holding its own insiders and institutional investors hold.
+---
+
+## What it measures
+
+Two shares of a company's stock: the fraction insiders (officers,
+directors, large individual holders required to report) hold, and the
+fraction institutions (funds, pensions, banks) hold. Neither is a
+judgement — high insider ownership can mean confidence or it can mean a
+founder-controlled company; high institutional ownership can mean broad
+index inclusion as easily as active conviction.
+
+## Where the numbers come from
+
+`holdings` resolves the fund's holding list; `fundamentals` reads each
+holding's `heldPercentInsiders` and `heldPercentInstitutions` straight from
+yfinance's own `.info` (`measurements/inputs/fundamentals.py`), live, with
+no database path — these are Yahoo's own periodically-refreshed estimate,
+not a figure this app tracks a history of.
+
+## How it is computed
+
+Both fractions are read as-is and expressed as a percentage, rounded to two
+decimal places.
+
+<WorkedExample />
+
+## How it reads
+
+Neither column alone says whether a company is well- or poorly-owned.
+Reading them together with a company's size is more useful: very high
+insider ownership in a small company often means a founder or family still
+controls it; very high institutional ownership in a large one usually just
+means it is in the index funds everyone holds.
+
+## Caveats
+
+<Warning>
+An ETF held as a constituent of another ETF has no insiders or
+institutional holders of its own kind to report, and reads as a dash here
+— not zero, which would claim no one holds it.
+</Warning>
