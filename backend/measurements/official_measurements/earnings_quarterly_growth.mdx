@@ -1,0 +1,42 @@
+---
+title: Earnings Quarterly Growth
+summary: How this holding's most recent quarter's earnings compare to the same quarter a year earlier.
+---
+
+## What it measures
+
+Year-over-year growth in a company's most recent reported quarter's
+earnings — this quarter against the same quarter last year, which cancels
+out ordinary seasonal swings (a retailer's Q4 against its own Q4, not
+against its quieter Q2).
+
+## Where the numbers come from
+
+`holdings` resolves the fund's holding list; `fundamentals` reads each
+holding's `earningsQuarterlyGrowth` straight from yfinance's own `.info`
+(`measurements/inputs/fundamentals.py`), live, with no database path — a
+figure that changes once a quarter, at each earnings release.
+
+## How it is computed
+
+<Formula tex={String.raw`\text{Growth} = \frac{\text{This Quarter's Earnings}}{\text{Same Quarter, Last Year}} - 1`} />
+
+Read as-is from Yahoo and expressed as a percentage, rounded to two decimal
+places.
+
+<WorkedExample />
+
+## How it reads
+
+A single quarter is one data point, not a trend — a company can post one
+strong or weak quarter against an unusually weak or strong one a year
+earlier. It says nothing about revenue growth, which can move in the
+opposite direction from earnings in the same quarter.
+
+## Caveats
+
+<Warning>
+A company moving from a loss to a profit (or the reverse) a year earlier
+can produce a figure Yahoo cannot express as a meaningful ratio — shown
+as a dash, not an inflated or negative number.
+</Warning>
