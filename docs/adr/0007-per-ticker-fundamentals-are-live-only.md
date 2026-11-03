@@ -25,6 +25,16 @@ synced row — the same cost `get_stock_description` and `get_listing_currency`
 already accept for the same reason, bounded by the existing `CACHE_TTL_HOLDINGS`
 TTL rather than a new one.
 
+**Issue #195 extended this to four more reads**: a stock's quarterly balance
+sheet, quarterly cash flow, six-month insider-purchases summary and top-10
+institutional holders (`get_stock_balance_sheet`, `get_stock_cash_flow`,
+`get_stock_insider_purchases`, `get_stock_institutional_holders`) — whole
+statements and tables, not single `.info` fields, but the same reasoning
+applies even more plainly: nothing in this app's own pipeline has ever carried
+a balance sheet or a holders list, these change at most once a quarter, and
+only the Stock page reads any of them. Same TTL, same no-DB-column choice, no
+new considered options beyond the two below.
+
 ## Considered options
 
 - **Add columns to `ticker` and sync them in `scripts/fetch_daily.py`** —

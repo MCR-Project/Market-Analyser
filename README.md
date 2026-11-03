@@ -1916,6 +1916,32 @@ The page is a stack of cards:
   no database path of its own (issue #158), kept as its own card and its
   own request so a slow or failed fetch here cannot affect anything above
   it.
+- **Balance Sheet** and **Cash Flow** (issue #195) — the four most recent
+  quarters, every line item yfinance returns in its own order, no curated
+  subset. Each starts collapsed — a statement can run 40–65 rows — behind
+  a disclosure naming the card; expanding it fetches nothing new, since
+  both are already requested like every other card here. A blank cell is
+  a dash, never a zero the statement did not actually report; a cell that
+  *is* a genuine zero still reads `0`. Numbers are grouped, not
+  abbreviated: unlike Market Cap or Total Debt above, a statement mixes
+  dollar figures with share counts, and nothing here curates enough rows
+  to know which is which.
+- **Insider Purchases** (issue #195) — the six-month buying/selling
+  summary yfinance reports (net shares purchased and sold, transaction
+  counts, the resulting share of insider ownership), exactly as shaped —
+  not a list of individual trades. Always expanded; a handful of rows
+  needs no disclosure.
+- **Institutional Holders** (issue #195) — the top 10, exactly as Yahoo
+  ranks and limits them, with % held picked out in the theme's accent
+  colour. Always expanded, for the same reason as above.
+
+All four are their own live-only requests
+(`GET /api/stock/{ticker}/balance-sheet`, `/cash-flow`,
+`/insider-purchases`, `/institutional-holders`), no database path, same
+reasoning as Fundamentals above — extended in
+`docs/adr/0007-per-ticker-fundamentals-are-live-only.md`. A security
+yfinance has none of this for (every ETF) answers with an empty table,
+not an error — the card says so in words rather than looking broken.
 
 ## Running both
 
