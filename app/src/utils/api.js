@@ -198,6 +198,12 @@ export const api = {
   // DB path, so a Yahoo hiccup on these eight fields must not break the
   // shared getStock endpoint's own two popup readers (issue #194).
   getStockFundamentals: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/fundamentals`, opts),
+  // Same reasoning again (issue #195): each is its own live call with no
+  // DB path, so a Yahoo hiccup on one of these four never affects another.
+  getStockBalanceSheet: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/balance-sheet`, opts),
+  getStockCashFlow: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/cash-flow`, opts),
+  getStockInsiderPurchases: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/insider-purchases`, opts),
+  getStockInstitutionalHolders: (ticker, opts = {}) => fetchJson(`/stock/${ticker}/institutional-holders`, opts),
   getSeries: (ticker, period = '1y', interval = '1d', opts = {}) =>
     fetchJson(`/series/${ticker}?period=${period}&interval=${interval}`, opts),
   getCorrelation: (etfId, period = '1y', opts = {}) =>

@@ -18,6 +18,10 @@
  *  │                │  Fundamentals                │    while comparing
  *  │                │  About                       │
  *  │                │  <business description>      │
+ *  │                │  Balance Sheet ▸ (collapsed)  │
+ *  │                │  Cash Flow ▸ (collapsed)      │
+ *  │                │  Insider Purchases            │
+ *  │                │  Institutional Holders        │
  *  └────────────────┴─────────────────────────────┘
  *
  * Two different search boxes, two different jobs. The sidebar's
@@ -79,6 +83,9 @@ import { Logo } from '../components/ui/Logo';
 import { StocksSidebar } from '../components/stock/StocksSidebar';
 import { StockMetricsCard } from '../components/stock/StockMetricsCard';
 import { StockFundamentalsCard } from '../components/stock/StockFundamentalsCard';
+import { FinancialStatementCard } from '../components/stock/FinancialStatementCard';
+import { InsiderPurchasesCard } from '../components/stock/InsiderPurchasesCard';
+import { InstitutionalHoldersCard } from '../components/stock/InstitutionalHoldersCard';
 import { TickerSearchField } from '../components/portfolio/TickerSearchField';
 
 const VALID_TIMEFRAMES = ['1W', '1M', '1Y', '5Y'];
@@ -462,6 +469,25 @@ const StockDetail = memo(function StockDetail({ resolved }) {
           </p>
         )}
       </section>
+
+      {/* Balance Sheet, Cash Flow, Insider Purchases, Institutional
+          Holders (issue #195) — in that order, after About. The two
+          statements start collapsed (40-65 rows each); the other two are
+          short enough to always show. */}
+      <FinancialStatementCard
+        ticker={ticker}
+        title="BALANCE SHEET"
+        fetcher={api.getStockBalanceSheet}
+        emptyText="No balance sheet data available for this ticker."
+      />
+      <FinancialStatementCard
+        ticker={ticker}
+        title="CASH FLOW"
+        fetcher={api.getStockCashFlow}
+        emptyText="No cash flow data available for this ticker."
+      />
+      <InsiderPurchasesCard ticker={ticker} />
+      <InstitutionalHoldersCard ticker={ticker} />
     </>
   );
 });
