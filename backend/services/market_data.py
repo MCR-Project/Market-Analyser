@@ -14,9 +14,11 @@ A few deliberately don't: get_dividends, get_risk_free_rate,
 get_untracked_info and get_untracked_holdings have no live fallback at all (a
 number that sometimes comes from a record and sometimes from a network call is a
 number nobody can reconcile), and
-get_stock_description and get_stock_fundamentals have no DB path at all
-(prose, and a handful of numbers that move too often to sync once a day,
-neither worth carrying through the pipeline - issue #194), and neither do
+get_stock_description, get_stock_fundamentals, get_stock_balance_sheet,
+get_stock_cash_flow, get_stock_insider_purchases and
+get_stock_institutional_holders have no DB path at all (prose, figures
+that move too often to sync once a day, and whole statements only this
+app's own Stock page ever reads - issues #194 and #195), and neither do
 search_listings and get_listing_currency (issue #190: an ISIN lookup has
 nothing to read from a table, and a currency must not be defaulted). Each states its
 own deviation in its own docstring rather than this one trying to stay in
@@ -997,6 +999,168 @@ def get_stock_fundamentals(ticker_symbol: str) -> dict:
 
     result = _live(
         f"fundamentals for '{ticker_symbol}'", _get_stock_fundamentals_live, ticker_symbol
+    )
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+# ── Financial statements and ownership (issue #195) ─────────────────────────────
+
+def _clean_number(value) -> float | None:
+    """A pandas/numpy scalar (a DataFrame cell, which may be a numpy float,
+    a nullable pandas Int64, or NaN/pd.NA) as a plain JSON-safe number, or
+    None for a missing one. Never 0 for a blank cell - a statement simply
+    not reporting a line item for a given quarter is absence, not a zero
+    figure (invariant 7), and Python's own json encoder has no valid
+    representation for NaN at all."""
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _statement_frame(df: pd.DataFrame) -> dict:
+    """A quarterly balance-sheet/cash-flow DataFrame - line items by row,
+    quarter-end dates by column, newest first - as plain JSON: every line
+    item yfinance returns (no curated subset), capped to its four most
+    recent quarters. `df.empty` for a security yfinance has no statements
+    for at all (every ETF) reads as no columns and no rows, not an error -
+    the frontend's own empty state, not a failure to explain."""
+    if df.empty:
+        return {"columns": [], "rows": []}
+    columns = df.columns[:4]
+    return {
+        "columns": [c.strftime("%Y-%m-%d") for c in columns],
+        "rows": [
+            {"label": label, "values": [_clean_number(row[c]) for c in columns]}
+            for label, row in df.iterrows()
+        ],
+    }
+
+
+def _get_stock_balance_sheet_live(ticker_symbol: str) -> dict:
+    df = yf.Ticker(ticker_symbol).get_balance_sheet(freq="quarterly", pretty=True)
+    return _statement_frame(df)
+
+
+def get_stock_balance_sheet(ticker_symbol: str) -> dict:
+    """A stock's own quarterly balance sheet, its four most recent quarters,
+    every line item yfinance returns (issue #195's Stock page tables).
+
+    Live-only, like get_stock_fundamentals above and for the same reason:
+    no table in this app's own pipeline carries a balance sheet, and a
+    figure that only changes once a quarter is not worth a daily sync -
+    see docs/adr/0007-per-ticker-fundamentals-are-live-only.md, which this
+    extends rather than restates. `pretty=True` asks yfinance for its own
+    spaced-out row labels ("Ordinary Shares Number") rather than the raw
+    camelCase keys Yahoo's API answers with - the same rows, in the same
+    order, just easier to read; nothing here chooses which rows to keep.
+    """
+    key = f"stock_balance_sheet:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = _live(
+        f"balance sheet for '{ticker_symbol}'", _get_stock_balance_sheet_live, ticker_symbol
+    )
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+def _get_stock_cash_flow_live(ticker_symbol: str) -> dict:
+    df = yf.Ticker(ticker_symbol).get_cash_flow(freq="quarterly", pretty=True)
+    return _statement_frame(df)
+
+
+def get_stock_cash_flow(ticker_symbol: str) -> dict:
+    """A stock's own quarterly cash flow statement - get_stock_balance_sheet's
+    own docstring states the reasoning, which applies here unchanged."""
+    key = f"stock_cash_flow:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = _live(
+        f"cash flow for '{ticker_symbol}'", _get_stock_cash_flow_live, ticker_symbol
+    )
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+def _get_stock_insider_purchases_live(ticker_symbol: str) -> dict:
+    df = yf.Ticker(ticker_symbol).get_insider_purchases()
+    if df is None or df.empty:
+        return {"rows": []}
+    # yfinance's own first column holds each row's label ("Purchases",
+    # "Sales", ...) under a header naming the table itself ("Insider
+    # Purchases Last 6m") rather than under something generic like
+    # "label" - read by position so a future rename of that header
+    # upstream does not silently drop every row.
+    label_col = df.columns[0]
+    return {
+        "rows": [
+            {
+                "label": row[label_col],
+                "shares": _clean_number(row.get("Shares")),
+                "trans": _clean_number(row.get("Trans")),
+            }
+            for _, row in df.iterrows()
+        ]
+    }
+
+
+def get_stock_insider_purchases(ticker_symbol: str) -> dict:
+    """The six-month insider buying/selling summary yfinance reports -
+    net shares purchased and sold, how many transactions, and the
+    resulting share of insider ownership - exactly as Yahoo's own table
+    shape, not a list of individual trades (`get_insider_transactions` is
+    the latter, and is not what this reads). Live-only, same reasoning as
+    get_stock_balance_sheet above.
+    """
+    key = f"stock_insider_purchases:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = _live(
+        f"insider purchases for '{ticker_symbol}'", _get_stock_insider_purchases_live, ticker_symbol
+    )
+    cache.set(key, result, CACHE_TTL_HOLDINGS)
+    return result
+
+
+def _get_stock_institutional_holders_live(ticker_symbol: str) -> dict:
+    df = yf.Ticker(ticker_symbol).get_institutional_holders()
+    if df is None or df.empty:
+        return {"holders": []}
+    holders = []
+    for _, row in df.iterrows():
+        reported = row.get("Date Reported")
+        holders.append({
+            "dateReported": reported.strftime("%Y-%m-%d") if pd.notna(reported) else None,
+            "holder": row.get("Holder"),
+            "pctHeld": _clean_number(row.get("pctHeld")),
+            "shares": _clean_number(row.get("Shares")),
+            "value": _clean_number(row.get("Value")),
+            "pctChange": _clean_number(row.get("pctChange")),
+        })
+    return {"holders": holders}
+
+
+def get_stock_institutional_holders(ticker_symbol: str) -> dict:
+    """A stock's top-10 institutional holders, exactly as Yahoo already
+    ranks and limits them - this app does not re-sort or re-cut the list.
+    Live-only, same reasoning as get_stock_balance_sheet above.
+    """
+    key = f"stock_institutional_holders:{ticker_symbol}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    result = _live(
+        f"institutional holders for '{ticker_symbol}'",
+        _get_stock_institutional_holders_live,
+        ticker_symbol,
     )
     cache.set(key, result, CACHE_TTL_HOLDINGS)
     return result
